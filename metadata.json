@@ -1,0 +1,6 @@
+{
+  "name": "Omni IELTS",
+  "description": "Nền tảng luyện thi IELTS thông minh đa nguồn, tích hợp AI Tutor theo ngữ cảnh, Spaced Repetition (SRS), Sổ tay lỗi sai hợp nhất và 7 module học tập cá nhân hóa.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
