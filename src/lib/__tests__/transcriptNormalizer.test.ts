@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeRollingVtt } from '../transcriptNormalizer';
+import { normalizeAndAlignVtt, normalizeRollingVtt } from '../transcriptNormalizer';
 
 describe('normalizeRollingVtt', () => {
   it('deduplicates rolling captions while preserving the complete lesson', () => {
@@ -35,5 +35,42 @@ Listen carefully and repeat.`;
     }).join('\n\n');
 
     expect(normalizeRollingVtt(`WEBVTT\n\n${cues}`)).toHaveLength(30);
+  });
+
+  it('keeps every new sentence from an 11-minute rolling-caption lesson', () => {
+    const sentences = Array.from({ length: 220 }, (_, index) =>
+      `Sentence ${index + 1} explains shadowing point ${index + 1}.`,
+    );
+    const cues = sentences.map((_, index) => {
+      const start = index * 3;
+      const end = start + 3;
+      const rollingWindow = sentences.slice(Math.max(0, index - 2), index + 1).join(' ');
+      const formatTime = (seconds: number) => {
+        const minutes = Math.floor(seconds / 60);
+        const remaining = seconds % 60;
+        return `00:${String(minutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}.000`;
+      };
+      return `${formatTime(start)} --> ${formatTime(end)}\n${rollingWindow}`;
+    }).join('\n\n');
+
+    const result = normalizeAndAlignVtt(`WEBVTT\n\n${cues}`);
+
+    expect(result).toHaveLength(220);
+    expect(result[0].text).toBe(sentences[0]);
+    expect(result.at(-1)).toMatchObject({ end: 660, text: sentences.at(-1) });
+  });
+
+  it('splits multiple complete sentences inside one caption cue', () => {
+    const result = normalizeAndAlignVtt(`WEBVTT
+
+00:00:00.000 --> 00:00:08.000
+Listen to the first sentence. Then repeat the second sentence!`);
+
+    expect(result.map((segment) => segment.text)).toEqual([
+      'Listen to the first sentence.',
+      'Then repeat the second sentence!',
+    ]);
+    expect(result[0].start).toBe(0);
+    expect(result.at(-1)?.end).toBe(8);
   });
 });

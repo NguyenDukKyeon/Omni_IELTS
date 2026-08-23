@@ -202,7 +202,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
       const evalResult = await evaluateShadowingAttempt({
         targetSentence: segment.text,
-        userTranscript: userTranscript || segment.text,
+        userTranscript,
         userAudioBase64: base64Audio,
         topicTitle: session.title,
       });
@@ -269,6 +269,26 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
     }
   };
 
+  useEffect(() => {
+    const handleKeyboard = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        handleNext();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        handlePrev();
+      } else if (event.code === 'Space') {
+        event.preventDefault();
+        if (isPlayingNative) handleStopNativeAudio();
+        else handlePlayNativeAudio();
+      }
+    };
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
+
   if (!segment) {
     return (
       <div className="p-8 text-center bg-white dark:bg-stone-800 rounded-3xl border border-stone-200 dark:border-stone-700">
@@ -289,6 +309,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
       />
       {/* Active Segment Studio Card */}
       <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 shadow-sm space-y-6">
+        <div className="text-right text-[10px] text-stone-400">Space: nghe/dừng · ←/→: chuyển câu</div>
         {/* Top Control Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 dark:border-stone-700 pb-4">
           <div className="flex items-center gap-2">

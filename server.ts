@@ -11,7 +11,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { z } from "zod";
 import { AI_TASK_PROFILES, AiTaskTier } from "./src/lib/aiTaskProfiles";
 import { validateMockPackage, validateMockSkill, MockSkill } from "./src/lib/mockPackageValidator";
-import { normalizeRollingVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
+import { alignTranscriptSentences, normalizeAndAlignVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
 import { classifyApiFailure, retryProviderCall } from "./src/lib/apiFailure";
 import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
@@ -1522,23 +1522,6 @@ async function ensureYtDlpBinary(): Promise<string> {
   return binaryPath;
 }
 
-function alignCaptionSentences(cues: NormalizedTranscriptSegment[]): NormalizedTranscriptSegment[] {
-  const result: NormalizedTranscriptSegment[] = [];
-  let pending: NormalizedTranscriptSegment | null = null;
-  for (const cue of cues) {
-    pending = pending
-      ? { start: pending.start, end: cue.end, text: `${pending.text} ${cue.text}`.replace(/\s+/g, " ").trim() }
-      : { ...cue };
-    const complete = /[.!?][\]"')]*$/.test(pending.text);
-    if (complete || pending.end - pending.start >= 18 || pending.text.length >= 260) {
-      result.push(pending);
-      pending = null;
-    }
-  }
-  if (pending) result.push(pending);
-  return result;
-}
-
 async function fetchYouTubeCaptionsWithYtDlp(url: string): Promise<{
   title?: string;
   channel?: string;
@@ -1573,7 +1556,7 @@ async function fetchYouTubeCaptionsWithYtDlp(url: string): Promise<{
       title: metadata.title,
       channel: metadata.channel || metadata.uploader,
       duration: metadata.duration,
-      segments: alignCaptionSentences(normalizeRollingVtt(vtt)),
+      segments: normalizeAndAlignVtt(vtt),
     };
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -1637,7 +1620,7 @@ async function transcribeYouTubeAudioWithYtDlp(
 // Import the complete timed transcript. Captions remain the source of truth; AI may only enrich them.
 app.post("/api/media/youtube/import", async (req, res) => {
   try {
-    const { url, topic, level, targetBand } = req.body;
+    const { url, topic } = req.body;
     const videoId = extractYouTubeId(url);
     if (!videoId) return res.status(400).json({ error: "URL YouTube không hợp lệ." });
 
@@ -1665,7 +1648,7 @@ app.post("/api/media/youtube/import", async (req, res) => {
         const { YoutubeTranscript } = await import("youtube-transcript");
         const raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" })
           .catch(() => YoutubeTranscript.fetchTranscript(videoId));
-        normalized = alignCaptionSentences(raw.map((cue) => ({
+        normalized = alignTranscriptSentences(raw.map((cue) => ({
           start: cue.offset / 1000,
           end: (cue.offset + cue.duration) / 1000,
           text: cue.text.replace(/\s+/g, " ").trim(),
@@ -1734,7 +1717,7 @@ CAPTIONS:\n${normalized.map((segment, index) => `${index}: ${segment.text}`).joi
       channelTitle,
       thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
       topic: topic || "Academic English",
-      level: level || targetBand || "Band 7.0-8.0",
+      level: "Adaptive",
       durationSeconds: durationSeconds || normalized.at(-1)?.end || 0,
       currentTimestamp: 0,
       transcriptSegments: normalized.map((segment, index) => ({
@@ -2046,7 +2029,7 @@ app.post("/api/media/evaluate-shadowing", async (req, res) => {
     const prompt = `Bạn là Giám khảo IELTS Chuyên chấm thi kỹ năng Speaking & Ngữ âm (Pronunciation Specialist).
 Hãy đánh giá bài luyện Shadowing sau của học viên:
 - Câu gốc của người bản xứ: "${targetSentence}"
-- Nội dung học viên nói được (Speech-to-text / Transcript): "${userTranscript || '(Học viên đã nói theo câu gốc)'}"
+- Nội dung nhận dạng được (Speech-to-text / Transcript): "${userTranscript || '(Không có transcript STT; chỉ đánh giá từ audio thật, không giả định học viên đã nói đúng câu gốc.)'}"
 - Chủ đề: "${topicTitle || 'IELTS Speaking'}"
 
 YÊU CẦU ĐÁNH GIÁ CHI TIẾT:

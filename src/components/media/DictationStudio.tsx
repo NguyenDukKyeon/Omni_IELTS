@@ -45,6 +45,8 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.9);
   const [loopCount, setLoopCount] = useState<number>(1);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [exerciseMode, setExerciseMode] = useState<'sentence' | 'fill' | 'arrange'>('sentence');
 
   // Dictation input & state
   const [userInput, setUserInput] = useState<string>('');
@@ -54,6 +56,8 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
   const [showHintFirstLetters, setShowHintFirstLetters] = useState<boolean>(false);
   const [showFullAnswer, setShowFullAnswer] = useState<boolean>(false);
   const [mistakeSaved, setMistakeSaved] = useState<boolean>(false);
+  const [fillAnswers, setFillAnswers] = useState<Record<number, string>>({});
+  const [arrangedWordIndexes, setArrangedWordIndexes] = useState<number[]>([]);
   const originalPlayerRef = useRef<OriginalMediaPlayerHandle | null>(null);
 
   // Reset state on segment change
@@ -62,11 +66,13 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
     setIsSubmitted(false);
     setDiffResults([]);
     setAccuracyScore(0);
-    setShowHintFirstLetters(false);
+    setShowHintFirstLetters(difficulty === 'easy');
     setShowFullAnswer(false);
     setMistakeSaved(false);
+    setFillAnswers({});
+    setArrangedWordIndexes([]);
     setIsPlayingAudio(false);
-  }, [activeSegmentIndex, session.id]);
+  }, [activeSegmentIndex, session.id, difficulty]);
 
   // Clean play audio handler
   const handlePlayAudio = () => {
@@ -75,13 +81,31 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
     originalPlayerRef.current?.playSegment(segment.start, segment.end, playbackSpeed, loopCount);
   };
 
-  // Compare user input against expected sentence
+  const sentenceWords = segment?.text.trim().split(/\s+/).filter(Boolean) || [];
+  const gapInterval = difficulty === 'easy' ? 5 : difficulty === 'medium' ? 4 : 3;
+  const gapIndexes = sentenceWords
+    .map((_, index) => index)
+    .filter((index) => (index + 1) % gapInterval === 0 || (sentenceWords.length < gapInterval && index === sentenceWords.length - 1));
+  const shuffledWordIndexes = sentenceWords
+    .map((_, index) => index)
+    .sort((a, b) => ((a * 7 + 3) % Math.max(1, sentenceWords.length)) - ((b * 7 + 3) % Math.max(1, sentenceWords.length)));
+
   const handleCheckDictation = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userInput.trim() || !segment) return;
+    if (!segment) return;
+    const expected = exerciseMode === 'fill'
+      ? gapIndexes.map((index) => sentenceWords[index]).join(' ')
+      : segment.text;
+    const attempt = exerciseMode === 'fill'
+      ? gapIndexes.map((index) => fillAnswers[index] || '').join(' ')
+      : exerciseMode === 'arrange'
+        ? arrangedWordIndexes.map((index) => sentenceWords[index]).join(' ')
+        : userInput;
+    if (!attempt.trim()) return;
 
-    const comparison = diffWords(segment.text, userInput);
+    const comparison = diffWords(expected, attempt);
     const accuracy = comparison.accuracy;
+    setUserInput(attempt);
     setAccuracyScore(accuracy);
     setDiffResults(comparison.tokens);
     setIsSubmitted(true);
@@ -139,6 +163,31 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
     }
   };
 
+  const canSubmit = exerciseMode === 'sentence'
+    ? Boolean(userInput.trim())
+    : exerciseMode === 'fill'
+      ? gapIndexes.length > 0 && gapIndexes.every((index) => Boolean(fillAnswers[index]?.trim()))
+      : arrangedWordIndexes.length === sentenceWords.length;
+
+  useEffect(() => {
+    const handleKeyboard = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return;
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        handleNext();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        handlePrev();
+      } else if (event.code === 'Space') {
+        event.preventDefault();
+        handlePlayAudio();
+      }
+    };
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  });
+
   if (!segment) {
     return (
       <div className="p-8 text-center bg-white dark:bg-stone-800 rounded-3xl border border-stone-200 dark:border-stone-700">
@@ -190,6 +239,56 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-3 dark:border-stone-700 dark:bg-stone-900/60">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-stone-500 dark:text-stone-400">Độ khó:</span>
+            {([
+              ['easy', 'Easy'],
+              ['medium', 'Medium'],
+              ['hard', 'Hard'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                data-ux-flow="media.learning"
+                aria-pressed={difficulty === value}
+                onClick={() => {
+                  setDifficulty(value);
+                  setShowHintFirstLetters(value === 'easy');
+                  if (value === 'hard') setShowFullAnswer(false);
+                }}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${difficulty === value ? 'bg-sky-600 text-white' : 'bg-white text-stone-600 dark:bg-stone-800 dark:text-stone-300'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-stone-400">Space: nghe lại · ←/→: chuyển câu</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900/60">
+          <span className="mr-1 text-[11px] font-bold text-stone-500">Dạng bài:</span>
+          {([['sentence', 'Sentence'], ['fill', 'Fill'], ['arrange', 'Arrange']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              data-ux-flow="media.learning"
+              aria-pressed={exerciseMode === value}
+              onClick={() => {
+                setExerciseMode(value);
+                setUserInput('');
+                setFillAnswers({});
+                setArrangedWordIndexes([]);
+                setIsSubmitted(false);
+                setDiffResults([]);
+              }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold ${exerciseMode === value ? 'bg-indigo-600 text-white' : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* Audio Player Card (Transcript Hidden) */}
         <div className="p-6 sm:p-8 rounded-3xl bg-stone-50/80 dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700/80 text-center space-y-4">
           <div className="flex justify-center">
@@ -236,34 +335,92 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
 
         {/* Dictation Input Form */}
         <form data-ux-flow="media.learning" onSubmit={handleCheckDictation} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
-              Gõ chính xác những gì bạn nghe được vào đây:
-            </label>
-            <textarea data-ux-flow="media.learning"
-              rows={3}
-              required
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              placeholder="Type exactly what you hear..."
-              className="w-full p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-sm text-stone-900 dark:text-stone-100 font-serif leading-relaxed focus:ring-2 focus:ring-sky-500 focus:outline-hidden"
-              autoFocus
-            />
-          </div>
+          {exerciseMode === 'sentence' && (
+            <div>
+              <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
+                Gõ chính xác những gì bạn nghe được vào đây:
+              </label>
+              <textarea data-ux-flow="media.learning"
+                rows={3}
+                required
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
+                placeholder="Type exactly what you hear..."
+                className="w-full p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-sm text-stone-900 dark:text-stone-100 font-serif leading-relaxed focus:ring-2 focus:ring-sky-500 focus:outline-hidden"
+                autoFocus
+              />
+            </div>
+          )}
+
+          {exerciseMode === 'fill' && (
+            <div className="space-y-3">
+              <div className="text-xs font-bold text-stone-700 dark:text-stone-300">Điền các từ còn thiếu</div>
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm font-serif dark:border-stone-700 dark:bg-stone-900">
+                {sentenceWords.map((word, index) => gapIndexes.includes(index) ? (
+                  <input
+                    key={`${word}-${index}`}
+                    data-ux-flow="media.learning"
+                    aria-label={`Điền từ vị trí ${index + 1}`}
+                    value={fillAnswers[index] || ''}
+                    onChange={(event) => setFillAnswers((answers) => ({ ...answers, [index]: event.target.value }))}
+                    className="w-24 rounded-lg border border-sky-300 bg-white px-2 py-1 text-center text-sm dark:border-sky-700 dark:bg-stone-800"
+                  />
+                ) : <span key={`${word}-${index}`}>{word}</span>)}
+              </div>
+            </div>
+          )}
+
+          {exerciseMode === 'arrange' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-300">
+                <span>Sắp xếp các từ theo thứ tự bạn nghe</span>
+                <span>Đã chọn {arrangedWordIndexes.length} / {sentenceWords.length} từ</span>
+              </div>
+              <div className="min-h-12 rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-sm font-serif dark:border-indigo-800 dark:bg-indigo-950/30">
+                {arrangedWordIndexes.length ? arrangedWordIndexes.map((index) => sentenceWords[index]).join(' ') : 'Chọn từng từ ở bên dưới…'}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {shuffledWordIndexes.filter((index) => !arrangedWordIndexes.includes(index)).map((index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    data-ux-flow="media.learning"
+                    aria-label={`Chọn từ ${sentenceWords[index]}`}
+                    onClick={() => setArrangedWordIndexes((indexes) => [...indexes, index])}
+                    className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-bold text-stone-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200"
+                  >
+                    {sentenceWords[index]}
+                  </button>
+                ))}
+              </div>
+              {arrangedWordIndexes.length > 0 && (
+                <button
+                  type="button"
+                  data-ux-flow="media.learning"
+                  onClick={() => setArrangedWordIndexes((indexes) => indexes.slice(0, -1))}
+                  className="text-xs font-bold text-indigo-600 dark:text-indigo-300"
+                >
+                  Bỏ từ cuối
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
-            <button data-ux-flow="media.learning"
-              type="button"
-              onClick={() => setShowFullAnswer(!showFullAnswer)}
-              className="text-xs font-semibold text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
-            >
-              {showFullAnswer ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{showFullAnswer ? 'Ẩn đáp án' : 'Xem đáp án ngay'}</span>
-            </button>
+            {difficulty !== 'hard' || isSubmitted ? (
+              <button data-ux-flow="media.learning"
+                type="button"
+                onClick={() => setShowFullAnswer(!showFullAnswer)}
+                className="text-xs font-semibold text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+              >
+                {showFullAnswer ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                <span>{showFullAnswer ? 'Ẩn đáp án' : 'Xem đáp án ngay'}</span>
+              </button>
+            ) : <span className="text-[11px] text-stone-400">Hard: đáp án chỉ mở sau khi nộp</span>}
 
             <button data-ux-flow="media.learning"
               type="submit"
-              disabled={!userInput.trim()}
+              disabled={!canSubmit}
               className="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white font-bold text-xs shadow-md shadow-sky-600/20 flex items-center gap-2 cursor-pointer transition-all"
             >
               <Send className="w-3.5 h-3.5" />

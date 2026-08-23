@@ -4,6 +4,7 @@ import {
   MediaExtractedVocab,
   AudioTranscribeInput,
   AudioTranscribeResult,
+  MediaTranscriptSegment,
 } from '../types';
 
 export interface ProcessYouTubeResponse {
@@ -24,13 +25,12 @@ export interface ExtractVocabResponse {
  * Process a YouTube URL via server backend with yt-dlp/transcript and Gemini
  */
 export async function processYouTubeUrl(
-  url: string,
-  targetBand: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.0+' = 'Band 7.0-8.0'
+  url: string
 ): Promise<MediaSession> {
   const response = await fetch('/api/media/youtube/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, level: targetBand }),
+    body: JSON.stringify({ url }),
   });
 
   if (!response.ok) {
@@ -44,6 +44,26 @@ export async function processYouTubeUrl(
   }
 
   return data.session;
+}
+
+export async function saveMediaTranscript(
+  sessionId: string,
+  segments: MediaTranscriptSegment[]
+): Promise<{ version: string; updatedAt: string }> {
+  const response = await fetch(`/api/media/transcripts/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      version: `user_${Date.now()}`,
+      normalizerVersion: 'user-edited-v1',
+      segments,
+    }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Không thể lưu transcript (${response.status})`);
+  }
+  return await response.json();
 }
 
 /**
