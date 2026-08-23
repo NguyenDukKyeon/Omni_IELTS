@@ -7076,6 +7076,21 @@ A verified_report must have a direct source that explicitly supports that exact 
           run: () => retryProviderCall(
             () => requestGroqGroundedForecast({
               apiKey: groqApiKey,
+              model: 'groq/compound-mini',
+              prompt,
+              originalQuery: searchTopicQuery,
+              retrievedAt,
+            }),
+            { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
+          ),
+        },
+        {
+          provider: 'groq',
+          model: AI_TASK_PROFILES.grounded.fallbacks[2],
+          run: () => retryProviderCall(
+            () => requestGroqGroundedForecast({
+              apiKey: groqApiKey,
+              model: 'groq/compound',
               prompt,
               originalQuery: searchTopicQuery,
               retrievedAt,
