@@ -1379,4 +1379,52 @@ export interface QuestionTrapAnalysisInput {
   targetBand?: number;
 }
 
+// ==========================================
+// Master Mentor Panel Types (3 Personas)
+// ==========================================
+
+export interface MentorIdeaExpansion {
+  pointOrParagraph: string;
+  currentArgument: string;
+  peelScaffolding: {
+    point: string;
+    explanation: string;
+    example: string;
+    link: string;
+  };
+  counterArgumentOrNuance?: string;
+  coachAdviceVi: string;
+}
+
+export interface MentorCollocationUpgrade {
+  originalPhrase: string;
+  fixedBaseSentence: string; // Must build on Dr. Vance's fixed version if flawed
+  upgradedC1C2Collocation: string;
+  academicHedgingOption: string;
+  maestroNotesVi: string;
+}
+
+export interface MasterMentorPerspectiveTension {
+  issue: string;
+  examinerStance: string;
+  coachStance: string;
+  resolutionAdviceVi: string;
+}
+
+export interface MasterMentorPanelReport {
+  disclaimerVi?: string;
+  criticalFlaws: StandardErrorObject[]; // 🔴 Critical Flaws (Dr. Vance - Cambridge Examiner)
+  ideaExpansion: MentorIdeaExpansion[]; // 💡 Idea Expansion (Mia - Band Booster Coach)
+  collocationUpgrades: MentorCollocationUpgrade[]; // ✨ C1/C2 Collocations (Prof. Arthur - Lexical Maestro)
+  perspectiveTensions?: MasterMentorPerspectiveTension[];
+  panelSummaryVi: string;
+}
+
+export interface MasterMentorPanelInput {
+  contentOrEssay: string;
+  taskType?: string;
+  taskPrompt?: string;
+  targetBand?: number;
+}
+
 
