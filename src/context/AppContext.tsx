@@ -27,6 +27,7 @@ import { curatedIELTSDecks } from '../data/curatedDecks';
 import { calculateNextSRS, ReviewRating } from '../services/srsScheduler';
 import { calculateLevel, updateStreak, XP_REWARDS } from '../services/gamification';
 import { askAITutor } from '../services/aiTutor';
+import { transitionMistakeLifecycle } from '../lib/mistakeDrill';
 
 interface NotificationState {
   id: string;
@@ -69,7 +70,7 @@ interface AppContextType {
   setIsAITutorOpen: (open: boolean) => void;
   openAITutorWithPrompt: (promptText: string) => void;
   tutorMessages: AITutorMessage[];
-  sendTutorMessage: (text: string) => Promise<void>;
+  sendTutorMessage: (text: string, researchMode?: boolean) => Promise<void>;
   isTutorLoading: boolean;
   isMistakeNotebookOpen: boolean;
   setIsMistakeNotebookOpen: (open: boolean) => void;
@@ -540,7 +541,23 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
   };
 
   const addMistake = (entry: MistakeEntry) => {
-    setMistakes((prev) => [entry, ...prev]);
+    setMistakes((prev) => {
+      const taxonomyKey = entry.taxonomyKey || entry.trapCategory || `${entry.errorType}:${entry.tags?.[0] || 'general'}`;
+      const existingIndex = prev.findIndex((mistake) =>
+        (mistake.taxonomyKey || mistake.trapCategory || `${mistake.errorType}:${mistake.tags?.[0] || 'general'}`) === taxonomyKey
+        && (mistake.mastered || mistake.lifecycle === 'archived'));
+      if (existingIndex < 0) return [{ ...entry, taxonomyKey, lifecycle: entry.lifecycle || 'active' }, ...prev];
+      const next = [...prev];
+      next[existingIndex] = {
+        ...transitionMistakeLifecycle(next[existingIndex], 'taxonomy-recurred'),
+        errorText: entry.errorText,
+        correctedText: entry.correctedText,
+        explanation: entry.explanation,
+        taxonomyKey,
+        relapseCount: (next[existingIndex].relapseCount || 0) + 1,
+      };
+      return next;
+    });
     setNotification({
       id: Math.random().toString(),
       message: `Đã ghi nhận lỗi vào Sổ tay lỗi sai hợp nhất (${entry.errorType})`,
@@ -559,11 +576,15 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
           item.repetitions || item.reviewCount || 0,
           rating
         );
-        return {
+        const updated = {
           ...item,
           ...srs,
           reviewCount: (item.reviewCount || 0) + 1,
           lastReviewedDate: new Date().toISOString(),
+        };
+        return {
+          ...updated,
+          lifecycle: updated.mastered ? 'archived' : 'active',
         };
       })
     );
@@ -612,7 +633,7 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
     awardXP(XP_REWARDS.MOCK_TEST_COMPLETED, 'Hoàn thành bài thi thử IELTS!');
   };
 
-  const sendTutorMessage = async (text: string) => {
+  const sendTutorMessage = async (text: string, researchMode = false) => {
     const userMsg: AITutorMessage = {
       id: Math.random().toString(),
       role: 'user',
@@ -630,7 +651,8 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
         newMessages,
         activeModule,
         profile.currentBand,
-        profile.targetBand
+        profile.targetBand,
+        researchMode,
       );
 
       const assistantMsg: AITutorMessage = {
@@ -640,6 +662,9 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
         timestamp: new Date().toISOString(),
         screenContext: activeModule,
         suggestedFollowUps: response.suggestedFollowUps,
+        citations: response.citations,
+        retrievedAt: response.retrievedAt,
+        researchMode: response.researchMode,
       };
 
       setTutorMessages((prev) => [...prev, assistantMsg]);

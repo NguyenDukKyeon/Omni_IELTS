@@ -34,13 +34,6 @@ const PRESET_VIDEOS = [
     topic: 'Labor Economics & AI Ethics',
     desc: 'Mẫu câu trả lời Band 8.5 với phản xạ lập luận đa chiều và collocations đắt giá.',
   },
-  {
-    title: 'BBC 6-Minute English: Communication & Empathy',
-    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    band: 'Band 5.5-6.5' as const,
-    topic: 'Interpersonal Psychology',
-    desc: 'Ngữ điệu tự nhiên, hội thoại 2 người với tốc độ vừa phải cho nền tảng.',
-  },
 ];
 
 export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({

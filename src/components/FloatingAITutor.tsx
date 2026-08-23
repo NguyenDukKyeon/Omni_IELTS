@@ -11,6 +11,8 @@ import {
   RefreshCw,
   Lightbulb,
   CornerDownLeft,
+  Search,
+  ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { playTextToSpeech } from '../services/aiTutor';
@@ -28,6 +30,7 @@ export const FloatingAITutor: React.FC = () => {
 
   const [inputText, setInputText] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [researchMode, setResearchMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -50,12 +53,12 @@ export const FloatingAITutor: React.FC = () => {
     if (!inputText.trim() || isTutorLoading) return;
     const text = inputText.trim();
     setInputText('');
-    await sendTutorMessage(text);
+    await sendTutorMessage(text, researchMode);
   };
 
   const handleChipClick = async (chipText: string) => {
     if (isTutorLoading) return;
-    await sendTutorMessage(chipText);
+    await sendTutorMessage(chipText, researchMode);
   };
 
   const getContextLabel = (mod: string) => {
@@ -284,6 +287,31 @@ export const FloatingAITutor: React.FC = () => {
                         </div>
                       </div>
                     )}
+
+                    {isAssistant && msg.citations && msg.citations.length > 0 && (
+                      <details className="mt-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 p-2.5">
+                        <summary className="cursor-pointer text-[11px] font-bold text-blue-700 dark:text-blue-300">
+                          Nguồn tra cứu ({msg.citations.length}) · {msg.retrievedAt ? new Date(msg.retrievedAt).toLocaleString() : ''}
+                        </summary>
+                        <div className="mt-2 space-y-1.5">
+                          {msg.citations.map((citation) => (
+                            <a
+                              key={`${citation.claimId}-${citation.url}`}
+                              href={citation.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-start gap-1.5 text-[11px] text-blue-700 dark:text-blue-300 hover:underline"
+                            >
+                              <ExternalLink className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span>{citation.title}</span>
+                            </a>
+                          ))}
+                          <p className="text-[10px] text-amber-700 dark:text-amber-300">
+                            Hãy kiểm tra lại nguồn trước khi dùng dẫn chứng trong Writing.
+                          </p>
+                        </div>
+                      </details>
+                    )}
                   </div>
                 </div>
               );
@@ -324,8 +352,18 @@ export const FloatingAITutor: React.FC = () => {
           {/* Input Form */}
           <form
             onSubmit={handleSend}
-            className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2 shrink-0"
+            className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-2 shrink-0"
           >
+            <button
+              type="button"
+              onClick={() => setResearchMode((enabled) => !enabled)}
+              aria-pressed={researchMode}
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-bold transition-colors ${researchMode ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}
+              title="Dùng Google Search Grounding và quota Gemini BYOK"
+            >
+              <Search className="h-3.5 w-3.5" />
+              Tra cứu dẫn chứng
+            </button>
             <input
               ref={inputRef}
               type="text"

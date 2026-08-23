@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Volume2, Clock, CheckCircle2, RotateCcw, Sparkles, MessageSquare, AlertCircle, Play, Pause } from 'lucide-react';
 import { FullMockTestPackage } from '../../types';
+import { speakExaminerText } from '../../services/practiceService';
 
 interface SpeakingExamViewProps {
   testPackage: FullMockTestPackage;
@@ -9,6 +10,9 @@ interface SpeakingExamViewProps {
     part2Transcript: string;
     part2Notes: string;
     part3Answers: Array<{ question: string; transcript: string }>;
+    audioBase64?: string;
+    audioMimeType?: string;
+    audioParts?: Array<{ dataUrl: string; mimeType: string }>;
   };
   onUpdateSpeaking: (updated: any) => void;
   textSize: 'normal' | 'large' | 'xlarge';
@@ -31,20 +35,17 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
   const [isExaminerSpeaking, setIsExaminerSpeaking] = useState(false);
 
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const activeStreamRef = useRef<MediaStream | null>(null);
+  const stopExaminerVoiceRef = useRef<(() => void) | null>(null);
   const speaking = testPackage.speaking;
 
   // Speak Examiner prompt via Web Speech API
   const speakExaminerQuestion = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'en-GB'; // British English for IELTS examiner persona
-      utter.rate = 0.95;
-      utter.onstart = () => setIsExaminerSpeaking(true);
-      utter.onend = () => setIsExaminerSpeaking(false);
-      utter.onerror = () => setIsExaminerSpeaking(false);
-      window.speechSynthesis.speak(utter);
-    }
+    stopExaminerVoiceRef.current?.();
+    setIsExaminerSpeaking(true);
+    stopExaminerVoiceRef.current = speakExaminerText(text, 0.94, 'British', () => setIsExaminerSpeaking(false));
   };
 
   // Initialize Web Speech Recognition
@@ -85,6 +86,8 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
+      stopExaminerVoiceRef.current?.();
+      activeStreamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
@@ -125,13 +128,40 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
     return () => clearInterval(interval);
   }, [isSpeakTimerActive, speakSecondsRemaining]);
 
-  const startRecording = () => {
+  const startRecording = async () => {
     setLiveTranscript('');
-    setIsRecording(true);
     try {
       recognitionRef.current?.start();
     } catch (e) {
       console.warn('Recognition already started');
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      activeStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) audioChunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          onUpdateSpeaking({
+            ...speakingAnswers,
+            audioBase64: dataUrl,
+            audioMimeType: blob.type,
+            audioParts: [...(speakingAnswers.audioParts || []), { dataUrl, mimeType: blob.type }],
+          });
+        };
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      setIsRecording(false);
+      console.warn('Microphone unavailable; Speaking audio will be unavailable:', error);
     }
   };
 
@@ -142,6 +172,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
     } catch (e) {
       console.warn('Recognition already stopped');
     }
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
   };
 
   const startPart2Prep = () => {
@@ -169,7 +200,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
       if (existingIdx >= 0) {
         updated[existingIdx] = { question: q, transcript: liveTranscript || updated[existingIdx].transcript };
       } else {
-        updated.push({ question: q, transcript: liveTranscript || '(Đã ghi nhận bài nói)' });
+        if (liveTranscript.trim()) updated.push({ question: q, transcript: liveTranscript });
       }
       onUpdateSpeaking({ ...speakingAnswers, part1Answers: updated });
     } else if (currentPart === 'part2') {
@@ -181,7 +212,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
       if (existingIdx >= 0) {
         updated[existingIdx] = { question: q, transcript: liveTranscript || updated[existingIdx].transcript };
       } else {
-        updated.push({ question: q, transcript: liveTranscript || '(Đã ghi nhận bài nói)' });
+        if (liveTranscript.trim()) updated.push({ question: q, transcript: liveTranscript });
       }
       onUpdateSpeaking({ ...speakingAnswers, part3Answers: updated });
     }

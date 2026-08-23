@@ -31,8 +31,59 @@ import { MockTestReportView } from '../components/mock/MockTestReportView';
 import { MockProgressChart } from '../components/mock/MockProgressChart';
 import { MockOrchestratorModal } from '../components/mock/MockOrchestratorModal';
 import { XP_REWARDS } from '../services/gamification';
+import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
+import { getGeminiRequestHeaders } from '../services/aiTutor';
 
 type ExamPhase = 'idle' | 'in_progress' | 'evaluating' | 'report_view';
+
+type ActiveMockSnapshot = {
+  package: FullMockTestPackage;
+  attemptId: string;
+  currentSkill: MockExamSkill;
+  currentQuestionNumber: number;
+  activeSubIndex: number;
+  timeRemainingSeconds: number;
+  totalTimeSpentSeconds: number;
+  listeningAnswers: Record<number, string>;
+  readingAnswers: Record<number, string>;
+  writingAnswers: { task1: string; task2: string };
+  speakingAnswers: {
+    part1Answers: Array<{ question: string; transcript: string }>;
+    part2Transcript: string;
+    part2Notes: string;
+    part3Answers: Array<{ question: string; transcript: string }>;
+  };
+  flaggedListening: number[];
+  flaggedReading: number[];
+  savedAt: string;
+};
+
+function readActiveMockSnapshot(): ActiveMockSnapshot | null {
+  try {
+    const value = localStorage.getItem('omni_active_mock_build');
+    if (!value) return null;
+    const raw = JSON.parse(value);
+    if (!raw?.package) return null;
+    return {
+      package: raw.package,
+      attemptId: raw.attemptId || `attempt_${raw.package.id}_${Date.now()}`,
+      currentSkill: raw.currentSkill || raw.startSkill || 'listening',
+      currentQuestionNumber: raw.currentQuestionNumber || 1,
+      activeSubIndex: raw.activeSubIndex || 0,
+      timeRemainingSeconds: Number.isFinite(raw.timeRemainingSeconds) ? raw.timeRemainingSeconds : 2400,
+      totalTimeSpentSeconds: raw.totalTimeSpentSeconds || 0,
+      listeningAnswers: raw.listeningAnswers || {},
+      readingAnswers: raw.readingAnswers || {},
+      writingAnswers: raw.writingAnswers || { task1: '', task2: '' },
+      speakingAnswers: raw.speakingAnswers || { part1Answers: [], part2Transcript: '', part2Notes: '', part3Answers: [] },
+      flaggedListening: raw.flaggedListening || [],
+      flaggedReading: raw.flaggedReading || [],
+      savedAt: raw.savedAt || new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export const MockTestView: React.FC = () => {
   const {
@@ -44,9 +95,11 @@ export const MockTestView: React.FC = () => {
     setIsExamModeActive,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'available' | 'progress' | 'history'>('available');
+  const [activeTab, setActiveTab] = useState<'available' | 'live_hub' | 'progress' | 'history'>('available');
   const [isOrchestratorOpen, setIsOrchestratorOpen] = useState<boolean>(false);
+  const [resumeSnapshot, setResumeSnapshot] = useState<ActiveMockSnapshot | null>(() => readActiveMockSnapshot());
   const [selectedTestPackage, setSelectedTestPackage] = useState<FullMockTestPackage>(CAM_19_TEST_01);
+  const [mockAttemptId, setMockAttemptId] = useState<string>(() => `attempt_${Date.now()}`);
   const [examPhase, setExamPhase] = useState<ExamPhase>('idle');
   const [currentSkill, setCurrentSkill] = useState<MockExamSkill>('listening');
   const [currentQuestionNumber, setCurrentQuestionNumber] = useState<number>(1);
@@ -71,6 +124,9 @@ export const MockTestView: React.FC = () => {
     part2Transcript: string;
     part2Notes: string;
     part3Answers: Array<{ question: string; transcript: string }>;
+    audioBase64?: string;
+    audioMimeType?: string;
+    audioParts?: Array<{ dataUrl: string; mimeType: string }>;
   }>({
     part1Answers: [],
     part2Transcript: '',
@@ -95,6 +151,43 @@ export const MockTestView: React.FC = () => {
     }
   }, [examPhase, setIsExamModeActive]);
 
+  // Persist the package and typed answers, but never persist raw microphone audio.
+  useEffect(() => {
+    if (examPhase !== 'in_progress') return;
+    const timer = window.setTimeout(() => {
+      const snapshot: ActiveMockSnapshot = {
+        package: selectedTestPackage,
+        attemptId: mockAttemptId,
+        currentSkill,
+        currentQuestionNumber,
+        activeSubIndex,
+        timeRemainingSeconds,
+        totalTimeSpentSeconds,
+        listeningAnswers,
+        readingAnswers,
+        writingAnswers,
+        speakingAnswers: {
+          part1Answers: speakingAnswers.part1Answers,
+          part2Transcript: speakingAnswers.part2Transcript,
+          part2Notes: speakingAnswers.part2Notes,
+          part3Answers: speakingAnswers.part3Answers,
+        },
+        flaggedListening,
+        flaggedReading,
+        savedAt: new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem('omni_active_mock_build', JSON.stringify(snapshot));
+        setResumeSnapshot(snapshot);
+      } catch (error) {
+        console.warn('Không thể autosave mock attempt:', error);
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [examPhase, selectedTestPackage, mockAttemptId, currentSkill, currentQuestionNumber, activeSubIndex,
+    timeRemainingSeconds, totalTimeSpentSeconds, listeningAnswers, readingAnswers, writingAnswers,
+    speakingAnswers, flaggedListening, flaggedReading]);
+
   // Main Exam Timer
   useEffect(() => {
     let interval: any;
@@ -112,7 +205,9 @@ export const MockTestView: React.FC = () => {
 
   // Start Full Test
   const handleStartExam = (testPkg: FullMockTestPackage, startSkill: MockExamSkill = 'listening') => {
+    const nextAttemptId = `attempt_${testPkg.id}_${Date.now()}`;
     setSelectedTestPackage(testPkg);
+    setMockAttemptId(nextAttemptId);
     setCurrentSkill(startSkill);
     setCurrentQuestionNumber(1);
     setActiveSubIndex(0);
@@ -133,6 +228,28 @@ export const MockTestView: React.FC = () => {
 
     // Set time according to starting skill
     setTimeForSkill(startSkill);
+    setIsTimerPaused(false);
+    setExamPhase('in_progress');
+  };
+
+  const handleResumeExam = () => {
+    const snapshot = readActiveMockSnapshot();
+    if (!snapshot?.package || !snapshot.attemptId) return;
+    setSelectedTestPackage(snapshot.package);
+    setMockAttemptId(snapshot.attemptId);
+    setCurrentSkill(snapshot.currentSkill);
+    setCurrentQuestionNumber(snapshot.currentQuestionNumber || 1);
+    setActiveSubIndex(snapshot.activeSubIndex || 0);
+    setTimeRemainingSeconds(snapshot.timeRemainingSeconds);
+    setTotalTimeSpentSeconds(snapshot.totalTimeSpentSeconds || 0);
+    setListeningAnswers(snapshot.listeningAnswers || {});
+    setReadingAnswers(snapshot.readingAnswers || {});
+    setWritingAnswers(snapshot.writingAnswers || { task1: '', task2: '' });
+    setSpeakingAnswers({
+      ...(snapshot.speakingAnswers || { part1Answers: [], part2Transcript: '', part2Notes: '', part3Answers: [] }),
+    });
+    setFlaggedListening(snapshot.flaggedListening || []);
+    setFlaggedReading(snapshot.flaggedReading || []);
     setIsTimerPaused(false);
     setExamPhase('in_progress');
   };
@@ -223,7 +340,7 @@ export const MockTestView: React.FC = () => {
 
       const response = await fetch('/api/mock/evaluate-full-test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getGeminiRequestHeaders(),
         body: JSON.stringify({
           testPackage: selectedTestPackage,
           userAnswers: {
@@ -266,113 +383,13 @@ export const MockTestView: React.FC = () => {
       );
 
       setExamPhase('report_view');
+      localStorage.removeItem('omni_active_mock_build');
+      setResumeSnapshot(null);
     } catch (err) {
       console.error('Error evaluating full mock test:', err);
-      // Fallback local calculation
-      const fallbackResult: MockResult = {
-        id: `mock_${Date.now()}`,
-        testCode: selectedTestPackage.code,
-        testTitle: selectedTestPackage.title,
-        overallBand: 7.0,
-        listeningBand: 7.5,
-        readingBand: 7.0,
-        writingBand: 6.5,
-        speakingBand: 7.0,
-        listeningRawScore: 32,
-        readingRawScore: 30,
-        completedDate: new Date().toISOString().split('T')[0],
-        timeSpentMinutes: Math.max(1, Math.round(totalTimeSpentSeconds / 60)),
-        breakdown: [
-          'Listening: 32/40 câu đúng (Band 7.5)',
-          'Reading: 30/40 câu đúng (Band 7.0)',
-          'Writing: Task 1 (6.5), Task 2 (6.5) - Band 6.5',
-          'Speaking: Fluency & Coherence tốt, cần cải thiện Collocations (Band 7.0)',
-        ],
-        strengths: [
-          'Khả năng nghe bắt từ khóa (keyword tracking) ở Section 1 & 2 rất chuẩn xác.',
-          'Nắm chắc kỹ thuật Skimming & Scanning trong phần Đọc hiểu.',
-        ],
-        weaknesses: [
-          'Cần mở rộng cấu trúc câu phức và từ vựng học thuật C1 trong Writing Task 2.',
-          'Phát triển ý sâu hơn ở Speaking Part 3 bằng cách đưa ví dụ phản biện.',
-        ],
-        roadmap: {
-          weakestSkill: 'writing',
-          targetBandGap: 1.0,
-          coreGrammarToReview: ['inversion_emphasis', 'complex_conditionals'],
-          recommendedDecks: ['academic_ielts_c1', 'writing_collocations_band8'],
-          summaryAdviceVi:
-            'Tập trung nâng cao tiêu chí Lexical Resource & Grammatical Range trong Writing.',
-          dayByDayPlan: [
-            {
-              day: 1,
-              title: 'Học Đảo ngữ & Cấu trúc câu Nâng cao',
-              targetModule: 'grammar',
-              targetSkill: 'writing',
-              actionLabel: 'Học Ngữ pháp',
-              priority: 'high',
-              description: 'Luyện cấu trúc Inversion và Conditional sentences để tăng điểm GRA.',
-            },
-            {
-              day: 2,
-              title: 'Ôn tập 20 Từ vựng Học thuật Task 2',
-              targetModule: 'vocabulary',
-              targetSkill: 'writing',
-              actionLabel: 'Học Flashcards',
-              priority: 'high',
-              description: 'Nạp bộ từ vựng chủ đề Society & Technology qua hệ thống SRS.',
-            },
-            {
-              day: 3,
-              title: 'Luyện viết mở bài & dàn ý Task 2',
-              targetModule: 'practice',
-              targetSkill: 'writing',
-              actionLabel: 'Luyện Writing',
-              priority: 'medium',
-              description: 'Thực hành Paraphrase đề bài và viết luận điểm ngắn gọn.',
-            },
-            {
-              day: 4,
-              title: 'Phân tích lỗi sai bài thi thử vừa rồi',
-              targetModule: 'profile',
-              targetSkill: 'writing',
-              actionLabel: 'Sổ tay Lỗi sai',
-              priority: 'high',
-              description: 'Xem lại các câu sai trong Sổ tay Lỗi sai để không tái phạm.',
-            },
-            {
-              day: 5,
-              title: 'Luyện Nghe Section 3 & 4 chuyên sâu',
-              targetModule: 'media',
-              targetSkill: 'listening',
-              actionLabel: 'Luyện Media Lab',
-              priority: 'medium',
-              description: 'Nghe bài giảng học thuật và tóm tắt ý chính.',
-            },
-            {
-              day: 6,
-              title: 'Thực hành Speaking Part 2 với Gemini Live',
-              targetModule: 'practice',
-              targetSkill: 'speaking',
-              actionLabel: 'Luyện Speaking',
-              priority: 'medium',
-              description: 'Thử thách 1 phút chuẩn bị và nói liên tục 2 phút không vấp.',
-            },
-            {
-              day: 7,
-              title: 'Làm bài Mini Mock Test kiểm tra lại tiến độ',
-              targetModule: 'mock_test',
-              targetSkill: 'reading',
-              actionLabel: 'Thi Mini Mock',
-              priority: 'high',
-              description: 'Đo lường sự tiến bộ sau 1 tuần rèn luyện có chủ đích.',
-            },
-          ],
-        },
-      };
-      addMockResult(fallbackResult);
-      setCurrentReport(fallbackResult);
-      setExamPhase('report_view');
+      setEvaluatingStep('Không thể chấm bài lúc này. Bài làm vẫn được giữ; không có band giả nào được tạo.');
+      setExamPhase('in_progress');
+      window.alert('Hệ thống chấm điểm đang unavailable. Bài làm của bạn vẫn được giữ để thử nộp lại.');
     }
   };
 
@@ -487,6 +504,7 @@ export const MockTestView: React.FC = () => {
 
             {currentSkill === 'reading' && (
               <ReadingExamView
+                mockAttemptId={mockAttemptId}
                 testPackage={selectedTestPackage}
                 currentQuestionNumber={currentQuestionNumber}
                 userAnswers={readingAnswers}
@@ -599,10 +617,10 @@ export const MockTestView: React.FC = () => {
             <div>
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5">
                 <GraduationCap className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                <span>Thi Thử IELTS Chuẩn Quốc Tế (Full Mock Exam)</span>
+                <span>Phòng Thi Thử IELTS-style (Full Mock Exam)</span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Mô phỏng 100% định dạng đề thi thật trên máy tính (CD-IELTS) với đầy đủ 4 kỹ năng & chấm điểm AI chuyên sâu.
+                Mô phỏng định dạng thi trên máy tính với đủ 4 kỹ năng. Nội dung do Omni IELTS tạo để luyện tập, không phải đề thi IELTS chính thức.
               </p>
             </div>
 
@@ -617,6 +635,16 @@ export const MockTestView: React.FC = () => {
                 }`}
               >
                 Đề Thi Khả Dụng ({ALL_FULL_MOCK_TESTS.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('live_hub')}
+                className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                  activeTab === 'live_hub'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Live Hub
               </button>
               <button
                 onClick={() => setActiveTab('progress')}
@@ -644,6 +672,24 @@ export const MockTestView: React.FC = () => {
           {/* TAB 1: AVAILABLE TESTS */}
           {activeTab === 'available' && (
             <div className="space-y-6">
+              {resumeSnapshot && (
+                <div className="p-4 rounded-2xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-sm text-amber-950 dark:text-amber-100">Có bài thi đang làm dở</p>
+                    <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
+                      {resumeSnapshot.package.title} • {resumeSnapshot.currentSkill} • lưu lúc {new Date(resumeSnapshot.savedAt).toLocaleString('vi-VN')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResumeExam}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 shrink-0"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    Tiếp tục bài thi
+                  </button>
+                </div>
+              )}
               {/* AI Mock Orchestrator Banner & Trigger */}
               <div className="p-6 rounded-3xl bg-gradient-to-r from-teal-950 via-slate-900 to-slate-900 border border-teal-800/40 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
                 <div className="space-y-1">
@@ -652,7 +698,7 @@ export const MockTestView: React.FC = () => {
                       mock-assembler-v1
                     </span>
                     <span className="text-xs text-teal-300 font-bold">
-                      Cambridge Full Mock Test Engine
+                      Validated Full Mock Test Engine
                     </span>
                   </div>
                   <h3 className="text-base sm:text-lg font-black text-white">
@@ -752,6 +798,16 @@ export const MockTestView: React.FC = () => {
                 ))}
               </div>
             </div>
+          )}
+
+          {activeTab === 'live_hub' && (
+            <ForecastLiveHub
+              usageContext="mock"
+              onSelectPromptForPractice={(item) => {
+                sessionStorage.setItem('omni_pending_mock_source', JSON.stringify(item));
+                setIsOrchestratorOpen(true);
+              }}
+            />
           )}
 
           {/* TAB 2: PROGRESS & RADAR ANALYTICS */}
@@ -863,6 +919,7 @@ export const MockTestView: React.FC = () => {
       <MockOrchestratorModal
         isOpen={isOrchestratorOpen}
         onClose={() => setIsOrchestratorOpen(false)}
+        onStartExam={(pkg) => handleStartExam(pkg, 'listening')}
       />
     </div>
   );

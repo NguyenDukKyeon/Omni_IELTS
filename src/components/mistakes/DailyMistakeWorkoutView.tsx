@@ -22,6 +22,7 @@ import { MistakeEntry, TrapCategory } from '../../types';
 import { ReviewRating, TRAP_CATEGORY_METAS } from '../../services/srsScheduler';
 import { playTextToSpeech } from '../../services/aiTutor';
 import { useApp } from '../../context/AppContext';
+import { isAcceptedAnswer, selectDueMistakes } from '../../lib/mistakeDrill';
 
 interface DailyMistakeWorkoutViewProps {
   mistakes: MistakeEntry[];
@@ -58,7 +59,7 @@ export const DailyMistakeWorkoutView: React.FC<DailyMistakeWorkoutViewProps> = (
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
 
   // Filter mistakes due or matching trap
-  const eligibleMistakes = mistakes.filter((m) => {
+  const eligibleMistakes = selectDueMistakes<MistakeEntry>(mistakes).filter((m) => {
     if (selectedTrapFilter !== 'all' && m.trapCategory !== selectedTrapFilter) return false;
     return true;
   });
@@ -94,10 +95,7 @@ export const DailyMistakeWorkoutView: React.FC<DailyMistakeWorkoutViewProps> = (
     if (isAnswerRevealed) return;
     setUserSelection(opt);
     setIsAnswerRevealed(true);
-    // Auto check if it matches correctedText or clean text
-    const cleanOpt = opt.toLowerCase().trim();
-    const cleanCorrect = (currentMistake?.correctedText || '').toLowerCase();
-    if (cleanCorrect.includes(cleanOpt)) {
+    if (currentMistake && isAcceptedAnswer(opt, currentMistake.correctedText, currentMistake.acceptedAnswers)) {
       setIsSelfCorrect(true);
       setCorrectCount((prev) => prev + 1);
     } else {
@@ -109,9 +107,7 @@ export const DailyMistakeWorkoutView: React.FC<DailyMistakeWorkoutViewProps> = (
     e.preventDefault();
     if (!typedAnswer.trim() || isAnswerRevealed) return;
     setIsAnswerRevealed(true);
-    const cleanInput = typedAnswer.toLowerCase().trim();
-    const cleanCorrect = (currentMistake?.correctedText || '').toLowerCase();
-    if (cleanCorrect.includes(cleanInput)) {
+    if (currentMistake && isAcceptedAnswer(typedAnswer, currentMistake.correctedText, currentMistake.acceptedAnswers)) {
       setIsSelfCorrect(true);
       setCorrectCount((prev) => prev + 1);
     } else {
@@ -120,7 +116,7 @@ export const DailyMistakeWorkoutView: React.FC<DailyMistakeWorkoutViewProps> = (
   };
 
   const handleRateCard = (rating: ReviewRating) => {
-    if (!currentMistake) return;
+    if (!currentMistake || !isAnswerRevealed) return;
 
     reviewMistake(currentMistake.id, rating);
     setReviewedCount((prev) => prev + 1);
