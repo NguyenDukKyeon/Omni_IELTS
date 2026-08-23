@@ -1241,4 +1241,50 @@ export interface DiagnosticPsychometricianReport {
   personalized30DayRoadmap: RoadmapWeek[];
 }
 
+// ==========================================
+// 3-Tier Sentence Academic Stylist Types
+// ==========================================
+
+export interface StandardErrorObject {
+  errorSubstring: string;
+  errorCategory: string; // e.g., "Grammar", "Syntax", "Collocation", "Register", "Hedging", "Punctuation"
+  explanationVi: string;
+  severity?: 'minor' | 'medium' | 'major';
+}
+
+export interface SentenceUpgradeTier65 {
+  text: string;
+  keyFixesVi: string;
+}
+
+export interface SentenceUpgradeTier75 {
+  text: string;
+  keyCollocations: string[];
+  keyFixesVi: string;
+}
+
+export interface SentenceUpgradeTier85 {
+  text: string;
+  grammaticalTechnique: string;
+  keyCollocations: string[];
+  keyFixesVi: string;
+}
+
+export interface SentenceAcademicStylistResult {
+  originalSentence: string;
+  essayTopicContext: string;
+  detectedErrors: StandardErrorObject[];
+  upgradedVersions: {
+    band65: SentenceUpgradeTier65;
+    band75: SentenceUpgradeTier75;
+    band85: SentenceUpgradeTier85;
+  };
+}
+
+export interface SentenceAcademicStylistInput {
+  sentence: string;
+  essayTopic?: string;
+  targetBand?: number;
+}
+
 

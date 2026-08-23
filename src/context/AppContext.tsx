@@ -77,6 +77,10 @@ interface AppContextType {
   setIsOnboardingOpen: (open: boolean) => void;
   isDiagnosticOpen: boolean;
   setIsDiagnosticOpen: (open: boolean) => void;
+  isSentenceStylistOpen: boolean;
+  setIsSentenceStylistOpen: (open: boolean) => void;
+  sentenceStylistData: { sentence: string; topic?: string };
+  openSentenceStylist: (sentence?: string, topic?: string) => void;
   darkMode: boolean;
   toggleDarkMode: () => void;
   awardXP: (amount: number, reason?: string) => void;
@@ -106,6 +110,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isMistakeNotebookOpen, setIsMistakeNotebookOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
   const [isDiagnosticOpen, setIsDiagnosticOpen] = useState<boolean>(false);
+  const [isSentenceStylistOpen, setIsSentenceStylistOpen] = useState<boolean>(false);
+  const [sentenceStylistData, setSentenceStylistData] = useState<{ sentence: string; topic?: string }>({
+    sentence: '',
+    topic: '',
+  });
   const [isTutorLoading, setIsTutorLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<NotificationState | null>(null);
   const [isExamModeActive, setIsExamModeActive] = useState<boolean>(false);
@@ -646,6 +655,11 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
     sendTutorMessage(promptText);
   };
 
+  const openSentenceStylist = (sentence: string = '', topic: string = '') => {
+    setSentenceStylistData({ sentence, topic });
+    setIsSentenceStylistOpen(true);
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -691,6 +705,10 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
         setIsOnboardingOpen,
         isDiagnosticOpen,
         setIsDiagnosticOpen,
+        isSentenceStylistOpen,
+        setIsSentenceStylistOpen,
+        sentenceStylistData,
+        openSentenceStylist,
         darkMode,
         toggleDarkMode,
         awardXP,

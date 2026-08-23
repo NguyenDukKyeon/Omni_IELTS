@@ -10,6 +10,8 @@ import {
   SpeakingPracticePrompt,
   SpeakingEvaluationResult,
   EssayUpgradeResult,
+  SentenceAcademicStylistInput,
+  SentenceAcademicStylistResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -104,6 +106,21 @@ export async function upgradeEssayBandApi(params: {
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || 'Lỗi nâng cấp bài viết IELTS.');
+  }
+  return await res.json();
+}
+
+export async function rewriteSentence3TiersApi(
+  params: SentenceAcademicStylistInput
+): Promise<SentenceAcademicStylistResult> {
+  const res = await fetch('/api/gemini/sentence-stylist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi nâng cấp câu văn 3 cấp độ (HTTP ${res.status}).`);
   }
   return await res.json();
 }

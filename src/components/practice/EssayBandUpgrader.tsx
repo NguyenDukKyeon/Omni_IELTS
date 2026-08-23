@@ -48,7 +48,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
   initialEssay,
   initialTaskType = 'task2_essay',
 }) => {
-  const { addMistake, addVocabCard, openAITutorWithPrompt, awardXP, profile } = useApp();
+  const { addMistake, addVocabCard, openAITutorWithPrompt, openSentenceStylist, awardXP, profile } = useApp();
 
   // Input states
   const [taskType, setTaskType] = useState<string>(initialTaskType);
@@ -350,27 +350,38 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
             <span>AI sẽ tự động tạo 2 bản nâng cấp độc lập (Band 7.0 & Band 8.5+) và bóc tách Diff so sánh.</span>
           </div>
 
-          <button
-            onClick={handleRunUpgrade}
-            disabled={isUpgrading}
-            className={`px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
-              isUpgrading
-                ? 'bg-indigo-400 text-white cursor-wait'
-                : 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40'
-            }`}
-          >
-            {isUpgrading ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                <span>{upgradeStageText}</span>
-              </>
-            ) : (
-              <>
-                <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                <span>Phân Tích & Nâng Cấp Từng Bước (AI Upgrader)</span>
-              </>
-            )}
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => openSentenceStylist('', promptStatement)}
+              className="px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-amber-100" />
+              <span>Nâng Cấp Câu Lẻ (3 Tiers)</span>
+            </button>
+
+            <button
+              onClick={handleRunUpgrade}
+              disabled={isUpgrading}
+              className={`px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
+                isUpgrading
+                  ? 'bg-indigo-400 text-white cursor-wait'
+                  : 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40'
+              }`}
+            >
+              {isUpgrading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                  <span>{upgradeStageText}</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                  <span>Phân Tích & Nâng Cấp Từng Bước (AI Upgrader)</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
