@@ -168,7 +168,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
               Xuất Sắc! Hoàn Thành Daily Workout
             </h3>
             <p className="text-xs text-stone-700 dark:text-stone-300">
-              Bạn đã ôn luyện và cập nhật tiến trình Spaced Repetition (SM-2) cho{' '}
+              Bạn đã ôn luyện và cập nhật tiến trình Spaced Repetition (FSRS-6) cho{' '}
               <strong>{reviewedCount}</strong> câu bẫy lỗi sai.
             </p>
           </div>
@@ -212,7 +212,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-full text-xs font-bold">
             <Flame className="w-4 h-4" />
-            <span>Thuật toán Lặp lại Ngắt quãng (SM-2 SRS)</span>
+            <span>Thuật toán Lặp lại Ngắt quãng (FSRS-6)</span>
           </div>
           <h3 className="text-lg font-bold text-stone-900 dark:text-white">
             Daily Mistake Workout (Luyện Khắc Phục Bẫy)
@@ -311,7 +311,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
           </span>
           <span className="text-stone-700 dark:text-stone-300">•</span>
           <span className="text-stone-700 dark:text-stone-300 font-medium">
-            Hộp SRS: {currentMistake?.srsStage ?? 0}/5
+            Cấp nhớ: {currentMistake?.srsStage ?? 0}/5
           </span>
         </div>
 
@@ -442,7 +442,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
         </div>
       )}
 
-      {/* REVEALED BREAKDOWN & SM-2 RATING */}
+      {/* REVEALED BREAKDOWN & FSRS RATING */}
       {isAnswerRevealed && (
         <div className="space-y-4 animate-in fade-in duration-200">
           {/* Correct Answer Card */}
@@ -504,10 +504,10 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
             </div>
           </div>
 
-          {/* SM-2 Rating Buttons */}
+          {/* FSRS Rating Buttons */}
           <div className="p-4 rounded-2xl bg-stone-100 dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 space-y-2">
             <span className="text-[11px] font-bold text-stone-700 dark:text-stone-300 block text-center">
-              Đánh giá mức độ ghi nhớ để thuật toán SM-2 xếp lịch ôn tiếp theo:
+              Đánh giá mức độ ghi nhớ để thuật toán FSRS-6 xếp lịch ôn tiếp theo:
             </span>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">

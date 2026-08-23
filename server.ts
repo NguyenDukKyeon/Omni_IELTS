@@ -15,6 +15,7 @@ import { alignTranscriptSentences, normalizeAndAlignVtt, NormalizedTranscriptSeg
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
 import { classifyApiFailure, retryProviderCall } from "./src/lib/apiFailure";
 import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
+import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
 import { requestGroqGroundedForecast } from "./src/lib/groqGrounding";
 
@@ -988,6 +989,70 @@ Trả về kết quả dưới dạng JSON:
 });
 
 // Auto-generate rich IELTS Vocab Card from a single word/phrase
+const adaptiveVocabCardSchema = z.object({
+  word: z.string().min(1),
+  phonetic: z.string().min(1),
+  pos: z.string().min(1),
+  definitionVi: z.string().min(1),
+  definitionEn: z.string().min(1),
+  exampleEn: z.string().min(1),
+  exampleVi: z.string().min(1),
+  collocations: z.array(z.string().min(1)).min(2).max(5),
+  wordFamily: z.array(z.string().min(1)).min(1).max(6),
+  paraphrases: z.array(z.string().min(1)).min(1).max(5),
+  usageNoteVi: z.string().min(1),
+  cefrLevel: z.enum(['A2', 'B1', 'B2', 'C1', 'C2']),
+});
+
+app.post('/api/vocab/adaptive-topic-decks', async (req, res) => {
+  try {
+    const topic = getAdaptiveVocabTopic(String(req.body?.topicId || ''));
+    const tierId = String(req.body?.tier || '');
+    const tier = ADAPTIVE_VOCAB_TIERS[tierId as keyof typeof ADAPTIVE_VOCAB_TIERS];
+    const count = Math.max(3, Math.min(12, Math.trunc(Number(req.body?.count) || 6)));
+    if (!topic || !tier) return res.status(400).json({ error: 'Chủ đề hoặc tầng từ vựng không hợp lệ.' });
+
+    const ai = getGeminiClient(req);
+    if (!ai) return res.status(503).json({ error: 'Cần Gemini API key để tạo deck thích ứng; hệ thống không trả deck giả.', status: 'unavailable' });
+
+    const allowedCefr = tierId === 'foundation' ? ['A2', 'B1'] : tierId === 'bridge' ? ['B1', 'B2'] : ['C1', 'C2'];
+    const result = await callGeminiResiliently(ai, {
+      taskTier: 'balanced',
+      contents: `Create exactly ${count} distinct vocabulary cards for IELTS learners.
+Topic: ${topic.titleEn} (${topic.titleVi}).
+Tier: ${tier.title}, ${tier.bandRange}, approximate CEFR ${tier.cefrRange}.
+Seed concepts: ${topic.seedConcepts.join(', ')}.
+Use only CEFR values: ${allowedCefr.join(' or ')}.
+Every card must include natural pronunciation IPA, word family, paraphrases, at least two collocations, one contextual example and a Vietnamese usage warning. Avoid obscure vocabulary and duplicate lemmas.
+Return JSON only: {"cards":[{"word":"...","phonetic":"/.../","pos":"...","definitionVi":"...","definitionEn":"...","exampleEn":"...","exampleVi":"...","collocations":["...","..."],"wordFamily":["..."],"paraphrases":["..."],"usageNoteVi":"...","cefrLevel":"${allowedCefr[0]}"}]}`,
+      config: { responseMimeType: 'application/json' },
+      maxRetriesPerModel: 1,
+    });
+    if (!result.text) return res.status(503).json({ error: 'AI đang không khả dụng; chưa có thẻ nào được lưu.', status: 'unavailable' });
+
+    let rawPayload: unknown;
+    try {
+      rawPayload = JSON.parse(result.text);
+    } catch {
+      return res.status(422).json({ error: 'AI trả dữ liệu không hợp lệ; chưa có thẻ nào được lưu.', status: 'schema_invalid' });
+    }
+    const parsed = z.object({ cards: z.array(adaptiveVocabCardSchema).length(count) }).safeParse(rawPayload);
+    if (!parsed.success) return res.status(422).json({ error: 'AI trả deck không đúng schema; chưa có thẻ nào được lưu.', status: 'schema_invalid' });
+    const normalizedWords = parsed.data.cards.map((card) => card.word.trim().toLocaleLowerCase());
+    if (new Set(normalizedWords).size !== normalizedWords.length) {
+      return res.status(422).json({ error: 'AI trả từ bị trùng; chưa có thẻ nào được lưu.', status: 'schema_invalid' });
+    }
+    if (parsed.data.cards.some((card) => !allowedCefr.includes(card.cefrLevel))) {
+      return res.status(422).json({ error: 'Deck không đúng tầng năng lực đã chọn.', status: 'schema_invalid' });
+    }
+
+    return res.json({ topicId: topic.id, tier: tier.id, cards: parsed.data.cards });
+  } catch (error: any) {
+    console.error('Adaptive vocab generation error:', error);
+    return res.status(500).json({ error: 'Không thể tạo deck từ vựng thích ứng.', status: 'error' });
+  }
+});
+
 app.post("/api/gemini/generate-vocab-card", async (req, res) => {
   try {
     const { word, contextHint, targetBand, userInterest } = req.body;
@@ -6961,60 +7026,64 @@ Schema:
 }
 A verified_report must have a direct source that explicitly supports that exact prompt and date. A user recall must be reported_recall. Everything else must be forecast.`;
 
+  const runGeminiGrounded = async (model: string) => {
+    if (!ai) throw Object.assign(new Error('NO_AI_CLIENT: Gemini not configured'), { code: 'NO_AI_CLIENT' });
+    const geminiResponse = await retryProviderCall(
+      () => ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { tools: [{ googleSearch: {} }], responseMimeType: 'application/json' },
+      }),
+      { context: 'forecast', provider: 'gemini', maxAttempts: 2, baseDelayMs: 750 },
+    );
+    const candidate = geminiResponse.candidates?.[0];
+    const groundingMetadata = candidate?.groundingMetadata as any;
+    const searchQueries: string[] = groundingMetadata?.webSearchQueries?.length
+      ? groundingMetadata.webSearchQueries
+      : [searchTopicQuery];
+    const uniqueSources = new Map<string, { title: string; url: string }>();
+    for (const chunk of groundingMetadata?.groundingChunks || []) {
+      const url = chunk?.web?.uri;
+      if (!url || uniqueSources.has(url)) continue;
+      let fallbackTitle = 'Nguồn tham khảo';
+      try { fallbackTitle = new URL(url).hostname; } catch { /* keep safe public label */ }
+      uniqueSources.set(url, { title: chunk?.web?.title || fallbackTitle, url });
+    }
+    return normalizeForecastGroundingPayload({
+      raw: JSON.parse(geminiResponse.text || '{}'),
+      groundingSources: [...uniqueSources.values()],
+      searchQueries,
+      retrievedAt,
+    });
+  };
+
   try {
     const routed = await groundedProviderRouter.execute({
       primary: {
         provider: 'gemini',
         model: AI_TASK_PROFILES.grounded.model,
-        run: async () => {
-          if (!ai) {
-            throw Object.assign(new Error('NO_AI_CLIENT: Gemini not configured'), { code: 'NO_AI_CLIENT' });
-          }
-          const geminiResponse = await retryProviderCall(
-            () => ai.models.generateContent({
-              model: AI_TASK_PROFILES.grounded.model,
-              contents: prompt,
-              config: {
-                tools: [{ googleSearch: {} }],
-                responseMimeType: 'application/json',
-              },
-            }),
-            { context: 'forecast', provider: 'gemini', maxAttempts: 2, baseDelayMs: 750 },
-          );
-          const candidate = geminiResponse.candidates?.[0];
-          const groundingMetadata = candidate?.groundingMetadata as any;
-          const searchQueries: string[] = groundingMetadata?.webSearchQueries?.length
-            ? groundingMetadata.webSearchQueries
-            : [searchTopicQuery];
-          const uniqueSources = new Map<string, { title: string; url: string }>();
-          for (const chunk of groundingMetadata?.groundingChunks || []) {
-            const url = chunk?.web?.uri;
-            if (!url || uniqueSources.has(url)) continue;
-            let fallbackTitle = 'Nguồn tham khảo';
-            try { fallbackTitle = new URL(url).hostname; } catch { /* keep safe public label */ }
-            uniqueSources.set(url, { title: chunk?.web?.title || fallbackTitle, url });
-          }
-          return normalizeForecastGroundingPayload({
-            raw: JSON.parse(geminiResponse.text || '{}'),
-            groundingSources: [...uniqueSources.values()],
-            searchQueries,
-            retrievedAt,
-          });
+        run: () => runGeminiGrounded(AI_TASK_PROFILES.grounded.model),
+      },
+      fallbacks: [
+        {
+          provider: 'gemini',
+          model: AI_TASK_PROFILES.grounded.fallbacks[0],
+          run: () => runGeminiGrounded(AI_TASK_PROFILES.grounded.fallbacks[0]),
         },
-      },
-      fallback: {
-        provider: 'groq',
-        model: AI_TASK_PROFILES.grounded.fallbacks[0],
-        run: () => retryProviderCall(
-          () => requestGroqGroundedForecast({
-            apiKey: groqApiKey,
-            prompt,
-            originalQuery: searchTopicQuery,
-            retrievedAt,
-          }),
-          { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
-        ),
-      },
+        {
+          provider: 'groq',
+          model: AI_TASK_PROFILES.grounded.fallbacks[1],
+          run: () => retryProviderCall(
+            () => requestGroqGroundedForecast({
+              apiKey: groqApiKey,
+              prompt,
+              originalQuery: searchTopicQuery,
+              retrievedAt,
+            }),
+            { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
+          ),
+        },
+      ],
     });
     return res.json({
       ...routed.value,

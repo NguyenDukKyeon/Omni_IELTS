@@ -81,7 +81,7 @@ export function nextGeminiDailyResetAt(now: number = Date.now()) {
 export class GroundedProviderRouter {
   private readonly now: () => number;
   private readonly dailyResetAt: (now: number) => number;
-  private readonly blockedUntil = new Map<AiProvider, number>();
+  private readonly blockedUntil = new Map<string, number>();
 
   constructor(options: RouterOptions = {}) {
     this.now = options.now || Date.now;
@@ -91,50 +91,54 @@ export class GroundedProviderRouter {
   async execute<T>(input: {
     primary: ProviderAttempt<T>;
     fallback?: ProviderAttempt<T>;
+    fallbacks?: ProviderAttempt<T>[];
   }): Promise<{
     value: T;
     provider: AiProvider;
     model: string;
     fallbackReason?: ApiFailureCategory;
   }> {
+    const attempts = [
+      input.primary,
+      ...(input.fallbacks || (input.fallback ? [input.fallback] : [])),
+    ];
     let primaryFailure: ApiFailure | undefined;
-    const blockedUntil = this.blockedUntil.get(input.primary.provider) || 0;
+    let lastFailure: ApiFailure | undefined;
 
-    if (blockedUntil <= this.now()) {
-      this.blockedUntil.delete(input.primary.provider);
-      try {
-        return {
-          value: await input.primary.run(),
-          provider: input.primary.provider,
-          model: input.primary.model,
-        };
-      } catch (error) {
-        primaryFailure = classifyApiFailure(error, 'forecast', input.primary.provider);
-        if (primaryFailure.category === 'quota_exhausted') {
-          this.blockedUntil.set(input.primary.provider, this.dailyResetAt(this.now()));
+    for (let index = 0; index < attempts.length; index += 1) {
+      const attempt = attempts[index];
+      const circuitKey = `${attempt.provider}:${attempt.model}`;
+      const blockedUntil = this.blockedUntil.get(circuitKey) || 0;
+      let failure: ApiFailure;
+
+      if (blockedUntil > this.now()) {
+        failure = classifyApiFailure(
+          { status: 429, message: 'Daily quota exhausted; model circuit remains open' },
+          'forecast',
+          attempt.provider,
+        );
+      } else {
+        this.blockedUntil.delete(circuitKey);
+        try {
+          return {
+            value: await attempt.run(),
+            provider: attempt.provider,
+            model: attempt.model,
+            fallbackReason: index > 0 ? primaryFailure?.category : undefined,
+          };
+        } catch (error) {
+          failure = classifyApiFailure(error, 'forecast', attempt.provider);
+          if (failure.category === 'quota_exhausted') {
+            this.blockedUntil.set(circuitKey, this.dailyResetAt(this.now()));
+          }
         }
       }
-    } else {
-      primaryFailure = classifyApiFailure(
-        { status: 429, message: 'Daily quota exhausted; provider circuit remains open' },
-        'forecast',
-        input.primary.provider,
-      );
+
+      if (index === 0) primaryFailure = failure;
+      lastFailure = failure;
+      if (!FALLBACK_CATEGORIES.has(failure.category)) throw failure;
     }
 
-    if (!input.fallback || !primaryFailure || !FALLBACK_CATEGORIES.has(primaryFailure.category)) {
-      throw primaryFailure;
-    }
-
-    try {
-      return {
-        value: await input.fallback.run(),
-        provider: input.fallback.provider,
-        model: input.fallback.model,
-        fallbackReason: primaryFailure.category,
-      };
-    } catch (error) {
-      throw classifyApiFailure(error, 'forecast', input.fallback.provider);
-    }
+    throw lastFailure || primaryFailure;
   }
 }

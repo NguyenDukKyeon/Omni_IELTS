@@ -140,7 +140,7 @@ export const MistakeNotebookModal: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs text-amber-100 hidden sm:block">
-                Thuật toán Lặp lại Ngắt quãng (SM-2 SRS) • Tự động phân loại 8 nhóm bẫy đề thi
+                Thuật toán Lặp lại Ngắt quãng FSRS-6 • Tự động phân loại 8 nhóm bẫy đề thi
               </p>
             </div>
           </div>
@@ -343,7 +343,7 @@ export const MistakeNotebookModal: React.FC = () => {
                                   : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
                               }`}
                             >
-                              SRS Hộp {m.srsStage}/5 {m.mastered ? '• Đã làm chủ' : ''}
+                              Cấp nhớ {m.srsStage}/5 {m.mastered ? '• Đã làm chủ' : ''}
                             </span>
 
                             <button data-ux-flow="grammar.learning"

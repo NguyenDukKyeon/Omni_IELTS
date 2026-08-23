@@ -192,7 +192,7 @@ export const DashboardView: React.FC = () => {
                   Ôn tập {dueVocab.length} Thẻ Từ Vựng
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-1">
-                  Thuật toán Leitner/SM-2 đã xếp lịch ôn để củng cố các từ vựng C1 vừa trích xuất vào trí nhớ dài hạn.
+                  Thuật toán FSRS-6 đã xếp lịch ôn thích ứng để củng cố từ vựng vừa trích xuất vào trí nhớ dài hạn.
                 </p>
               </div>
             </div>

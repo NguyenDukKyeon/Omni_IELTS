@@ -9,6 +9,6 @@ describe('AI task profiles', () => {
 
   it('never falls back across incompatible capabilities', () => {
     expect(getFallbackModels('tts')).not.toContain(AI_TASK_PROFILES.instant.model);
-    expect(getFallbackModels('grounded')).toEqual(['groq/compound-mini']);
+    expect(getFallbackModels('grounded')).toEqual(['gemini-3.5-flash-lite', 'groq/compound-mini']);
   });
 });

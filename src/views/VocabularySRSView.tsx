@@ -43,8 +43,20 @@ import { ReviewRating, getDueVocabCards, isDueForReview } from '../services/srsS
 import { playTextToSpeech, generateVocabCardApi } from '../services/aiTutor';
 import { curatedIELTSDecks, CuratedDeckMeta } from '../data/curatedDecks';
 import { VocabEnricherModal } from '../components/vocab/VocabEnricherModal';
+import {
+  ADAPTIVE_VOCAB_TIERS,
+  ADAPTIVE_VOCAB_TOPICS,
+  AdaptiveVocabTier,
+} from '../data/adaptiveVocabTopics';
+import { generateAdaptiveTopicDeck } from '../services/vocabularyService';
 
 type StudyMode = 'flashcard' | 'quiz' | 'dictation' | 'context' | 'pronunciation' | 'lexicon' | 'decks';
+
+const formatReviewInterval = (days: number) => {
+  if (days < 1 / 24) return `${Math.max(1, Math.round(days * 24 * 60))} phút`;
+  if (days < 1) return `${Math.max(1, Math.round(days * 24))} giờ`;
+  return `${Math.round(days)} ngày`;
+};
 
 export const VocabularySRSView: React.FC = () => {
   const {
@@ -114,6 +126,9 @@ export const VocabularySRSView: React.FC = () => {
   const [selectedCuratedDeck, setSelectedCuratedDeck] = useState<CuratedDeckMeta | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isEnricherOpen, setIsEnricherOpen] = useState<boolean>(false);
+  const [adaptiveTier, setAdaptiveTier] = useState<AdaptiveVocabTier>('foundation');
+  const [generatingTopicId, setGeneratingTopicId] = useState<string | null>(null);
+  const [adaptiveDeckError, setAdaptiveDeckError] = useState<string | null>(null);
 
   // AI Auto-Gen Form State in Add Modal
   const [inputWord, setInputWord] = useState('');
@@ -153,7 +168,7 @@ export const VocabularySRSView: React.FC = () => {
   const activeStudyQueue = currentFilteredCards.length > 0 ? currentFilteredCards : vocabCards;
   const currentCard: VocabCard | undefined = activeStudyQueue[cardIndex % Math.max(1, activeStudyQueue.length)];
 
-  // Leitner Memory Statistics
+  // FSRS-compatible progress buckets retained for a familiar mastery overview.
   const stage0Count = vocabCards.filter((c) => c.srsStage === 0).length;
   const stage12Count = vocabCards.filter((c) => c.srsStage >= 1 && c.srsStage <= 2).length;
   const stage34Count = vocabCards.filter((c) => c.srsStage >= 3 && c.srsStage <= 4).length;
@@ -188,6 +203,55 @@ export const VocabularySRSView: React.FC = () => {
     reviewVocabCard(currentCard.id, rating);
     setIsFlipped(false);
     setCardIndex((prev) => (prev + 1) % activeStudyQueue.length);
+  };
+
+  const handleGenerateAdaptiveDeck = async (topicId: string) => {
+    const topic = ADAPTIVE_VOCAB_TOPICS.find((item) => item.id === topicId);
+    if (!topic) return;
+    setGeneratingTopicId(topicId);
+    setAdaptiveDeckError(null);
+    try {
+      const generated = await generateAdaptiveTopicDeck(topicId, adaptiveTier, 6);
+      const deckName = `${topic.titleEn} · ${ADAPTIVE_VOCAB_TIERS[adaptiveTier].title}`;
+      const now = new Date().toISOString();
+      const existingWords = new Set(vocabCards.map((card) => card.word.trim().toLocaleLowerCase()));
+      const uniqueGeneratedCards = generated.cards.filter((card) => !existingWords.has(card.word.trim().toLocaleLowerCase()));
+      if (!uniqueGeneratedCards.length) throw new Error('Các từ vừa tạo đã có trong kho. Hãy thử chủ đề hoặc tầng khác.');
+      const cards: VocabCard[] = uniqueGeneratedCards.map((card, index) => ({
+        id: `adaptive_${topicId}_${adaptiveTier}_${Date.now()}_${index}`,
+        word: card.word,
+        phonetic: card.phonetic,
+        pos: card.pos,
+        definitionVi: card.definitionVi,
+        definitionEn: card.definitionEn,
+        definitionAcademicEn: card.definitionEn,
+        exampleEn: card.exampleEn,
+        exampleVi: card.exampleVi,
+        collocations: card.collocations,
+        wordFamily: card.wordFamily,
+        paraphrases: card.paraphrases,
+        synonyms: card.paraphrases.map((word) => ({ word, nuance: card.usageNoteVi })),
+        usageNoteVi: card.usageNoteVi,
+        cefrLevel: card.cefrLevel,
+        topicDeck: deckName,
+        originModule: 'curated_deck',
+        srsStage: 0,
+        intervalDays: 0,
+        nextReviewDate: now,
+        easeFactor: 2.5,
+        repetitions: 0,
+        mastered: false,
+        adaptiveProvenance: { topicId, tier: adaptiveTier, generatedAt: now },
+      }));
+      bulkAddVocabCards(cards);
+      setSelectedDeckFilter(deckName);
+      setCardIndex(0);
+      setStudyMode('flashcard');
+    } catch (error: any) {
+      setAdaptiveDeckError(error?.message || 'Không thể tạo deck thích ứng.');
+    } finally {
+      setGeneratingTopicId(null);
+    }
   };
 
   // Play pronunciation sound
@@ -492,11 +556,11 @@ export const VocabularySRSView: React.FC = () => {
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 font-display tracking-tight flex items-center gap-2">
                 <span>Kho Từ Vựng & Thuật Toán SRS</span>
                 <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800">
-                  SM-2 / Leitner 5
+                  FSRS-6
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                Ghi nhớ từ vựng học thuật C1/C2 vào trí nhớ dài hạn. Đa dạng 5 chế độ tương tác theo triết lý Mochi-SRS.
+                Lộ trình từ Foundation đến Advanced cho người học Band 3.0–9.0, với lịch ôn FSRS thích ứng theo trí nhớ.
               </p>
             </div>
           </div>
@@ -535,7 +599,7 @@ export const VocabularySRSView: React.FC = () => {
             }`}
           >
             <BookOpen className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <span>Bộ từ chuẩn IELTS ({curatedIELTSDecks.length})</span>
+            <span>Bộ từ theo chủ đề ({ADAPTIVE_VOCAB_TOPICS.length + curatedIELTSDecks.length})</span>
           </button>
 
           {/* Export Modal Trigger */}
@@ -583,12 +647,12 @@ export const VocabularySRSView: React.FC = () => {
           </div>
         </div>
 
-        {/* 4 Leitner Memory Bins */}
+        {/* 4 FSRS progress buckets */}
         <div className="md:col-span-8 p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
             <span className="flex items-center gap-1.5">
               <Zap className="w-4 h-4 text-amber-500" />
-              <span>Phân Bố 4 Cấp Độ Bộ Nhớ Dài Hạn (Leitner Memory Bins)</span>
+              <span>Phân Bố 4 Cấp Độ Bộ Nhớ Dài Hạn (FSRS Progress)</span>
             </span>
             <span className="text-slate-700 dark:text-slate-300 font-normal">
               Mục tiêu: Đưa 100% từ vào Hộp 4
@@ -921,7 +985,7 @@ export const VocabularySRSView: React.FC = () => {
                 {/* Bottom Bar inside Card */}
                 <div className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 pt-2 border-t border-slate-100 dark:border-slate-800/80">
                   <span>
-                    Trạng thái SRS: <strong>Hộp {currentCard.srsStage}</strong> ({currentCard.intervalDays} ngày)
+                    Trạng thái FSRS: <strong>Cấp nhớ {currentCard.srsStage}</strong> ({formatReviewInterval(currentCard.intervalDays)})
                   </span>
                   <button data-ux-flow="vocabulary.srs"
                     type="button"
@@ -937,7 +1001,7 @@ export const VocabularySRSView: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4 SM-2 SRS FEEDBACK BUTTONS */}
+              {/* 4 FSRS FEEDBACK BUTTONS */}
               <div className="grid grid-cols-4 gap-2 pt-2">
                 {/* 1. Again */}
                 <button data-ux-flow="vocabulary.srs"
@@ -1360,15 +1424,66 @@ export const VocabularySRSView: React.FC = () => {
       {/* 9. MODE 6: CURATED STANDARD IELTS DECKS EXPLORER */}
       {studyMode === 'decks' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                Các Bộ Từ Vựng IELTS Chuẩn Cambridge
+                20 chủ đề thích ứng từ Band 3.0 đến 9.0
               </h2>
               <p className="text-xs text-slate-500">
-                Nạp sẵn các bộ từ academic và collocations trọng điểm để học viên mới có thể bắt đầu ngay.
+                Chọn tầng phù hợp; AI tạo từ phổ biến, word family, paraphrase, phát âm và collocation theo đúng chủ đề.
               </p>
             </div>
+            <div className="flex flex-wrap gap-2" aria-label="Tầng năng lực từ vựng">
+              {(Object.values(ADAPTIVE_VOCAB_TIERS)).map((tier) => (
+                <button
+                  key={tier.id}
+                  type="button"
+                  data-ux-flow="vocabulary.srs"
+                  aria-pressed={adaptiveTier === tier.id}
+                  onClick={() => setAdaptiveTier(tier.id)}
+                  className={`rounded-xl border px-3 py-2 text-left text-xs font-bold ${adaptiveTier === tier.id ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'}`}
+                >
+                  <span className="block">{tier.title}</span>
+                  <span className="block text-[10px] opacity-75">{tier.bandRange} · {tier.cefrRange}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {adaptiveDeckError && (
+            <div role="alert" className="flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-800 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
+              <AlertCircle className="h-4 w-4" /> {adaptiveDeckError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {ADAPTIVE_VOCAB_TOPICS.map((topic) => (
+              <article key={topic.id} className="flex flex-col justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+                <div className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">{topic.titleEn}</div>
+                  <h3 className="font-bold text-slate-900 dark:text-slate-100">{topic.titleVi}</h3>
+                  <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{topic.description}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {topic.seedConcepts.map((concept) => <span key={concept} className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">{concept}</span>)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-ux-flow="vocabulary.srs"
+                  aria-label={`Tạo deck ${topic.titleEn} – ${ADAPTIVE_VOCAB_TIERS[adaptiveTier].title}`}
+                  disabled={generatingTopicId !== null}
+                  onClick={() => handleGenerateAdaptiveDeck(topic.id)}
+                  className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {generatingTopicId === topic.id ? 'Đang tạo & kiểm tra…' : `Tạo deck ${ADAPTIVE_VOCAB_TIERS[adaptiveTier].title}`}
+                </button>
+              </article>
+            ))}
+          </div>
+
+          <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
+            <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">4 bộ curated học ngay không cần AI</h2>
+            <p className="mt-1 text-xs text-slate-500">Các bộ AWL, Environment, Technology và Academic Collocations được đóng gói sẵn.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1469,6 +1584,8 @@ export const VocabularySRSView: React.FC = () => {
               className="px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold"
             >
               <option value="all">Tất cả CEFR</option>
+              <option value="A2">Level A2</option>
+              <option value="B1">Level B1</option>
               <option value="B2">Level B2</option>
               <option value="C1">Level C1</option>
               <option value="C2">Level C2</option>
@@ -1489,7 +1606,7 @@ export const VocabularySRSView: React.FC = () => {
                       {card.pos} • {card.cefrLevel || 'C1'}
                     </span>
                     <span className="text-[10px] font-bold text-slate-700 dark:text-slate-300">
-                      Hộp {card.srsStage} ({card.intervalDays}d)
+                      Cấp {card.srsStage} ({formatReviewInterval(card.intervalDays)})
                     </span>
                   </div>
 
@@ -1704,7 +1821,7 @@ export const VocabularySRSView: React.FC = () => {
                 <span className="text-xs font-bold bg-blue-600 px-2.5 py-0.5 rounded-full">
                   {selectedCardDetail.pos} • CEFR {selectedCardDetail.cefrLevel || 'C1'}
                 </span>
-                <span className="text-xs text-slate-400">Hộp SRS: {selectedCardDetail.srsStage}</span>
+                <span className="text-xs text-slate-400">Cấp nhớ FSRS: {selectedCardDetail.srsStage}</span>
               </div>
               <button data-ux-flow="vocabulary.srs"
                 onClick={() => setSelectedCardDetail(null)}

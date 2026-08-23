@@ -488,7 +488,7 @@ export const OnboardingModal: React.FC = () => {
                   <div className="flex items-start gap-2 p-2.5 bg-stone-50 dark:bg-stone-800/60 rounded-xl border border-stone-200/70 dark:border-stone-700/70">
                     <Target className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                     <div>
-                      <strong className="text-stone-900 dark:text-stone-100">Sổ Tay Lỗi Sai Hợp Nhất:</strong> Tự động gom lỗi từ bài thi để ôn tập theo thuật toán SuperMemo SM-2.
+                      <strong className="text-stone-900 dark:text-stone-100">Sổ Tay Lỗi Sai Hợp Nhất:</strong> Tự động gom lỗi từ bài thi để ôn tập theo thuật toán FSRS-6.
                     </div>
                   </div>
                 </div>
