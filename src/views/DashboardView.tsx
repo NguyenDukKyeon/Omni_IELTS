@@ -22,6 +22,8 @@ import {
 import { useApp } from '../context/AppContext';
 import { getDueVocabCards, getDueMistakes } from '../services/srsScheduler';
 import { calculateLevel } from '../services/gamification';
+import { SpeedDrillArenaModal } from '../components/drills/SpeedDrillArenaModal';
+import { ChallengeType } from '../types';
 
 export const DashboardView: React.FC = () => {
   const {
@@ -40,6 +42,9 @@ export const DashboardView: React.FC = () => {
   const dueVocab = getDueVocabCards(vocabCards);
   const dueMistakes = getDueMistakes(mistakes);
   const { level, progressPercent } = calculateLevel(profile.xp);
+
+  const [isSpeedDrillOpen, setIsSpeedDrillOpen] = React.useState<boolean>(false);
+  const [speedDrillType, setSpeedDrillType] = React.useState<ChallengeType>('paraphrase_blitz');
 
   // Calculate target exam countdown
   const examDateObj = new Date(profile.examDate);
@@ -257,6 +262,58 @@ export const DashboardView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* 60-Second Speed Drill Arena Quick-Launcher */}
+        <div className="mt-4 p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center text-2xl shadow-inner shrink-0">
+              ⚡
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-black text-white">
+                  IELTS 60-Second Speed Drill Arena
+                </h3>
+                <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-white/20 border border-white/30">
+                  Micro-Challenge
+                </span>
+              </div>
+              <p className="text-xs text-amber-100 mt-0.5">
+                Thử thách phản xạ cực nhanh: Paraphrase Blitz • Cohesive Jigsaw • Collocation Match
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                setSpeedDrillType('paraphrase_blitz');
+                setIsSpeedDrillOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs border border-white/30 transition-all"
+            >
+              ⚡ Paraphrase
+            </button>
+            <button
+              onClick={() => {
+                setSpeedDrillType('cohesive_jigsaw');
+                setIsSpeedDrillOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs border border-white/30 transition-all"
+            >
+              🧩 Jigsaw
+            </button>
+            <button
+              onClick={() => {
+                setSpeedDrillType('collocation_match');
+                setIsSpeedDrillOpen(true);
+              }}
+              className="px-3.5 py-2 rounded-xl bg-white text-slate-900 hover:bg-amber-100 font-black text-xs shadow-sm transition-all"
+            >
+              🎯 Collocation
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -436,6 +493,13 @@ export const DashboardView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 60-Second Speed Drill Arena Modal */}
+      <SpeedDrillArenaModal
+        isOpen={isSpeedDrillOpen}
+        onClose={() => setIsSpeedDrillOpen(false)}
+        initialChallengeType={speedDrillType}
+      />
     </div>
   );
 };
