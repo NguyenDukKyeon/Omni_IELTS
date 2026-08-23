@@ -544,6 +544,9 @@ export const MediaLabView: React.FC = () => {
                 <MediaVocabDrawer
                   vocabList={selectedSession.extractedVocab}
                   sessionTitle={selectedSession.title}
+                  topic={selectedSession.topic}
+                  transcriptText={selectedSession.transcriptSegments.map((segment) => segment.text).join(' ')}
+                  onVocabExtracted={(items) => updateMediaSession({ ...selectedSession, extractedVocab: items })}
                 />
               )}
             </div>
@@ -572,6 +575,10 @@ export const MediaLabView: React.FC = () => {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onSessionCreated={handleSessionCreated}
+        onFallbackRequested={() => {
+          setIsImportModalOpen(false);
+          setIsAudioTranscribeOpen(true);
+        }}
       />
 
       {/* AI Audio Transcription Modal */}

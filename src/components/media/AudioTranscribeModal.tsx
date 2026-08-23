@@ -29,6 +29,8 @@ import {
   VocabCard,
 } from '../../types';
 import { transcribeAudioAndSegmentApi } from '../../services/mediaService';
+import { segmentUntimedTranscript } from '../../lib/mediaImport';
+import { parseTimedCaptionText } from '../../lib/transcriptNormalizer';
 import { speakExaminerText } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
 import { XP_REWARDS } from '../../services/gamification';
@@ -46,13 +48,15 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 }) => {
   const { addVocabCard, awardXP } = useApp();
 
-  const [inputMode, setInputMode] = useState<'upload' | 'record'>('upload');
+  const [inputMode, setInputMode] = useState<'upload' | 'record' | 'captions'>('upload');
   const [topicContext, setTopicContext] = useState<string>('IELTS Academic Audio');
 
   // File Upload State
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioBase64, setAudioBase64] = useState<string>('');
   const [audioMimeType, setAudioMimeType] = useState<string>('audio/mp3');
+  const [captionText, setCaptionText] = useState('');
+  const [captionFileName, setCaptionFileName] = useState('');
 
   // Mic Recording State
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -76,6 +80,8 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
       setErrorMessage(null);
       setAudioFile(null);
       setAudioBase64('');
+      setCaptionText('');
+      setCaptionFileName('');
       setIsRecording(false);
       setPlayingSegmentIndex(null);
       setSyncedVocab({});
@@ -100,6 +106,22 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
       setAudioBase64(base64Str);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleCaptionFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorMessage('File phụ đề vượt giới hạn 2 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCaptionText(String(reader.result || ''));
+      setCaptionFileName(file.name);
+      setErrorMessage(null);
+    };
+    reader.readAsText(file);
   };
 
   // Start Mic Recording
@@ -157,6 +179,26 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
     setSyncedVocab({});
 
     try {
+      if (inputMode === 'captions') {
+        const segments = captionText.includes('-->')
+          ? parseTimedCaptionText(captionText)
+          : segmentUntimedTranscript(captionText);
+        if (!segments.length) throw new Error('Hãy tải VTT/SRT hoặc dán transcript có nội dung trước.');
+        setResult({
+          promptVersion: captionText.includes('-->') ? 'user-caption-v1' : 'user-transcript-v1',
+          segments: segments.map((segment) => ({
+            startSec: segment.start,
+            endSec: segment.end,
+            speaker: 'Original audio',
+            text: segment.text,
+            confidence: captionText.includes('-->') ? 'high' : 'medium',
+          })),
+          detectedVocabulary: [],
+        });
+        awardXP(XP_REWARDS.EXERCISE_COMPLETED, 'Nhập transcript do người học sở hữu');
+        return;
+      }
+
       let b64 = audioBase64;
       let mime = audioMimeType;
       let ctx = topicContext;
@@ -236,8 +278,8 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 
     const newSession: MediaSession = {
       id: `media_audio_${Date.now()}`,
-      title: `Bài Luyện Audio: ${topicContext || 'Học Thuật IELTS'}`,
-      mediaType: 'audio',
+      title: `${inputMode === 'captions' ? 'Bài Luyện Transcript' : 'Bài Luyện Audio'}: ${topicContext || 'Học Thuật IELTS'}`,
+      mediaType: inputMode === 'captions' ? 'article_audio' : 'audio',
       mediaUrl: audioBase64 || '',
       topic: topicContext || 'Academic Listening',
       level: 'Band 7.0-8.0',
@@ -252,6 +294,9 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
         phonetic: '',
         cefrLevel: 'C1',
       })),
+      transcriptVersion: inputMode === 'captions'
+        ? { rawSource: 'user-upload', normalizerVersion: result.promptVersion, importedAt: new Date().toISOString() }
+        : undefined,
     };
 
     if (onSessionCreated) {
@@ -321,6 +366,17 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
           >
             <Mic className="w-3.5 h-3.5" />
             <span>Thu Âm Trực Tiếp (Mic)</span>
+          </button>
+          <button data-ux-flow="media.learning"
+            type="button"
+            onClick={() => setInputMode('captions')}
+            className={`px-3.5 py-1.5 rounded-xl font-bold transition-all ${
+              inputMode === 'captions'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            VTT / SRT / Dán transcript
           </button>
         </div>
 
@@ -394,6 +450,37 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
             </div>
           )}
 
+          {inputMode === 'captions' && (
+            <div className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900/50 dark:bg-sky-950/30">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  data-ux-flow="media.learning"
+                  id="caption-file-input"
+                  type="file"
+                  accept=".vtt,.srt,.txt,text/vtt,application/x-subrip,text/plain"
+                  onChange={handleCaptionFileUpload}
+                  className="hidden"
+                />
+                <label htmlFor="caption-file-input" className="cursor-pointer rounded-xl bg-sky-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-sky-800">
+                  Tải VTT / SRT / TXT
+                </label>
+                {captionFileName && <span className="text-xs text-sky-800 dark:text-sky-200">{captionFileName}</span>}
+              </div>
+              <textarea
+                data-ux-flow="media.learning"
+                aria-label="Dán transcript hoặc nội dung VTT SRT"
+                value={captionText}
+                onChange={(event) => setCaptionText(event.target.value)}
+                rows={7}
+                placeholder="Dán transcript, VTT hoặc SRT tại đây..."
+                className="w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-sky-900 dark:bg-slate-950 dark:text-white"
+              />
+              <p className="text-[11px] text-slate-500">
+                VTT/SRT giữ timestamp gốc. Transcript thuần sẽ được chia câu với mốc thời gian ước tính để bạn có thể bắt đầu luyện ngay.
+              </p>
+            </div>
+          )}
+
           {/* Context Topic Input */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -420,7 +507,11 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
               ) : (
                 <Sparkles className="w-4 h-4" />
               )}
-              <span>{isLoading ? 'AI đang phiên âm & chia câu...' : 'Phiên Âm & Phân Đoạn Timestamp'}</span>
+              <span>{isLoading
+                ? 'Đang xử lý & chia câu...'
+                : inputMode === 'captions'
+                  ? 'Tạo bài học từ transcript'
+                  : 'Phiên Âm & Phân Đoạn Timestamp'}</span>
             </button>
           </div>
         </div>

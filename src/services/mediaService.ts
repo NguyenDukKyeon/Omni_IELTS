@@ -5,7 +5,10 @@ import {
   AudioTranscribeInput,
   AudioTranscribeResult,
   MediaTranscriptSegment,
+  MediaCapabilities,
+  MediaImportJob,
 } from '../types';
+import { getGeminiRequestHeaders } from './aiTutor';
 
 export interface ProcessYouTubeResponse {
   session?: MediaSession;
@@ -25,25 +28,48 @@ export interface ExtractVocabResponse {
  * Process a YouTube URL via server backend with yt-dlp/transcript and Gemini
  */
 export async function processYouTubeUrl(
-  url: string
+  url: string,
+  onProgress?: (job: MediaImportJob) => void,
 ): Promise<MediaSession> {
   const response = await fetch('/api/media/youtube/import', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getGeminiRequestHeaders(),
     body: JSON.stringify({ url }),
   });
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error || `Lỗi xử lý YouTube (${response.status})`);
+    throw new Error(errData.message || errData.error || `Lỗi xử lý YouTube (${response.status})`);
   }
 
-  const data: ProcessYouTubeResponse = await response.json();
-  if (!data.session) {
-    throw new Error('Không nhận được dữ liệu phiên học từ server');
+  const data: ProcessYouTubeResponse | MediaImportJob = await response.json();
+  if ('session' in data && data.session) return data.session;
+  if (!('id' in data)) throw new Error('Không nhận được mã tác vụ nhập media từ server.');
+
+  let job = data;
+  onProgress?.(job);
+  const deadline = Date.now() + 4 * 60 * 1000;
+  while (job.phase !== 'ready' && job.phase !== 'failed') {
+    if (Date.now() >= deadline) throw new Error('Tác vụ nhập media quá thời gian chờ. Hãy thử lại hoặc dùng file audio/phụ đề.');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const statusResponse = await fetch(`/api/media/imports/${encodeURIComponent(job.id)}`);
+    if (!statusResponse.ok) {
+      const body = await statusResponse.json().catch(() => ({}));
+      throw new Error(body.message || 'Không thể đọc trạng thái nhập media.');
+    }
+    job = await statusResponse.json();
+    onProgress?.(job);
   }
 
-  return data.session;
+  if (job.phase === 'failed') throw new Error(job.failure?.message || 'Không thể nhập video YouTube.');
+  if (!job.session) throw new Error('Tác vụ hoàn tất nhưng không có phiên học hợp lệ.');
+  return job.session;
+}
+
+export async function getMediaCapabilities(): Promise<MediaCapabilities> {
+  const response = await fetch('/api/media/capabilities');
+  if (!response.ok) throw new Error('Không thể kiểm tra khả năng nhập media của máy chủ.');
+  return response.json();
 }
 
 export async function saveMediaTranscript(
@@ -99,7 +125,7 @@ export async function extractMediaVocab(
 ): Promise<MediaExtractedVocab[]> {
   const response = await fetch('/api/media/extract-vocab', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getGeminiRequestHeaders(),
     body: JSON.stringify({ transcriptText, topic }),
   });
 

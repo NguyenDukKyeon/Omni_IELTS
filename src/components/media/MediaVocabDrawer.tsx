@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BookOpen,
   Plus,
@@ -11,17 +11,39 @@ import { MediaExtractedVocab, VocabCard } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { playTextToSpeech } from '../../services/aiTutor';
 import { XP_REWARDS } from '../../services/gamification';
+import { extractMediaVocab } from '../../services/mediaService';
 
 interface MediaVocabDrawerProps {
   vocabList?: MediaExtractedVocab[];
   sessionTitle: string;
+  transcriptText?: string;
+  topic?: string;
+  onVocabExtracted?: (items: MediaExtractedVocab[]) => void;
 }
 
 export const MediaVocabDrawer: React.FC<MediaVocabDrawerProps> = ({
   vocabList = [],
   sessionTitle,
+  transcriptText = '',
+  topic,
+  onVocabExtracted,
 }) => {
   const { vocabCards, addVocabCard, awardXP } = useApp();
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+
+  const handleExtract = async () => {
+    if (!transcriptText.trim() || !onVocabExtracted) return;
+    setIsExtracting(true);
+    setExtractError(null);
+    try {
+      onVocabExtracted(await extractMediaVocab(transcriptText, topic));
+    } catch (error: any) {
+      setExtractError(error?.message || 'Không thể trích xuất từ vựng lúc này.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
 
   const isWordSaved = (word: string) => {
     return vocabCards.some((c) => c.word.toLowerCase() === word.toLowerCase());
@@ -61,6 +83,18 @@ export const MediaVocabDrawer: React.FC<MediaVocabDrawerProps> = ({
         <p className="text-xs text-stone-600 dark:text-stone-400">
           Chưa có từ vựng học thuật nào được trích xuất cho bài này.
         </p>
+        {onVocabExtracted && transcriptText.trim() && (
+          <button
+            type="button"
+            data-ux-flow="media.learning"
+            onClick={handleExtract}
+            disabled={isExtracting}
+            className="rounded-xl bg-sky-700 px-4 py-2 text-xs font-bold text-white hover:bg-sky-800 disabled:opacity-50"
+          >
+            {isExtracting ? 'AI đang trích xuất...' : 'Trích xuất từ vựng bằng AI (dùng quota)'}
+          </button>
+        )}
+        {extractError && <p className="text-xs text-rose-700 dark:text-rose-300">{extractError}</p>}
       </div>
     );
   }

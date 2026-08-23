@@ -154,3 +154,8 @@ export function alignTranscriptSentences(cues: NormalizedTranscriptSegment[]): N
 export function normalizeAndAlignVtt(vtt: string) {
   return alignTranscriptSentences(splitTimedSentences(rollingCaptionDeltas(parseVttCues(vtt))));
 }
+
+/** Parse user-owned VTT or SRT captions using the same timestamp normalizer. */
+export function parseTimedCaptionText(captions: string) {
+  return normalizeAndAlignVtt(captions);
+}

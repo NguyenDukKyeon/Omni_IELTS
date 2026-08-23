@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Youtube,
@@ -10,14 +10,25 @@ import {
   ExternalLink,
   Layers,
 } from 'lucide-react';
-import { processYouTubeUrl } from '../../services/mediaService';
-import { MediaSession } from '../../types';
+import { getMediaCapabilities, processYouTubeUrl } from '../../services/mediaService';
+import { MediaCapabilities, MediaImportJob, MediaSession } from '../../types';
 
 interface YouTubeUrlInputModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSessionCreated: (session: MediaSession) => void;
+  onFallbackRequested?: () => void;
 }
+
+const IMPORT_PHASE_LABELS: Record<MediaImportJob['phase'], string> = {
+  probing: 'Đang kiểm tra video và metadata...',
+  captions: 'Đang lấy phụ đề tiếng Anh đầy đủ...',
+  normalizing: 'Đang khử caption lặp và chuẩn hóa từng câu...',
+  transcribing: 'Video không có caption; đang chép lời từ audio thật...',
+  validating: 'Đang kiểm tra timestamp và độ phủ transcript...',
+  ready: 'Transcript đã sẵn sàng.',
+  failed: 'Không thể hoàn tất tác vụ nhập media.',
+};
 
 const PRESET_VIDEOS = [
   {
@@ -38,11 +49,23 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
   isOpen,
   onClose,
   onSessionCreated,
+  onFallbackRequested,
 }) => {
   const [url, setUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingStep, setLoadingStep] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [capabilities, setCapabilities] = useState<MediaCapabilities | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    getMediaCapabilities()
+      .then((value) => active && setCapabilities(value))
+      .catch(() => active && setCapabilities(null));
+    return () => { active = false; };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -52,21 +75,14 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
 
     setIsLoading(true);
     setErrorMsg(null);
-    setLoadingStep('Đang kết nối YouTube & trích xuất transcript...');
+    setProgress(0);
+    setLoadingStep('Đang tạo tác vụ nhập media...');
 
     try {
-      // Step timer updates for realistic smooth UX
-      const timer1 = setTimeout(() => {
-        setLoadingStep('Gemini AI đang nhận diện câu & gắn mốc thời gian (timestamp)...');
-      }, 1500);
-
-      const timer2 = setTimeout(() => {
-        setLoadingStep('Đang dịch song ngữ & trích xuất từ vựng học thuật C1/C2...');
-      }, 3200);
-
-      const session = await processYouTubeUrl(url.trim());
-      clearTimeout(timer1);
-      clearTimeout(timer2);
+      const session = await processYouTubeUrl(url.trim(), (job) => {
+        setLoadingStep(IMPORT_PHASE_LABELS[job.phase]);
+        setProgress(job.progress);
+      });
 
       onSessionCreated(session);
       setUrl('');
@@ -100,7 +116,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
                 Nhập Video YouTube Bất Kỳ
               </h2>
               <p className="text-xs text-stone-600 dark:text-stone-400 mt-0.5">
-                AI sẽ trích xuất phụ đề, đồng bộ từng câu và phân tích từ vựng để bạn luyện tập
+                Hệ thống lấy transcript đầy đủ; dịch và từ vựng AI chỉ chạy khi bạn yêu cầu
               </p>
             </div>
           </div>
@@ -124,6 +140,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
               <div className="relative">
                 <input data-ux-flow="media.learning"
                   type="text"
+                  aria-label="Đường dẫn URL Video YouTube"
                   required
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
@@ -138,7 +155,25 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
             {errorMsg && (
               <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 flex items-start gap-2.5 text-xs text-rose-800 dark:text-rose-200">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{errorMsg}</span>
+                <div className="space-y-2">
+                  <span>{errorMsg}</span>
+                  {onFallbackRequested && (
+                    <button
+                      type="button"
+                      data-ux-flow="media.learning"
+                      onClick={onFallbackRequested}
+                      className="block rounded-lg border border-rose-300 px-2.5 py-1.5 font-bold hover:bg-rose-100 dark:border-rose-800 dark:hover:bg-rose-950"
+                    >
+                      Dùng audio, VTT/SRT hoặc transcript
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {capabilities && !capabilities.youtubeImport.available && (
+              <div className="p-3.5 rounded-xl border border-amber-300 bg-amber-50 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                {capabilities.youtubeImport.reason} Bạn vẫn có thể dùng file audio của mình.
               </div>
             )}
 
@@ -149,12 +184,15 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
                   <span>Hệ thống đang xử lý bài học...</span>
                 </div>
                 <p className="text-xs text-stone-600 dark:text-stone-400">{loadingStep}</p>
+                <div className="h-1.5 overflow-hidden rounded-full bg-amber-100 dark:bg-amber-900/50">
+                  <div className="h-full bg-amber-600 transition-[width]" style={{ width: `${progress}%` }} />
+                </div>
               </div>
             )}
 
             <button data-ux-flow="media.learning"
               type="submit"
-              disabled={isLoading || !url.trim()}
+              disabled={isLoading || !url.trim() || capabilities?.youtubeImport.available === false}
               className="w-full py-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
             >
               {isLoading ? (
