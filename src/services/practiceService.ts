@@ -9,6 +9,7 @@ import {
   SpeakingPracticePart,
   SpeakingPracticePrompt,
   SpeakingEvaluationResult,
+  EssayUpgradeResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -87,6 +88,26 @@ export async function evaluateWritingPracticeApi(
   const data = await res.json();
   return data.evaluation;
 }
+
+export async function upgradeEssayBandApi(params: {
+  promptStatement: string;
+  originalEssay: string;
+  taskType: string;
+  targetBand?: number;
+  userCurrentBand?: number;
+}): Promise<EssayUpgradeResult> {
+  const res = await fetch('/api/gemini/essay-upgrader', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Lỗi nâng cấp bài viết IELTS.');
+  }
+  return await res.json();
+}
+
 
 export async function evaluateSpeakingPracticeApi(
   questionPrompt: string,
@@ -216,3 +237,31 @@ export function speakExaminerText(
     window.speechSynthesis.cancel();
   };
 }
+
+export const playTextToSpeech = speakExaminerText;
+
+export async function fetchRealExamForecastApi(params: {
+  skill?: string;
+  council?: string;
+  customQuery?: string;
+  timeframe?: string;
+}): Promise<import('../types').ForecastGroundingResponse> {
+  const res = await fetch('/api/gemini/forecast-grounding', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      skill: params.skill || 'all',
+      council: params.council || 'all',
+      customQuery: params.customQuery || '',
+      timeframe: params.timeframe || 'latest',
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Lỗi tra cứu dữ liệu đề thi thật và dự đoán.');
+  }
+
+  const data = await res.json();
+  return data;
+}
+

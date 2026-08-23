@@ -25,6 +25,7 @@ import {
   evaluateWritingPracticeApi,
 } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
+import { EssayBandUpgrader } from './EssayBandUpgrader';
 
 const WRITING_TASK_TYPES: Array<{
   type: WritingPracticeType;
@@ -149,6 +150,7 @@ export const WritingQuestionModule: React.FC = () => {
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [evaluation, setEvaluation] = useState<WritingEvaluationResult | null>(null);
+  const [writingSubModule, setWritingSubModule] = useState<'mock_practice' | 'band_upgrader'>('band_upgrader');
 
   // Timer State
   const [secondsRemaining, setSecondsRemaining] = useState<number>(40 * 60);
@@ -163,6 +165,59 @@ export const WritingQuestionModule: React.FC = () => {
     }
     return () => clearInterval(interval);
   }, [isTimerRunning, secondsRemaining]);
+
+  // Listen for real exam forecast prompts
+  useEffect(() => {
+    const handleLoadPrompt = (data: any) => {
+      if (!data) return;
+      const isTask1 = data.taskType === 'task1_academic' || data.taskType === 'task1_general';
+      const targetTask = WRITING_TASK_TYPES.find((t) => t.type === data.taskType) || (isTask1 ? WRITING_TASK_TYPES[0] : WRITING_TASK_TYPES[5]);
+      setSelectedTask(targetTask);
+      setPrompt({
+        id: data.id || `custom_forecast_${Date.now()}`,
+        type: data.taskType || 'task2_essay',
+        category: data.category || 'Opinion Essay',
+        title: data.title || 'Đề thi thật IELTS Real Exam',
+        topic: 'IELTS Real Exam Forecast 2026',
+        difficulty: 'Band 7.0-8.0',
+        targetWords: isTask1 ? 150 : 250,
+        timeLimitMinutes: isTask1 ? 20 : 40,
+        promptStatement: data.promptStatement || '',
+        highBandVocabSuggestions: [],
+        sampleBand9Structure: {
+          overviewOrThesis: 'Xác định rõ ràng lập trường / xu hướng tổng quan trong đề thi thật.',
+          body1Strategy: 'Phát triển luận điểm 1 theo công thức PEEL với dẫn chứng sắc bén.',
+          body2Strategy: 'Phát triển luận điểm 2, phản biện hoặc mở rộng hàm ý vĩ mô.',
+        },
+      });
+      setEvaluation(null);
+      setEssayText('');
+      setSecondsRemaining((isTask1 ? 20 : 40) * 60);
+      setIsTimerRunning(true);
+    };
+
+    // Check on mount
+    const saved = sessionStorage.getItem('omni_pending_writing_prompt');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        handleLoadPrompt(parsed);
+        sessionStorage.removeItem('omni_pending_writing_prompt');
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    const listener = (e: any) => {
+      if (e.detail) {
+        handleLoadPrompt(e.detail);
+      }
+    };
+
+    window.addEventListener('omni_load_writing_prompt', listener);
+    return () => window.removeEventListener('omni_load_writing_prompt', listener);
+  }, []);
+
 
   const wordCount = essayText.trim() ? essayText.trim().split(/\s+/).length : 0;
   const isUnderWordCount = wordCount < prompt.targetWords;
@@ -288,8 +343,45 @@ export const WritingQuestionModule: React.FC = () => {
 
   return (
     <div id="ielts_writing_module" className="space-y-6">
-      {/* 1. Selector bar: Task 1 Academic / General & Task 2 Essays */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
+      {/* Top Module Sub-navigation Tabs */}
+      <div className="flex items-center justify-between flex-wrap gap-3 bg-white dark:bg-slate-800 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setWritingSubModule('band_upgrader')}
+            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-2 transition-all ${
+              writingSubModule === 'band_upgrader'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            <Zap className="w-4 h-4 text-amber-300" />
+            <span>Nâng Cấp Bài Viết Từng Bước (Band 5.5 ➔ 7.0 ➔ 8.5+)</span>
+          </button>
+
+          <button
+            onClick={() => setWritingSubModule('mock_practice')}
+            className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-2 transition-all ${
+              writingSubModule === 'mock_practice'
+                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            <PenTool className="w-4 h-4" />
+            <span>Luyện Viết & Chấm Điểm Cambridge (Task 1 & 2)</span>
+          </button>
+        </div>
+      </div>
+
+      {writingSubModule === 'band_upgrader' ? (
+        <EssayBandUpgrader
+          initialPrompt={prompt.promptStatement}
+          initialEssay={essayText}
+          initialTaskType={prompt.type}
+        />
+      ) : (
+        <div className="space-y-6">
+          {/* 1. Selector bar: Task 1 Academic / General & Task 2 Essays */}
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
           <div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -716,10 +808,32 @@ export const WritingQuestionModule: React.FC = () => {
                   </p>
                 </div>
               )}
+
+              {/* Direct Link to Band Upgrader */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-900 to-slate-900 text-white flex items-center justify-between gap-3 border border-indigo-700/60 shadow-md">
+                <div>
+                  <h4 className="font-bold text-sm text-white flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                    Muốn biến bài viết này thành tuyệt tác Band 8.5+?
+                  </h4>
+                  <p className="text-xs text-indigo-200 mt-0.5">
+                    Chuyển sang phân hệ Nâng Cấp Từng Bước để xem bản Diff 3 cột & bộ Collocations C1/C2.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setWritingSubModule('band_upgrader')}
+                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shadow-md transition-all"
+                >
+                  <span>Mở AI Band Upgrader</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
+        </div>
+      )}
     </div>
   );
 };

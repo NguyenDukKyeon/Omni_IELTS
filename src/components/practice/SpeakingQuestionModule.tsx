@@ -136,6 +136,68 @@ export const SpeakingQuestionModule: React.FC = () => {
         recognitionRef.current = recognition;
       }
     }
+
+    // Check for pending speaking prompt from Forecast Live Hub
+    const handleLoadSpeakingPrompt = (data: any) => {
+      if (!data) return;
+      const isPart1 = data.part === 'speaking_part1';
+      const isPart3 = data.part === 'speaking_part3';
+      const targetPart: SpeakingPracticePart = isPart1
+        ? 'part1_qa'
+        : isPart3
+        ? 'part3_deep_discussion'
+        : 'part2_cue_card';
+
+      setSelectedPart(targetPart);
+      setPrompt({
+        id: data.id || `custom_speaking_${Date.now()}`,
+        part: targetPart,
+        title: data.title || 'Đề thi thật IELTS Speaking Real Exam',
+        topic: 'IELTS Real Exam Forecast 2026',
+        difficulty: 'Band 7.0-8.0',
+        examinerPersona: 'Dr. Jonathan Vance - Cambridge Senior Speaking Examiner',
+        cueCard: {
+          prompt: data.promptStatement || 'Describe a topic from real exam',
+          bulletPoints: data.cueCardPoints || [
+            'What it is and when it occurred',
+            'Who was involved',
+            'How you felt about it',
+            'And explain why it made a lasting impression on you',
+          ],
+          prepTimeSeconds: 60,
+          speakingTimeSeconds: 120,
+          keyIdeasVi: [
+            'Phát triển ý mạch lạc theo trình tự thời gian hoặc nguyên nhân - kết quả',
+            'Ứng dụng cụm từ Collocations C1/C2 tự nhiên',
+          ],
+        },
+      });
+      setEvaluation(null);
+      setLiveTranscript('');
+      setPrepNotes('');
+      setPrepSeconds(60);
+      setSpeakingSeconds(120);
+    };
+
+    const saved = sessionStorage.getItem('omni_pending_speaking_prompt');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        handleLoadSpeakingPrompt(parsed);
+        sessionStorage.removeItem('omni_pending_speaking_prompt');
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    const listener = (e: any) => {
+      if (e.detail) {
+        handleLoadSpeakingPrompt(e.detail);
+      }
+    };
+
+    window.addEventListener('omni_load_speaking_prompt', listener);
+    return () => window.removeEventListener('omni_load_speaking_prompt', listener);
   }, []);
 
   // Timer countdowns for Cue Card

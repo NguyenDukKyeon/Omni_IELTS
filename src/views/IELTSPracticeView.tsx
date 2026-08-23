@@ -8,17 +8,22 @@ import {
   Sparkles,
   BookMarked,
   Zap,
+  Globe2,
+  Flame,
 } from 'lucide-react';
-import { SkillType } from '../types';
+import { SkillType, RealExamForecastItem } from '../types';
 import { useApp } from '../context/AppContext';
 import { ReadingQuestionModule } from '../components/practice/ReadingQuestionModule';
 import { ListeningQuestionModule } from '../components/practice/ListeningQuestionModule';
 import { WritingQuestionModule } from '../components/practice/WritingQuestionModule';
 import { SpeakingQuestionModule } from '../components/practice/SpeakingQuestionModule';
+import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
+
+export type PracticeTabType = SkillType | 'forecast_hub';
 
 export const IELTSPracticeView: React.FC = () => {
   const { mistakes, openAITutorWithPrompt } = useApp();
-  const [activeSkill, setActiveSkill] = useState<SkillType>('reading');
+  const [activeTab, setActiveTab] = useState<PracticeTabType>('forecast_hub');
 
   // Count mistake items per skill
   const skillMistakesCount = {
@@ -26,6 +31,56 @@ export const IELTSPracticeView: React.FC = () => {
     listening: mistakes.filter((m) => m.skill === 'listening').length,
     writing: mistakes.filter((m) => m.skill === 'writing').length,
     speaking: mistakes.filter((m) => m.skill === 'speaking').length,
+  };
+
+  const handleSelectForecastForPractice = (item: RealExamForecastItem) => {
+    if (item.skill.startsWith('writing')) {
+      sessionStorage.setItem(
+        'omni_pending_writing_prompt',
+        JSON.stringify({
+          id: item.id,
+          promptStatement: item.promptStatement,
+          title: item.title,
+          category: item.subCategory || 'Opinion Essay',
+          taskType: item.skill === 'writing_task1' ? 'task1_academic' : 'task2_essay',
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('omni_load_writing_prompt', {
+          detail: {
+            id: item.id,
+            promptStatement: item.promptStatement,
+            title: item.title,
+            category: item.subCategory || 'Opinion Essay',
+            taskType: item.skill === 'writing_task1' ? 'task1_academic' : 'task2_essay',
+          },
+        })
+      );
+      setActiveTab('writing');
+    } else {
+      sessionStorage.setItem(
+        'omni_pending_speaking_prompt',
+        JSON.stringify({
+          id: item.id,
+          promptStatement: item.promptStatement,
+          title: item.title,
+          cueCardPoints: item.cueCardPoints,
+          part: item.skill,
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('omni_load_speaking_prompt', {
+          detail: {
+            id: item.id,
+            promptStatement: item.promptStatement,
+            title: item.title,
+            cueCardPoints: item.cueCardPoints,
+            part: item.skill,
+          },
+        })
+      );
+      setActiveTab('speaking');
+    }
   };
 
   return (
@@ -38,15 +93,14 @@ export const IELTSPracticeView: React.FC = () => {
               <Target className="w-5 h-5 text-indigo-400" />
             </div>
             <span className="text-xs uppercase tracking-wider font-bold text-indigo-300">
-              Chuyên sâu từng dạng câu hỏi IELTS
+              Khảo Thí IELTS Chuẩn Quốc Tế & AI Grounding Live
             </span>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            Luyện Tập IELTS Theo Từng Dạng Bài Chuẩn Cambridge
+            Luyện Tập IELTS & Kho Đề Thi Thật Forecast
           </h1>
           <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-            Học có chủ đích với đề bài sinh bởi AI không giới hạn. Mọi bẫy câu hỏi và lỗi sai khi làm bài
-            sẽ được tự động đồng bộ vào <strong>Sổ tay lỗi sai (Mistake Notebook)</strong> để tối ưu điểm số.
+            Tra cứu đề thi thật IDP/BC thời gian thực qua <strong>Google Search Grounding</strong> hoặc luyện tập chuyên sâu 4 kỹ năng với AI chấm điểm 4 tiêu chí chuẩn Cambridge.
           </p>
         </div>
 
@@ -66,15 +120,22 @@ export const IELTSPracticeView: React.FC = () => {
         </div>
       </div>
 
-      {/* 4 Skill Navigation Tabs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* 5 Navigation Tabs */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
+          {
+            id: 'forecast_hub',
+            title: '🔥 Forecast Live Hub',
+            subtitle: 'Đề thi thật IDP & BC 2026',
+            icon: Globe2,
+            badge: 'Grounding Search Live',
+            highlight: true,
+          },
           {
             id: 'reading',
             title: 'IELTS Reading',
             subtitle: '6 dạng câu hỏi học thuật',
             icon: BookOpen,
-            color: 'indigo',
             badge: 'Headings, TFNG, Matching...',
           },
           {
@@ -82,15 +143,13 @@ export const IELTSPracticeView: React.FC = () => {
             title: 'IELTS Listening',
             subtitle: '4 dạng bài kèm audio & bản đồ',
             icon: Headphones,
-            color: 'sky',
             badge: 'Form, Maps, Distractors...',
           },
           {
             id: 'writing',
             title: 'IELTS Writing',
-            subtitle: 'Task 1 & Task 2 (Chấm 4 tiêu chí)',
+            subtitle: 'Task 1, 2 & Band Upgrader',
             icon: PenTool,
-            color: 'amber',
             badge: 'TR, CC, LR, GRA Rubric',
           },
           {
@@ -98,34 +157,40 @@ export const IELTSPracticeView: React.FC = () => {
             title: 'IELTS Speaking',
             subtitle: 'Part 1, 2 (1m prep) & Part 3',
             icon: Mic,
-            color: 'rose',
             badge: 'Voice Examiner & 4 Criteria',
           },
         ].map((tab) => {
           const Icon = tab.icon;
-          const isActive = activeSkill === tab.id;
-          const mistakeCount = skillMistakesCount[tab.id as keyof typeof skillMistakesCount];
+          const isActive = activeTab === tab.id;
+          const mistakeCount =
+            tab.id !== 'forecast_hub'
+              ? skillMistakesCount[tab.id as keyof typeof skillMistakesCount]
+              : 0;
 
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveSkill(tab.id as SkillType)}
-              className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex flex-col justify-between ${
+              onClick={() => setActiveTab(tab.id as PracticeTabType)}
+              className={`p-3.5 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex flex-col justify-between ${
                 isActive
                   ? 'border-indigo-600 bg-white dark:bg-slate-800 shadow-md ring-2 ring-indigo-500/20'
+                  : tab.highlight
+                  ? 'border-amber-400/40 bg-amber-500/5 dark:bg-amber-500/10 hover:bg-white dark:hover:bg-slate-800/80'
                   : 'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 hover:bg-white dark:hover:bg-slate-800/80'
               }`}
             >
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center ${
                       isActive
                         ? 'bg-indigo-600 text-white'
+                        : tab.highlight
+                        ? 'bg-amber-500 text-white'
                         : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                     }`}
                   >
-                    <Icon className="w-5 h-5" />
+                    <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
                   </div>
                   {mistakeCount > 0 && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 flex items-center gap-1">
@@ -133,11 +198,15 @@ export const IELTSPracticeView: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-white">{tab.title}</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{tab.subtitle}</p>
+                <h3 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight">
+                  {tab.title}
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+                  {tab.subtitle}
+                </p>
               </div>
 
-              <span className="mt-3 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 truncate">
+              <span className="mt-2.5 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 truncate">
                 {tab.badge}
               </span>
             </button>
@@ -145,13 +214,17 @@ export const IELTSPracticeView: React.FC = () => {
         })}
       </div>
 
-      {/* Render Active Skill Module */}
+      {/* Render Active Module */}
       <div className="transition-all duration-300">
-        {activeSkill === 'reading' && <ReadingQuestionModule />}
-        {activeSkill === 'listening' && <ListeningQuestionModule />}
-        {activeSkill === 'writing' && <WritingQuestionModule />}
-        {activeSkill === 'speaking' && <SpeakingQuestionModule />}
+        {activeTab === 'forecast_hub' && (
+          <ForecastLiveHub onSelectPromptForPractice={handleSelectForecastForPractice} />
+        )}
+        {activeTab === 'reading' && <ReadingQuestionModule />}
+        {activeTab === 'listening' && <ListeningQuestionModule />}
+        {activeTab === 'writing' && <WritingQuestionModule />}
+        {activeTab === 'speaking' && <SpeakingQuestionModule />}
       </div>
     </div>
   );
 };
+

@@ -1008,3 +1008,176 @@ export interface AITutorMessage {
   screenContext?: string;
   suggestedFollowUps?: string[];
 }
+
+// ==========================================
+// ESSAY BAND UPGRADER (TASK 1 & TASK 2)
+// ==========================================
+
+export interface DetectedEssayError {
+  originalText: string;
+  errorType: 'grammar' | 'vocabulary' | 'cohesion' | 'task_response' | 'style';
+  correction: string;
+  explanation: string;
+  severity: 'high' | 'medium' | 'low';
+}
+
+export interface UpgradedPhraseDiff {
+  id: string;
+  originalPhrase: string;
+  band7Alternative: string;
+  band85Mastery: string;
+  category: 'lexical_upgrade' | 'grammatical_inversion' | 'cohesive_device' | 'academic_precision' | 'nominalization';
+  whyBetterVi: string;
+  contrastAnalysis: {
+    spokenOrBasic: string;
+    academicC1C2: string;
+    examinerInsight: string;
+  };
+  exampleInSentence: string;
+}
+
+export interface GoldenCollocation {
+  id: string;
+  phrase: string;
+  phonetic?: string;
+  cefrLevel: 'C1' | 'C2';
+  meaningVi: string;
+  collocationCategory: string; // e.g. "Verb + Noun", "Adjective + Noun", "Adverb + Adjective"
+  exampleSentence: string;
+  ieltsTopic: string;
+  whyHighBand: string;
+}
+
+export interface PEELParagraph {
+  paragraphIndex: number;
+  paragraphType: 'Introduction' | 'Body Paragraph 1' | 'Body Paragraph 2' | 'Conclusion' | 'Overview';
+  point: string; // Point
+  explanation: string; // Explanation
+  evidenceOrExample: string; // Evidence / Example
+  linkOrImplication: string; // Link back / Implication
+  fullParagraphText: string;
+}
+
+export interface InteractiveDiffSegment {
+  type: 'unchanged' | 'modified';
+  originalText: string;
+  upgradedTextBand7?: string;
+  upgradedTextBand85?: string;
+  upgradeId?: string;
+  diffCategory?: string;
+}
+
+export interface EssayUpgradeResult {
+  taskType: string;
+  promptStatement: string;
+  originalAnalysis: {
+    estimatedBand: number; // e.g. 5.5 or 6.0
+    bandRange: string; // e.g. "Band 5.5 - 6.0"
+    wordCount: number;
+    overallCritique: string;
+    strengths: string[];
+    weaknesses: string[];
+    detectedErrors: DetectedEssayError[];
+  };
+  band7Upgrade: {
+    bandScore: number; // 7.0
+    essayText: string;
+    wordCount: number;
+    keyImprovements: string[];
+    grammarFixedCount: number;
+    coherenceEnhancements: string[];
+  };
+  band85Upgrade: {
+    bandScore: number; // 8.5
+    essayText: string;
+    wordCount: number;
+    advancedTechniquesUsed: string[];
+    peelBreakdown: PEELParagraph[];
+  };
+  upgradedPhrasesDiff: UpgradedPhraseDiff[];
+  goldenCollocations: GoldenCollocation[];
+  interactiveDiffSegments: InteractiveDiffSegment[];
+}
+
+export interface EssayPromptBankItem {
+  id: string;
+  taskType: 'task1_academic' | 'task1_general' | 'task2_essay';
+  category: string;
+  title: string;
+  topic: string;
+  promptStatement: string;
+  sampleStudentEssayBand55: string;
+  studentEstimatedBand: number;
+  targetBandSuggestions: number[];
+}
+
+export type RealExamSkillType =
+  | 'writing_task1'
+  | 'writing_task2'
+  | 'speaking_part1'
+  | 'speaking_part2'
+  | 'speaking_part3';
+
+export type RealExamCouncilType =
+  | 'idp_vietnam'
+  | 'bc_vietnam'
+  | 'both_vietnam'
+  | 'idp_global'
+  | 'bc_global'
+  | 'global_general';
+
+export interface RealExamVocabularyItem {
+  phrase: string;
+  phonetic?: string;
+  pos: string; // e.g. "Collocation", "Idiom", "Verb Phrase", "Noun Phrase"
+  meaningVi: string;
+  exampleSentence: string;
+  cefrLevel: 'B2' | 'C1' | 'C2';
+  usageNote?: string;
+}
+
+export interface RealExamPEELOutline {
+  point: string; // [P] Luận điểm then chốt
+  explanation: string; // [E] Phân tích cơ chế & nguyên nhân
+  evidence: string; // [E] Dẫn chứng / Dữ liệu thực tế
+  link: string; // [L] Móc nối lại luận đề & hàm ý vĩ mô
+  suggestedParagraphs?: Array<{
+    heading: string;
+    keyPoints: string[];
+  }>;
+}
+
+export interface RealExamForecastItem {
+  id: string;
+  title: string;
+  skill: RealExamSkillType;
+  council: RealExamCouncilType;
+  councilLabel: string; // e.g. "IDP & BC Việt Nam", "IDP Hà Nội / TP.HCM", "British Council Global"
+  examDate: string; // e.g. "Thi thật: 18/08/2026", "Dự đoán Quý 3/2026"
+  topicDomain: string; // e.g. "Artificial Intelligence & Automation", "Environmental Sustainability", "Urbanization & Housing"
+  subCategory?: string; // e.g. "Agree / Disagree", "Discussion", "Describe a person", "Bar Chart"
+  promptStatement: string; // Full exact exam question or cue card prompt
+  cueCardPoints?: string[]; // For Speaking Part 2
+  trendStatus: 'recent_real_exam' | 'quarter_forecast' | 'hot_trend' | 'high_frequency';
+  trendBadge: string; // e.g. "🔥 Đề Thi Thật Vừa Ra", "⭐ Trọng Tâm Quý", "📈 Tần Suất Cao"
+  frequencyScore: number; // 0 - 100
+  outlinePEEL: RealExamPEELOutline;
+  topicVocabularyC1C2: RealExamVocabularyItem[];
+  band8ModelAnswer: string;
+  modelAnswerWordCount?: number;
+  examinerTipsVi: string;
+  groundingSourceTitle?: string;
+  groundingSourceUrl?: string;
+  isCustomGenerated?: boolean;
+}
+
+export interface ForecastGroundingResponse {
+  forecastItems: RealExamForecastItem[];
+  searchQueries: string[];
+  groundingSources: Array<{ title: string; url: string }>;
+  lastUpdated: string;
+  summaryOverviewVi: string;
+  detectedTrends?: string[];
+}
+
+

@@ -67,7 +67,7 @@ export const Sidebar: React.FC = () => {
     {
       id: 'practice',
       label: 'Luyện tập IELTS',
-      subLabel: '4 Kỹ năng & Chấm AI',
+      subLabel: 'Forecast Live & 4 Kỹ năng',
       icon: Target,
     },
     {
