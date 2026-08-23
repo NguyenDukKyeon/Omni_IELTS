@@ -80,6 +80,8 @@ interface AppContextType {
   awardXP: (amount: number, reason?: string) => void;
   notification: NotificationState | null;
   clearNotification: () => void;
+  isExamModeActive: boolean;
+  setIsExamModeActive: (active: boolean) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -103,6 +105,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
   const [isTutorLoading, setIsTutorLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<NotificationState | null>(null);
+  const [isExamModeActive, setIsExamModeActive] = useState<boolean>(false);
 
   // Dark mode state
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -144,19 +147,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // Mistakes Notebook State
+  // Mistakes Notebook State with smart schema migration & initial merge
   const [mistakes, setMistakes] = useState<MistakeEntry[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.MISTAKES);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((m: any) => ({
-            ...m,
-            tags: Array.isArray(m.tags) ? m.tags : [],
-            explanation: m.explanation || '',
-            errorText: m.errorText || '',
-          }));
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Merge initial items so updated trap fields & explanations are always preserved
+          const initialMap = new Map(initialMistakes.map((m) => [m.id, m]));
+          const merged: MistakeEntry[] = parsed.map((m: any) => {
+            const init = initialMap.get(m.id);
+            if (init) {
+              return {
+                ...init,
+                ...m,
+                trapCategory: m.trapCategory || init.trapCategory,
+                trapCategoryTitleVi: m.trapCategoryTitleVi || init.trapCategoryTitleVi,
+                trapBreakdownVi: m.trapBreakdownVi || init.trapBreakdownVi,
+                examinerTipVi: m.examinerTipVi || init.examinerTipVi,
+                questionContext: m.questionContext || init.questionContext,
+                userAttemptAnswer: m.userAttemptAnswer || init.userAttemptAnswer,
+                options: m.options || init.options,
+                srsStage: typeof m.srsStage === 'number' ? m.srsStage : init.srsStage,
+                nextReviewDate: m.nextReviewDate || init.nextReviewDate,
+                tags: Array.isArray(m.tags) ? m.tags : init.tags,
+              };
+            }
+            return {
+              ...m,
+              tags: Array.isArray(m.tags) ? m.tags : [],
+              explanation: m.explanation || '',
+              errorText: m.errorText || '',
+            };
+          });
+
+          // Add any new initial mistakes that weren't in saved
+          initialMistakes.forEach((init) => {
+            if (!merged.some((m) => m.id === init.id)) {
+              merged.push(init);
+            }
+          });
+
+          return merged;
         }
       }
       return initialMistakes;
@@ -509,21 +542,20 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
         if (item.id !== mistakeId) return item;
         const srs = calculateNextSRS(
           item.srsStage,
-          1,
-          2.5,
-          item.reviewCount,
+          item.intervalDays || 1,
+          item.easeFactor || 2.5,
+          item.repetitions || item.reviewCount || 0,
           rating
         );
         return {
           ...item,
-          srsStage: srs.srsStage,
-          nextReviewDate: srs.nextReviewDate,
-          reviewCount: item.reviewCount + 1,
-          mastered: srs.mastered,
+          ...srs,
+          reviewCount: (item.reviewCount || 0) + 1,
+          lastReviewedDate: new Date().toISOString(),
         };
       })
     );
-    awardXP(XP_REWARDS.MISTAKE_REVIEWED, 'Ôn tập Sổ tay lỗi sai');
+    awardXP(XP_REWARDS.MISTAKE_REVIEWED, 'Khắc phục bẫy lỗi sai (SRS)');
   };
 
   const deleteMistake = (id: string) => {
@@ -659,6 +691,8 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
         awardXP,
         notification,
         clearNotification,
+        isExamModeActive,
+        setIsExamModeActive,
       }}
     >
       {children}

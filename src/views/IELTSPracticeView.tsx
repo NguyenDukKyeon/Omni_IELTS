@@ -1,503 +1,156 @@
 import React, { useState } from 'react';
 import {
   Target,
-  PenTool,
-  Mic,
   BookOpen,
   Headphones,
+  PenTool,
+  Mic,
   Sparkles,
-  CheckCircle2,
-  AlertTriangle,
-  RefreshCw,
-  Award,
+  BookMarked,
+  Zap,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
 import { SkillType } from '../types';
-import { evaluateWritingApi } from '../services/aiTutor';
-import { XP_REWARDS } from '../services/gamification';
-
-interface PracticePromptItem {
-  id: string;
-  skill: SkillType;
-  title: string;
-  topic: string;
-  difficulty: string;
-  targetTask?: string;
-  instruction: string;
-}
-
-const samplePrompts: PracticePromptItem[] = [
-  {
-    id: 'pr_w1',
-    skill: 'writing',
-    title: 'Compulsory Community Service for Students',
-    topic: 'Education & Society',
-    difficulty: 'Band 7.0+',
-    targetTask: 'Writing Task 2',
-    instruction:
-      'Some people believe that unpaid community service should be a compulsory part of high school programmes (for example working for a charity, improving the neighborhood or teaching sports to younger children). To what extent do you agree or disagree? Give reasons for your answer and include any relevant examples from your own knowledge or experience. Write at least 250 words.',
-  },
-  {
-    id: 'pr_w2',
-    skill: 'writing',
-    title: 'Renewable Energy vs Economic Growth',
-    topic: 'Environment & Energy',
-    difficulty: 'Band 7.5+',
-    targetTask: 'Writing Task 2',
-    instruction:
-      'Many governments prioritize rapid economic expansion over environmental sustainability by continuing fossil fuel subsidies. Discuss both views and give your own opinion. Write at least 250 words.',
-  },
-  {
-    id: 'pr_s1',
-    skill: 'speaking',
-    title: 'Describe an Important Decision You Made',
-    topic: 'Personal Experience',
-    difficulty: 'Band 7.0+',
-    targetTask: 'Speaking Part 2',
-    instruction:
-      'Describe an important decision you made in your life. You should say: What the decision was, When and why you made it, Who helped or influenced you, and Explain how you felt about the decision afterwards. (1 minute preparation, 2 minutes speaking).',
-  },
-  {
-    id: 'pr_r1',
-    skill: 'reading',
-    title: 'The Evolution of Modern Neural Machine Translation',
-    topic: 'Technology & AI',
-    difficulty: 'Band 7.5+',
-    targetTask: 'Reading Passage 3',
-    instruction:
-      'Read the academic research paper excerpt on transformer architectures and neural linguistics, then answer 5 rigorous comprehension questions.',
-  },
-  {
-    id: 'pr_l1',
-    skill: 'listening',
-    title: 'University Campus Environmental Initiative',
-    topic: 'Academic Life',
-    difficulty: 'Band 7.0+',
-    targetTask: 'Listening Section 3',
-    instruction:
-      'Listen to a conversation between a tutor and two post-graduate students discussing their environmental audit project methodology.',
-  },
-];
+import { useApp } from '../context/AppContext';
+import { ReadingQuestionModule } from '../components/practice/ReadingQuestionModule';
+import { ListeningQuestionModule } from '../components/practice/ListeningQuestionModule';
+import { WritingQuestionModule } from '../components/practice/WritingQuestionModule';
+import { SpeakingQuestionModule } from '../components/practice/SpeakingQuestionModule';
 
 export const IELTSPracticeView: React.FC = () => {
-  const { awardXP, addMistake, addPracticeAttempt, openAITutorWithPrompt, profile } = useApp();
+  const { mistakes, openAITutorWithPrompt } = useApp();
+  const [activeSkill, setActiveSkill] = useState<SkillType>('reading');
 
-  const [activeSkill, setActiveSkill] = useState<SkillType>('writing');
-  const [prompts] = useState<PracticePromptItem[]>(samplePrompts);
-  const [selectedPrompt, setSelectedPrompt] = useState<PracticePromptItem>(samplePrompts[0]);
-  const [userSubmission, setUserSubmission] = useState<string>('');
-  const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
-  const [evaluationResult, setEvaluationResult] = useState<any | null>(null);
-
-  // Speaking simulation state
-  const [isSpeakingRecording, setIsSpeakingRecording] = useState<boolean>(false);
-  const [speakingScore, setSpeakingScore] = useState<any | null>(null);
-
-  const filteredPrompts = prompts.filter((p) => p.skill === activeSkill);
-  const wordCount = userSubmission.trim() ? userSubmission.trim().split(/\s+/).length : 0;
-
-  const handleEvaluateWriting = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userSubmission.trim() || isEvaluating) return;
-
-    setIsEvaluating(true);
-    setEvaluationResult(null);
-
-    try {
-      const result = await evaluateWritingApi(
-        selectedPrompt.title,
-        userSubmission,
-        selectedPrompt.targetTask || 'Writing Task 2',
-        profile.targetBand
-      );
-
-      setEvaluationResult(result);
-
-      // Add practice attempt
-      addPracticeAttempt({
-        id: `attempt_${Date.now()}`,
-        skill: 'writing',
-        topic: selectedPrompt.title,
-        taskType: selectedPrompt.targetTask || 'Writing Task 2',
-        scoreBand: result.estimatedBand || 6.5,
-        feedbackSummary: result.generalFeedback || 'Đã hoàn thành chấm bài.',
-        detailedCriteria: {
-          taskResponse: result.criteriaScores?.taskResponse,
-          coherenceCohesion: result.criteriaScores?.coherenceCohesion,
-          lexicalResource: result.criteriaScores?.lexicalResource,
-          grammaticalAccuracy: result.criteriaScores?.grammaticalAccuracy,
-        },
-        mistakesGeneratedCount: result.mistakesFound?.length || 0,
-        timestamp: new Date().toISOString(),
-        durationMinutes: 40,
-      });
-
-      // Automatically add identified errors to Mistake Notebook
-      if (result.mistakesFound && Array.isArray(result.mistakesFound)) {
-        result.mistakesFound.forEach((err: any) => {
-          addMistake({
-            id: `m_writing_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            errorText: err.errorText || err.original || '',
-            correctedText: err.correctedText || err.suggestion || '',
-            explanation: err.explanation || err.reason || 'Lỗi diễn đạt cần cải thiện.',
-            errorType: (err.type as any) || 'grammar',
-            skill: 'writing',
-            originModule: 'practice',
-            srsStage: 0,
-            nextReviewDate: new Date().toISOString(),
-            reviewCount: 0,
-            mastered: false,
-            createdAt: new Date().toISOString(),
-            tags: ['Writing', selectedPrompt.targetTask || 'Task 2'],
-          });
-        });
-      }
-
-      awardXP(XP_REWARDS.PRACTICE_COMPLETED, 'Hoàn thành bài viết IELTS Writing & Chấm AI 4 tiêu chí!');
-    } catch (error) {
-      console.error('Error evaluating writing', error);
-    } finally {
-      setIsEvaluating(false);
-    }
-  };
-
-  const handleSimulateSpeaking = () => {
-    if (!isSpeakingRecording) {
-      setIsSpeakingRecording(true);
-      setSpeakingScore(null);
-      setTimeout(() => {
-        setIsSpeakingRecording(false);
-        const score = {
-          overallBand: 7.0,
-          fluency: 7.0,
-          lexical: 7.5,
-          grammar: 6.5,
-          pronunciation: 7.0,
-          feedback:
-            'Độ trôi chảy tốt, sử dụng được các cụm collocation C1 tự nhiên. Chú ý cấu trúc câu phức ở Part 3 để kéo band lên 7.5+.',
-          sampleAnswer:
-            'Personally speaking, I find academic challenges immensely rewarding because they foster intellectual resilience...',
-        };
-        setSpeakingScore(score);
-        awardXP(XP_REWARDS.PRACTICE_COMPLETED, 'Hoàn thành bài luyện Speaking AI!');
-      }, 4000);
-    } else {
-      setIsSpeakingRecording(false);
-    }
+  // Count mistake items per skill
+  const skillMistakesCount = {
+    reading: mistakes.filter((m) => m.skill === 'reading').length,
+    listening: mistakes.filter((m) => m.skill === 'listening').length,
+    writing: mistakes.filter((m) => m.skill === 'writing').length,
+    speaking: mistakes.filter((m) => m.skill === 'speaking').length,
   };
 
   return (
-    <div id="practice-module" className="space-y-6 animate-fadeIn">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-black text-stone-900 dark:text-stone-100 font-display flex items-center gap-2.5">
-          <Target className="w-6 h-6 text-purple-600 dark:text-purple-400" />
-          <span>Luyện Tập IELTS 4 Kỹ Năng & AI Chấm Điểm</span>
-        </h1>
-        <p className="text-xs sm:text-sm text-stone-700 dark:text-stone-300 mt-1">
-          Luyện viết Task 1/2 với rubric chuẩn 4 tiêu chí (TR, CC, LR, GRA), luyện nói Speaking với Cue Card, và giải đề Reading/Listening.
-        </p>
+    <div id="ielts_practice_view" className="space-y-6 animate-fadeIn pb-12">
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-900 text-white p-6 rounded-3xl shadow-lg border border-indigo-800/40">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center">
+              <Target className="w-5 h-5 text-indigo-400" />
+            </div>
+            <span className="text-xs uppercase tracking-wider font-bold text-indigo-300">
+              Chuyên sâu từng dạng câu hỏi IELTS
+            </span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">
+            Luyện Tập IELTS Theo Từng Dạng Bài Chuẩn Cambridge
+          </h1>
+          <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+            Học có chủ đích với đề bài sinh bởi AI không giới hạn. Mọi bẫy câu hỏi và lỗi sai khi làm bài
+            sẽ được tự động đồng bộ vào <strong>Sổ tay lỗi sai (Mistake Notebook)</strong> để tối ưu điểm số.
+          </p>
+        </div>
+
+        {/* Quick Review Action */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() =>
+              openAITutorWithPrompt(
+                'Hãy kiểm tra lại các bẫy thường gặp nhất trong kỳ thi IELTS ở cả 4 kỹ năng (Reading, Listening, Writing, Speaking) và cho tôi 5 mẹo khắc phục quan trọng nhất.'
+              )
+            }
+            className="px-4 py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold flex items-center gap-2 border border-indigo-400/40 shadow-sm transition-all whitespace-nowrap"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>Chiến thuật bẻ bẫy cùng AI Tutor</span>
+          </button>
+        </div>
       </div>
 
-      {/* 4 Skill Tabs */}
-      <div className="flex items-center gap-2 border-b border-stone-200 dark:border-stone-700 pb-3 overflow-x-auto no-scrollbar">
+      {/* 4 Skill Navigation Tabs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { id: 'writing', label: 'Writing (Task 1 & 2)', icon: PenTool },
-          { id: 'speaking', label: 'Speaking (Part 1, 2, 3)', icon: Mic },
-          { id: 'reading', label: 'Reading (Học thuật)', icon: BookOpen },
-          { id: 'listening', label: 'Listening (4 Sections)', icon: Headphones },
+          {
+            id: 'reading',
+            title: 'IELTS Reading',
+            subtitle: '6 dạng câu hỏi học thuật',
+            icon: BookOpen,
+            color: 'indigo',
+            badge: 'Headings, TFNG, Matching...',
+          },
+          {
+            id: 'listening',
+            title: 'IELTS Listening',
+            subtitle: '4 dạng bài kèm audio & bản đồ',
+            icon: Headphones,
+            color: 'sky',
+            badge: 'Form, Maps, Distractors...',
+          },
+          {
+            id: 'writing',
+            title: 'IELTS Writing',
+            subtitle: 'Task 1 & Task 2 (Chấm 4 tiêu chí)',
+            icon: PenTool,
+            color: 'amber',
+            badge: 'TR, CC, LR, GRA Rubric',
+          },
+          {
+            id: 'speaking',
+            title: 'IELTS Speaking',
+            subtitle: 'Part 1, 2 (1m prep) & Part 3',
+            icon: Mic,
+            color: 'rose',
+            badge: 'Voice Examiner & 4 Criteria',
+          },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeSkill === tab.id;
+          const mistakeCount = skillMistakesCount[tab.id as keyof typeof skillMistakesCount];
+
           return (
             <button
               key={tab.id}
-              onClick={() => {
-                setActiveSkill(tab.id as SkillType);
-                const first = prompts.find((p) => p.skill === tab.id);
-                if (first) setSelectedPrompt(first);
-                setUserSubmission('');
-                setEvaluationResult(null);
-                setSpeakingScore(null);
-              }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              onClick={() => setActiveSkill(tab.id as SkillType)}
+              className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex flex-col justify-between ${
                 isActive
-                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
-                  : 'bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-100'
+                  ? 'border-indigo-600 bg-white dark:bg-slate-800 shadow-md ring-2 ring-indigo-500/20'
+                  : 'border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 hover:bg-white dark:hover:bg-slate-800/80'
               }`}
             >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                      isActive
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  {mistakeCount > 0 && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 flex items-center gap-1">
+                      <BookMarked className="w-3 h-3" /> {mistakeCount} lỗi
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">{tab.title}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{tab.subtitle}</p>
+              </div>
+
+              <span className="mt-3 text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 truncate">
+                {tab.badge}
+              </span>
             </button>
           );
         })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Prompt Selector */}
-        <div className="p-5 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 space-y-3">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300">
-            Danh Sách Đề Bài Luyện Tập
-          </h2>
-
-          <div className="space-y-2">
-            {filteredPrompts.map((prompt) => {
-              const isSelected = selectedPrompt.id === prompt.id;
-              return (
-                <button
-                  key={prompt.id}
-                  onClick={() => {
-                    setSelectedPrompt(prompt);
-                    setUserSubmission('');
-                    setEvaluationResult(null);
-                    setSpeakingScore(null);
-                  }}
-                  className={`w-full p-3.5 rounded-2xl text-left transition-all border flex items-center justify-between cursor-pointer ${
-                    isSelected
-                      ? 'bg-purple-50 dark:bg-purple-950/60 border-purple-500 shadow-sm'
-                      : 'bg-stone-50 dark:bg-stone-900/40 border-stone-200/80 dark:border-stone-700/80 hover:border-stone-300'
-                  }`}
-                >
-                  <div className="min-w-0 pr-2">
-                    <div className="font-bold text-xs sm:text-sm text-stone-900 dark:text-stone-100 truncate">
-                      {prompt.title}
-                    </div>
-                    <div className="text-[11px] text-stone-700 dark:text-stone-300 truncate mt-0.5">
-                      {prompt.topic}
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-300 shrink-0">
-                    {prompt.difficulty}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right: Practice Workspace */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* WRITING WORKSPACE */}
-          {activeSkill === 'writing' && (
-            <div className="p-6 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 space-y-5 shadow-sm">
-              <div className="space-y-2">
-                <span className="text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
-                  {selectedPrompt.targetTask || 'Writing Task 2'} • Band 7.5+ Target
-                </span>
-                <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100">
-                  {selectedPrompt.title}
-                </h2>
-                <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs sm:text-sm text-stone-800 dark:text-stone-200 font-serif leading-relaxed">
-                  {selectedPrompt.instruction}
-                </div>
-              </div>
-
-              {/* Writing Input */}
-              <form onSubmit={handleEvaluateWriting} className="space-y-3">
-                <div className="flex items-center justify-between text-xs font-semibold text-stone-700 dark:text-stone-300">
-                  <span>Bài làm của bạn:</span>
-                  <span className={wordCount < 250 ? 'text-amber-500' : 'text-emerald-500'}>
-                    Số từ: <strong>{wordCount}</strong> / 250 từ tối thiểu
-                  </span>
-                </div>
-
-                <textarea
-                  rows={9}
-                  required
-                  value={userSubmission}
-                  onChange={(e) => setUserSubmission(e.target.value)}
-                  placeholder="Bắt đầu viết bài luận của bạn tại đây..."
-                  className="w-full p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs sm:text-sm text-stone-900 dark:text-stone-100 focus:ring-2 focus:ring-purple-500 leading-relaxed font-sans"
-                />
-
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      openAITutorWithPrompt(
-                        `Hãy gợi ý dàn ý 4 bước theo phương pháp PEEL cho đề bài: "${selectedPrompt.instruction}"`
-                      )
-                    }
-                    className="text-xs font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Gợi ý dàn ý PEEL từ AI</span>
-                  </button>
-
-                  <button
-                    id="submit-writing-for-evaluation-btn"
-                    type="submit"
-                    disabled={isEvaluating || wordCount < 20}
-                    className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-bold text-xs shadow-md shadow-purple-600/20 flex items-center gap-2 cursor-pointer"
-                  >
-                    {isEvaluating ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>AI Đang Chấm 4 Tiêu Chí...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4" />
-                        <span>Nộp Bài & Chấm Điểm AI</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-
-              {/* EVALUATION REPORT CARD */}
-              {evaluationResult && (
-                <div className="p-5 rounded-2xl bg-stone-50 dark:bg-stone-900/80 border border-stone-200 dark:border-stone-700 space-y-4 animate-fadeIn">
-                  <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700 pb-3">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
-                        Bảng Đánh Giá Chi Tiết Rubric IELTS
-                      </span>
-                      <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                        Ước Tính Overall Band: {Number(evaluationResult.estimatedBand || 6.5).toFixed(1)}
-                      </h3>
-                    </div>
-                    <div className="text-2xl font-black text-purple-600 dark:text-purple-400">
-                      Band {Number(evaluationResult.estimatedBand || 6.5).toFixed(1)}
-                    </div>
-                  </div>
-
-                  {/* 4 Rubric Criteria Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                    <div className="p-3 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
-                      <span className="text-stone-700 dark:text-stone-300 font-medium block">Task Response</span>
-                      <strong className="text-stone-900 dark:text-stone-100 text-sm">
-                        {evaluationResult.criteriaScores?.taskResponse || 6.5}
-                      </strong>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
-                      <span className="text-stone-700 dark:text-stone-300 font-medium block">Coherence & Cohesion</span>
-                      <strong className="text-stone-900 dark:text-stone-100 text-sm">
-                        {evaluationResult.criteriaScores?.coherenceCohesion || 6.5}
-                      </strong>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
-                      <span className="text-stone-700 dark:text-stone-300 font-medium block">Lexical Resource</span>
-                      <strong className="text-stone-900 dark:text-stone-100 text-sm">
-                        {evaluationResult.criteriaScores?.lexicalResource || 6.5}
-                      </strong>
-                    </div>
-                    <div className="p-3 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
-                      <span className="text-stone-700 dark:text-stone-300 font-medium block">Grammar Range</span>
-                      <strong className="text-stone-900 dark:text-stone-100 text-sm">
-                        {evaluationResult.criteriaScores?.grammaticalAccuracy || 6.5}
-                      </strong>
-                    </div>
-                  </div>
-
-                  {evaluationResult.generalFeedback && (
-                    <div className="p-3 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs text-stone-800 dark:text-stone-200">
-                      {evaluationResult.generalFeedback}
-                    </div>
-                  )}
-
-                  {/* Identified Errors */}
-                  {evaluationResult.mistakesFound &&
-                    evaluationResult.mistakesFound.length > 0 && (
-                      <div className="space-y-2 pt-2">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
-                          <AlertTriangle className="w-4 h-4" />
-                          <span>Lỗi ngữ pháp/từ vựng (Đã tự động lưu vào Sổ tay lỗi sai):</span>
-                        </div>
-
-                        {evaluationResult.mistakesFound.map((err: any, ei: number) => (
-                          <div
-                            key={ei}
-                            className="p-3 rounded-xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-xs space-y-1"
-                          >
-                            <div className="line-through text-rose-600 dark:text-rose-400 font-serif">
-                              "{err.errorText || err.original}"
-                            </div>
-                            <div className="text-emerald-700 dark:text-emerald-300 font-bold font-serif">
-                              ➔ "{err.correctedText || err.suggestion}"
-                            </div>
-                            <div className="text-stone-700 dark:text-stone-300 text-[11px]">
-                              {err.explanation || err.reason}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SPEAKING WORKSPACE */}
-          {activeSkill === 'speaking' && (
-            <div className="p-6 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 space-y-5 shadow-sm">
-              <div className="space-y-2">
-                <span className="text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300">
-                  Speaking Cue Card • 1 Phút Chuẩn Bị & 2 Phút Trả Lời
-                </span>
-                <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100">
-                  {selectedPrompt.title}
-                </h2>
-                <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs sm:text-sm text-stone-800 dark:text-stone-200 leading-relaxed font-serif">
-                  {selectedPrompt.instruction}
-                </div>
-              </div>
-
-              <div className="text-center py-4">
-                <button
-                  onClick={handleSimulateSpeaking}
-                  className={`px-8 py-3.5 rounded-full font-bold text-xs sm:text-sm tracking-wide shadow-lg transition-all flex items-center justify-center gap-2.5 mx-auto cursor-pointer ${
-                    isSpeakingRecording
-                      ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
-                      : 'bg-sky-500 hover:bg-sky-600 text-white'
-                  }`}
-                >
-                  <Mic className="w-4 h-4" />
-                  <span>{isSpeakingRecording ? 'Đang Ghi Âm Câu Trả Lời...' : 'Bắt Đầu Nói (Speaking)'}</span>
-                </button>
-              </div>
-
-              {speakingScore && (
-                <div className="p-5 rounded-2xl bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900/50 space-y-3 animate-fadeIn">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-sky-900 dark:text-sky-200">
-                      Kết Quả Đánh Giá Speaking AI
-                    </span>
-                    <span className="text-lg font-black text-sky-600 dark:text-sky-400">
-                      Band {speakingScore.overallBand.toFixed(1)}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed">
-                    {speakingScore.feedback}
-                  </p>
-
-                  <div className="pt-2 border-t border-sky-200/50 dark:border-sky-900/40 text-xs">
-                    <span className="font-bold text-stone-900 dark:text-stone-100 block mb-1">
-                      Câu trả lời mẫu Band 8.5+:
-                    </span>
-                    <p className="font-serif italic text-stone-700 dark:text-stone-300">
-                      "{speakingScore.sampleAnswer}"
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* READING & LISTENING PLACEHOLDER QUICK DRILL */}
-          {(activeSkill === 'reading' || activeSkill === 'listening') && (
-            <div className="p-6 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 space-y-4 text-center py-12">
-              <BookOpen className="w-10 h-10 text-indigo-500 mx-auto opacity-70" />
-              <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                {activeSkill === 'reading' ? 'Phần Luyện Đọc Học Thuật' : 'Phần Luyện Nghe Học Thuật'}
-              </h3>
-              <p className="text-xs text-stone-700 dark:text-stone-300 max-w-md mx-auto">
-                Hệ thống đề thi trọn bộ theo format Cambridge IELTS đã sẵn sàng trong Module 6 (Thi thử IELTS).
-              </p>
-            </div>
-          )}
-        </div>
+      {/* Render Active Skill Module */}
+      <div className="transition-all duration-300">
+        {activeSkill === 'reading' && <ReadingQuestionModule />}
+        {activeSkill === 'listening' && <ListeningQuestionModule />}
+        {activeSkill === 'writing' && <WritingQuestionModule />}
+        {activeSkill === 'speaking' && <SpeakingQuestionModule />}
       </div>
     </div>
   );

@@ -1,0 +1,218 @@
+import {
+  ReadingQuestionType,
+  ReadingPracticeExercise,
+  ListeningQuestionType,
+  ListeningPracticeExercise,
+  WritingPracticeType,
+  WritingPracticePrompt,
+  WritingEvaluationResult,
+  SpeakingPracticePart,
+  SpeakingPracticePrompt,
+  SpeakingEvaluationResult,
+} from '../types';
+
+export async function generateReadingPracticeApi(
+  type: ReadingQuestionType,
+  topic?: string,
+  difficulty: string = 'Band 7.0-8.0'
+): Promise<ReadingPracticeExercise> {
+  const res = await fetch('/api/practice/generate-reading', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, topic, difficulty }),
+  });
+  if (!res.ok) throw new Error('Không thể tạo bài tập Reading.');
+  const data = await res.json();
+  return data.exercise;
+}
+
+export async function generateListeningPracticeApi(
+  type: ListeningQuestionType,
+  topic?: string,
+  difficulty: string = 'Band 7.0-8.0'
+): Promise<ListeningPracticeExercise> {
+  const res = await fetch('/api/practice/generate-listening', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, topic, difficulty }),
+  });
+  if (!res.ok) throw new Error('Không thể tạo bài tập Listening.');
+  const data = await res.json();
+  return data.exercise;
+}
+
+export async function generateWritingPracticePromptApi(
+  type: WritingPracticeType,
+  category?: string,
+  topic?: string,
+  difficulty: string = 'Band 7.0-8.0'
+): Promise<WritingPracticePrompt> {
+  const res = await fetch('/api/practice/generate-writing-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, category, topic, difficulty }),
+  });
+  if (!res.ok) throw new Error('Không thể tạo đề Writing.');
+  const data = await res.json();
+  return data.prompt;
+}
+
+export async function generateSpeakingPracticePromptApi(
+  part: SpeakingPracticePart,
+  topic?: string,
+  difficulty: string = 'Band 7.0-8.0'
+): Promise<SpeakingPracticePrompt> {
+  const res = await fetch('/api/practice/generate-speaking-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ part, topic, difficulty }),
+  });
+  if (!res.ok) throw new Error('Không thể tạo đề Speaking.');
+  const data = await res.json();
+  return data.prompt;
+}
+
+export async function evaluateWritingPracticeApi(
+  promptStatement: string,
+  essayContent: string,
+  taskType: string,
+  targetBand: number = 7.5
+): Promise<WritingEvaluationResult> {
+  const res = await fetch('/api/practice/evaluate-writing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ promptStatement, essayContent, taskType, targetBand }),
+  });
+  if (!res.ok) throw new Error('Lỗi chấm bài Writing.');
+  const data = await res.json();
+  return data.evaluation;
+}
+
+export async function evaluateSpeakingPracticeApi(
+  questionPrompt: string,
+  userTranscript: string,
+  part: string,
+  targetBand: number = 7.0
+): Promise<SpeakingEvaluationResult> {
+  const res = await fetch('/api/practice/evaluate-speaking', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questionPrompt, userTranscript, part, targetBand }),
+  });
+  if (!res.ok) throw new Error('Lỗi chấm bài Speaking.');
+  const data = await res.json();
+  return data.evaluation;
+}
+
+// 1:1 AI Virtual Examiner Room APIs
+export interface ExaminerTurnResponse {
+  examinerReply: string;
+  nextQuestion: string;
+  isPartFinished: boolean;
+  suggestedPart: 'part1' | 'part2' | 'part3' | 'completed';
+  timeGuidanceSeconds: number;
+  quickTips: string[];
+}
+
+export async function callSpeakingExaminerTurnApi(params: {
+  currentPart: 'part1' | 'part2' | 'part3';
+  turnIndex: number;
+  history: Array<{ speaker: string; text: string }>;
+  candidateLastSpeech: string;
+  currentTopic?: string;
+  cueCard?: any;
+  targetBand?: number;
+  examinerName?: string;
+  examinerStyle?: string;
+}): Promise<ExaminerTurnResponse> {
+  const res = await fetch('/api/gemini/speaking-examiner', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error('Không thể kết nối với Giám khảo AI.');
+  return await res.json();
+}
+
+export async function evaluateFullSpeakingSessionApi(params: {
+  conversationHistory: Array<{
+    part: string;
+    question: string;
+    userTranscript: string;
+    durationSeconds: number;
+  }>;
+  totalDurationSeconds: number;
+  targetBand?: number;
+}): Promise<any> {
+  const res = await fetch('/api/gemini/speaking-evaluation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error('Không thể tạo bảng điểm Speaking.');
+  return await res.json();
+}
+
+// Audio Text-To-Speech helper for British/Australian IELTS Examiner Voice
+export function speakExaminerText(
+  text: string,
+  rate: number = 0.95,
+  accentOrOnEnd: 'British' | 'Australian' | 'Standard' | (() => void) = 'British',
+  onEndCallback?: () => void
+): () => void {
+  if (typeof window === 'undefined' || !window.speechSynthesis) {
+    if (typeof accentOrOnEnd === 'function') {
+      accentOrOnEnd();
+    } else {
+      onEndCallback?.();
+    }
+    return () => {};
+  }
+
+  let accent: 'British' | 'Australian' | 'Standard' = 'British';
+  let onEnd: (() => void) | undefined = onEndCallback;
+
+  if (typeof accentOrOnEnd === 'function') {
+    onEnd = accentOrOnEnd;
+    accent = 'British';
+  } else if (typeof accentOrOnEnd === 'string') {
+    accent = accentOrOnEnd;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = rate;
+  utterance.pitch = 1.0;
+
+  const voices = window.speechSynthesis.getVoices();
+  let selectedVoice = null;
+
+  if (accent === 'British') {
+    utterance.lang = 'en-GB';
+    selectedVoice = voices.find((v) => v.lang === 'en-GB' || v.name.toLowerCase().includes('british') || v.name.toLowerCase().includes('uk'));
+  } else if (accent === 'Australian') {
+    utterance.lang = 'en-AU';
+    selectedVoice = voices.find((v) => v.lang === 'en-AU' || v.name.toLowerCase().includes('australia'));
+  }
+
+  if (!selectedVoice) {
+    selectedVoice =
+      voices.find((v) => v.lang.includes('en-GB') || v.lang.includes('en-US')) ||
+      voices.find((v) => v.lang.startsWith('en'));
+  }
+
+  if (selectedVoice) {
+    utterance.voice = selectedVoice;
+  }
+
+  if (onEnd) {
+    utterance.onend = () => onEnd?.();
+    utterance.onerror = () => onEnd?.();
+  }
+
+  window.speechSynthesis.speak(utterance);
+
+  return () => {
+    window.speechSynthesis.cancel();
+  };
+}

@@ -24,7 +24,7 @@ import { KnowledgeBaseView } from './views/KnowledgeBaseView';
 import { LearnerProfileView } from './views/LearnerProfileView';
 
 const MainContent: React.FC = () => {
-  const { activeModule } = useApp();
+  const { activeModule, isExamModeActive } = useApp();
 
   const renderActiveView = () => {
     switch (activeModule) {
@@ -51,23 +51,37 @@ const MainContent: React.FC = () => {
     }
   };
 
+  const isFullScreenExam = isExamModeActive && activeModule === 'mock_test';
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
+    <div
+      className={`min-h-screen ${
+        isFullScreenExam
+          ? 'bg-slate-900 text-slate-100'
+          : 'bg-[#F8FAFC] dark:bg-slate-950 text-slate-800 dark:text-slate-100'
+      } flex flex-col font-sans transition-colors duration-200`}
+    >
       {/* Top Fixed Header */}
-      <Header />
+      {!isFullScreenExam && <Header />}
 
       {/* Main Body Shell */}
-      <div className="flex-1 flex max-w-7xl w-full mx-auto pb-20 md:pb-8">
+      <div
+        className={`flex-1 flex w-full ${
+          isFullScreenExam ? 'max-w-full p-0 pb-0' : 'max-w-7xl mx-auto pb-20 md:pb-8'
+        }`}
+      >
         {/* Left Desktop Sidebar */}
-        <Sidebar />
+        {!isFullScreenExam && <Sidebar />}
 
         {/* Dynamic Center Stage Content */}
         <main
           id="main-viewport-content"
-          className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto"
+          className={`flex-1 min-w-0 ${
+            isFullScreenExam ? 'p-0 overflow-hidden flex flex-col' : 'p-4 sm:p-6 lg:p-8 overflow-y-auto'
+          }`}
         >
           {/* Next Recommended Best Action Banner */}
-          <NextActionBanner />
+          {!isFullScreenExam && <NextActionBanner />}
 
           {/* Module View */}
           {renderActiveView()}
@@ -75,10 +89,10 @@ const MainContent: React.FC = () => {
       </div>
 
       {/* Mobile Bottom Navigation Bar */}
-      <BottomNav />
+      {!isFullScreenExam && <BottomNav />}
 
       {/* Contextual Floating AI Tutor */}
-      <FloatingAITutor />
+      {!isFullScreenExam && <FloatingAITutor />}
 
       {/* Modals */}
       <OnboardingModal />

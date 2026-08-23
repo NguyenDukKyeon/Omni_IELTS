@@ -199,20 +199,359 @@ export interface VocabCard {
 export type ErrorCategory = 'grammar' | 'vocab' | 'pronunciation' | 'cohesion' | 'task_response';
 export type SkillType = 'writing' | 'speaking' | 'listening' | 'reading' | 'grammar';
 
+export type ReadingQuestionType =
+  | 'matching_headings'
+  | 'true_false_not_given'
+  | 'yes_no_not_given'
+  | 'matching_information'
+  | 'sentence_summary_completion'
+  | 'matching_features';
+
+export type ListeningQuestionType =
+  | 'form_note_table_completion'
+  | 'multiple_choice'
+  | 'map_plan_diagram_labelling'
+  | 'matching';
+
+export type WritingPracticeType =
+  | 'task1_academic'
+  | 'task1_general'
+  | 'task2_essay';
+
+export type SpeakingPracticePart =
+  | 'part1_qa'
+  | 'part2_cue_card'
+  | 'part3_deep_discussion';
+
+export interface ReadingPracticeExercise {
+  id: string;
+  type: ReadingQuestionType;
+  title: string;
+  topic: string;
+  difficulty: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.5+';
+  targetTimeMinutes: number;
+  instructionsVi: string;
+  passage: {
+    title: string;
+    paragraphs: Array<{
+      label: string; // 'A', 'B', 'C', 'D', 'E', etc.
+      text: string;
+    }>;
+  };
+  // Dành riêng cho Matching Headings
+  headingsList?: Array<{
+    id: string; // 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii'
+    text: string;
+  }>;
+  // Dành riêng cho Matching Features
+  featuresList?: {
+    categoryName: string; // e.g. 'Researchers / Theorists'
+    items: Array<{ id: string; name: string }>; // A: 'Dr. Jane Goodall', B: 'Prof. David Miller'
+  };
+  questions: Array<{
+    id: string;
+    questionNumber: number;
+    statementOrQuestion: string;
+    options?: string[]; // for MC or dropdowns
+    correctAnswer: string;
+    explanationVi: string;
+    paragraphReference?: string;
+    trapWarning?: string; // Cảnh báo bẫy thi thường gặp
+    relatedGrammarTopicId?: string;
+    relatedVocab?: string[];
+  }>;
+}
+
+export interface ListeningPracticeExercise {
+  id: string;
+  type: ListeningQuestionType;
+  title: string;
+  topic: string;
+  difficulty: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.5+';
+  section: 'Section 1 (Social/Form)' | 'Section 2 (Monologue/Map)' | 'Section 3 (Academic Discussion)' | 'Section 4 (Academic Lecture)';
+  targetTimeMinutes: number;
+  instructionsVi: string;
+  wordLimit?: string; // e.g. "NO MORE THAN TWO WORDS AND/OR A NUMBER"
+  audioTranscript: string;
+  audioSpeakers?: Array<{ role: string; name: string }>;
+  // Dành riêng cho Map / Plan / Diagram Labelling
+  mapDiagramData?: {
+    diagramType: 'campus_map' | 'building_floorplan' | 'equipment_diagram' | 'process_flow';
+    title: string;
+    locationsToLabel: Array<{
+      letter: string; // 'A', 'B', 'C', 'D', 'E'
+      xPercent: number; // 0 - 100
+      yPercent: number; // 0 - 100
+      name: string;
+    }>;
+    fixedLandmarks: Array<{
+      xPercent: number;
+      yPercent: number;
+      label: string;
+    }>;
+  };
+  matchingOptions?: Array<{
+    id: string; // 'A', 'B', 'C', 'D'
+    text: string;
+  }>;
+  questions: Array<{
+    id: string;
+    questionNumber: number;
+    prompt: string; // Context or blank text
+    options?: string[];
+    correctAnswer: string;
+    acceptableAnswers?: string[];
+    explanationVi: string;
+    timestampHint?: string;
+    spellingOrGrammarTrap?: string;
+    relatedGrammarTopicId?: string;
+    relatedVocab?: string[];
+  }>;
+}
+
+export interface WritingPracticePrompt {
+  id: string;
+  type: WritingPracticeType;
+  category: 'Bar Chart' | 'Line Graph' | 'Pie Chart' | 'Table' | 'Process Diagram' | 'Map' | 'Formal Letter' | 'Semi-formal Letter' | 'Opinion Essay' | 'Discussion Essay' | 'Problem-Solution' | 'Advantages-Disadvantages' | 'Two-part Question';
+  title: string;
+  topic: string;
+  difficulty: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.5+';
+  targetWords: number; // 150 for Task 1, 250 for Task 2
+  timeLimitMinutes: number; // 20 or 40
+  promptStatement: string;
+  academicChartData?: {
+    type: 'bar' | 'line' | 'pie' | 'table' | 'process' | 'map';
+    labels: string[];
+    datasets: Array<{
+      label: string;
+      data: number[];
+      unit?: string;
+      color?: string;
+    }>;
+    processSteps?: Array<{ stepNumber: number; title: string; description: string }>;
+    mapComparison?: { beforeYear: string; afterYear: string; keyChanges: string[] };
+  };
+  highBandVocabSuggestions: Array<{
+    word: string;
+    meaningVi: string;
+    contextUsage: string;
+  }>;
+  sampleBand9Structure: {
+    overviewOrThesis: string;
+    body1Strategy: string;
+    body2Strategy: string;
+  };
+}
+
+export interface WritingEvaluationResult {
+  overallBand: number;
+  wordCount: number;
+  criteriaScores: {
+    taskResponse: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+    coherenceCohesion: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+    lexicalResource: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+    grammaticalRangeAccuracy: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+  };
+  detailedMistakes: Array<{
+    id: string;
+    originalSegment: string;
+    suggestedRewrite: string;
+    category: 'grammar' | 'vocab' | 'cohesion' | 'task_response';
+    ruleExplanationVi: string;
+    suggestedReviewTopic?: string;
+  }>;
+  sentenceUpgrades: Array<{
+    original: string;
+    band8Rewrite: string;
+    techniqueUsed: string; // e.g. "Nominalization + Advanced Participle Clause"
+  }>;
+  sampleExaminerResponseBand9?: string;
+}
+
+export interface SpeakingPracticePrompt {
+  id: string;
+  part: SpeakingPracticePart;
+  title: string;
+  topic: string;
+  difficulty: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.5+';
+  // Cho Part 1 & 3
+  questions?: Array<{
+    id: string;
+    questionText: string;
+    followUpHintVi?: string;
+    suggestedVocab: string[];
+  }>;
+  // Cho Part 2 (Cue Card)
+  cueCard?: {
+    prompt: string; // e.g. "Describe a memorable journey you took by public transport."
+    bulletPoints: string[]; // 4 bullet points
+    prepTimeSeconds: number; // 60s
+    speakingTimeSeconds: number; // 120s
+    keyIdeasVi: string[];
+  };
+  examinerPersona: string; // "Dr. Jonathan Smith - Oxford Cambridge Examiner"
+}
+
+export interface SpeakingEvaluationResult {
+  overallBand: number;
+  transcript: string;
+  criteriaScores: {
+    fluencyCoherence: {
+      band: number;
+      feedback: string;
+      fillerWordsCount: number;
+      pauseRateAdvice: string;
+    };
+    lexicalResource: {
+      band: number;
+      feedback: string;
+      collocationsUsed: string[];
+      repetitiveWords: string[];
+    };
+    grammaticalRangeAccuracy: {
+      band: number;
+      feedback: string;
+      complexStructuresUsed: string[];
+      grammarSlips: Array<{ original: string; corrected: string; explanation: string }>;
+    };
+    pronunciation: {
+      band: number;
+      feedback: string;
+      intonationScore: number;
+      stressErrors: string[];
+    };
+  };
+  highBandUpgrades: Array<{
+    spokenSentence: string;
+    band8Upgrade: string;
+    focus: string;
+  }>;
+  actionableStepsVi: string[];
+}
+
+export interface SpeakingRoomTurn {
+  id: string;
+  part: 'part1' | 'part2' | 'part3';
+  questionNumber: number;
+  examinerSpoken: string;
+  question: string;
+  candidateTranscript: string;
+  durationSeconds: number;
+  timestamp: string;
+}
+
+export interface SpeakingRoomEvaluation {
+  overallBand: number;
+  criteriaScores: {
+    fluencyCoherence: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+    lexicalResource: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+    grammaticalRangeAccuracy: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+    pronunciation: {
+      band: number;
+      feedback: string;
+      strengths: string[];
+      weaknesses: string[];
+    };
+  };
+  telemetry: {
+    totalWords: number;
+    wpm: number;
+    fillerWordsCount: number;
+    fillerWordsDetected: Array<{ word: string; count: number }>;
+    longPausesDetectedCount: number;
+    fluencyRating: 'Excellent' | 'Good' | 'Needs Improvement';
+  };
+  sampleUpgrades: Array<{
+    part: string;
+    question: string;
+    candidateResponse: string;
+    upgradedBand85Response: string;
+    keyVocabularyC1C2: Array<{ phrase: string; meaningVi: string; phonetic: string }>;
+    examinerAnalysisVi: string;
+  }>;
+  examinerOverallSummaryVi: string;
+  actionableAdvice: string[];
+  mistakesForNotebook: Array<{
+    errorText: string;
+    correctedText: string;
+    explanation: string;
+    errorType: 'grammar' | 'vocab' | 'collocation' | 'pronunciation';
+  }>;
+}
+
+export type TrapCategory =
+  | 'trap_not_given' // Bẫy Not Given & False trong Reading
+  | 'trap_listening_plural_spelling' // Lỗi chia số ít/số nhiều & Chính tả Listening
+  | 'trap_task1_tenses' // Lỗi thì quá khứ / xu hướng Task 1
+  | 'trap_cohesion_flow' // Lỗi Cohesion & Mạch lạc Task 2
+  | 'trap_lexical_context' // Lỗi từ vựng sai ngữ cảnh & Collocations
+  | 'trap_distractor_numbers' // Bẫy Đổi ý Phút chót & Số liệu Listening
+  | 'trap_matching_headings' // Bẫy Matching Headings & Ý chính
+  | 'trap_speaking_stress_pronunciation'; // Lỗi trọng âm & phát âm Speaking
+
 export interface MistakeEntry {
   id: string;
   errorText: string;
   correctedText: string;
   explanation: string;
   errorType: ErrorCategory;
+  trapCategory?: TrapCategory;
+  trapCategoryTitleVi?: string;
+  trapBreakdownVi?: string;
+  examinerTipVi?: string;
+  questionContext?: string;
+  userAttemptAnswer?: string;
+  options?: string[];
+  drillType?: 'flashcard' | 'multiple_choice' | 'correction' | 'gap_fill';
   skill: SkillType;
-  originModule: ModuleId | 'writing_eval' | 'speaking_eval' | 'dictation' | 'grammar_quiz';
-  srsStage: number; // 0-5
+  originModule: ModuleId | 'writing_eval' | 'speaking_eval' | 'dictation' | 'grammar_quiz' | 'ielts_practice_reading' | 'ielts_practice_listening' | 'ielts_practice_writing' | 'ielts_practice_speaking' | 'mock_test';
+  srsStage: number; // 0-5 (0: Mới nạp, 1: Hộp 1 - 1d, 2: Hộp 2 - 3d, 3: Hộp 3 - 7d, 4: Hộp 4 - 14d, 5: Mastered - 30d+)
+  intervalDays?: number;
+  easeFactor?: number;
+  repetitions?: number;
   nextReviewDate: string; // ISO date string
+  lastReviewedDate?: string;
   reviewCount: number;
   mastered: boolean;
   createdAt: string;
   tags: string[];
+  suggestedGrammarTopicId?: string;
+  difficulty?: string;
 }
 
 export interface MediaShadowingEvaluation {
@@ -296,17 +635,197 @@ export interface PracticeAttempt {
   durationMinutes: number;
 }
 
+export type ExamColorScheme = 'standard' | 'high_contrast' | 'inverted';
+
+export interface ExamPassageNote {
+  id: string;
+  passageIndex: number;
+  paragraphLabel?: string;
+  selectedText: string;
+  noteText: string;
+  color?: string;
+  createdAt: string;
+}
+
+export interface MockQuestionReview {
+  number: number;
+  sectionIndex: number;
+  userAnswer: string;
+  correctAnswer: string;
+  acceptableAnswers?: string[];
+  isCorrect: boolean;
+  explanationVi: string;
+  locationHint?: string;
+  evidenceText?: string;
+  trapWarning?: string;
+  relatedGrammarTopicId?: string;
+}
+
+export interface DayStudyPlanItem {
+  day: number;
+  title: string;
+  description: string;
+  targetModule: ModuleId;
+  targetSkill: SkillType;
+  actionLabel: string;
+  priority: 'high' | 'medium' | 'normal';
+}
+
+export interface MockStudyRoadmap {
+  weakestSkill: SkillType;
+  targetBandGap: number;
+  summaryAdviceVi: string;
+  coreGrammarToReview: string[];
+  recommendedDecks: string[];
+  dayByDayPlan: DayStudyPlanItem[];
+}
+
 export interface MockResult {
   id: string;
   testTitle: string;
+  testCode?: string;
   overallBand: number;
   listeningBand: number;
   readingBand: number;
   writingBand: number;
   speakingBand: number;
+  listeningRawScore?: number; // e.g. 34/40
+  readingRawScore?: number; // e.g. 33/40
   completedDate: string;
   timeSpentMinutes: number;
   breakdown: string[];
+  strengths?: string[];
+  weaknesses?: string[];
+  writingEvaluation?: {
+    task1Band: number;
+    task2Band: number;
+    criteriaScores: {
+      taskResponse: { band: number; feedback: string };
+      coherenceCohesion: { band: number; feedback: string };
+      lexicalResource: { band: number; feedback: string };
+      grammaticalRangeAccuracy: { band: number; feedback: string };
+    };
+    examinerRemarksVi: string;
+    sampleBand9Task2?: string;
+  };
+  speakingEvaluation?: {
+    criteriaScores: {
+      fluencyCoherence: { band: number; feedback: string };
+      lexicalResource: { band: number; feedback: string };
+      grammaticalRangeAccuracy: { band: number; feedback: string };
+      pronunciation: { band: number; feedback: string };
+    };
+    examinerRemarksVi: string;
+    transcriptOverview?: string;
+    highBandUpgrades?: Array<{ spoken: string; upgrade: string; technique: string }>;
+  };
+  detailedReview?: {
+    listening: MockQuestionReview[];
+    reading: MockQuestionReview[];
+  };
+  roadmap?: MockStudyRoadmap;
+}
+
+export type MockExamSkill = 'listening' | 'reading' | 'writing' | 'speaking';
+
+export interface FullMockTestQuestion {
+  id: string;
+  number: number; // 1 to 40
+  sectionIndex: number; // 0, 1, 2, 3 (or passage 0, 1, 2)
+  type: 'multiple_choice' | 'gap_fill' | 'true_false_not_given' | 'yes_no_not_given' | 'matching_headings' | 'matching_features' | 'map_labelling' | 'sentence_completion';
+  prompt: string;
+  options?: string[]; // for MC / matching
+  correctAnswer: string;
+  acceptableAnswers?: string[];
+  explanationVi: string;
+  locationHint?: string;
+  trapWarning?: string;
+  relatedGrammarTopicId?: string;
+  relatedVocab?: string[];
+}
+
+export interface FullMockTestPackage {
+  id: string;
+  code: string; // e.g. "CAM-19-ACAD-01"
+  title: string;
+  subtitle: string;
+  difficulty: 'Cambridge Official Standard' | 'Hard (Band 7.5 - 8.5+)' | 'Diagnostic Standard';
+  description: string;
+  estimatedMinutes: number; // ~170 mins
+  // 1. Listening
+  listening: {
+    title: string;
+    audioTranscript: string;
+    sections: Array<{
+      sectionNumber: number;
+      title: string;
+      context: string;
+      audioScriptExcerpt: string;
+      instructionsVi: string;
+      questions: FullMockTestQuestion[];
+      mapData?: {
+        title: string;
+        locations: Array<{ letter: string; name: string; x: number; y: number }>;
+      };
+    }>;
+  };
+  // 2. Reading
+  reading: {
+    title: string;
+    passages: Array<{
+      passageNumber: number;
+      title: string;
+      subtitle: string;
+      wordCount: number;
+      paragraphs: Array<{ label: string; text: string }>;
+      headingsList?: Array<{ id: string; text: string }>;
+      featuresList?: { category: string; items: Array<{ id: string; name: string }> };
+      questions: FullMockTestQuestion[];
+    }>;
+  };
+  // 3. Writing
+  writing: {
+    title: string;
+    task1: {
+      category: 'Bar Chart' | 'Line Graph' | 'Pie Chart' | 'Table' | 'Process' | 'Map';
+      prompt: string;
+      chartData?: {
+        labels: string[];
+        datasets: Array<{ label: string; data: number[]; unit?: string; color?: string }>;
+        description?: string;
+      };
+      minWords: number;
+      suggestedMinutes: number;
+    };
+    task2: {
+      category: 'Opinion Essay' | 'Discussion Essay' | 'Problem-Solution' | 'Advantages-Disadvantages';
+      prompt: string;
+      minWords: number;
+      suggestedMinutes: number;
+    };
+  };
+  // 4. Speaking
+  speaking: {
+    examinerName: string;
+    examinerAvatar: string;
+    part1: {
+      topic: string;
+      questions: string[];
+    };
+    part2: {
+      cueCard: {
+        topic: string;
+        prompt: string;
+        bulletPoints: string[];
+        prepTimeSeconds: number;
+        speakTimeSeconds: number;
+      };
+    };
+    part3: {
+      topic: string;
+      questions: string[];
+    };
+  };
 }
 
 export type GrammarExerciseType = 'multiple_choice' | 'gap_fill' | 'error_correction' | 'sentence_transformation';
@@ -384,6 +903,101 @@ export interface IELTSKnowledgeArticle {
   contentMarkdown: string;
   tags: string[];
   keyTakeaway: string;
+}
+
+export interface StrategyQuizQuestion {
+  id: string;
+  scenario?: string;
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanationVi: string;
+  keyTakeaway: string;
+}
+
+export interface SkillStrategyTopic {
+  id: string;
+  skill: 'listening' | 'reading' | 'writing' | 'speaking' | 'general';
+  categoryTitleVi: string;
+  title: string;
+  subtitle: string;
+  readTimeMinutes: number;
+  difficultyLevel: 'Foundation (5.0 - 6.5)' | 'Advanced (7.0 - 8.0)' | 'Master (8.5+)';
+  corePrinciples: string[];
+  stepByStepMethod: Array<{
+    stepNumber: number;
+    stepTitle: string;
+    actionVi: string;
+    exampleOrCaveat?: string;
+  }>;
+  proTactics: string[];
+  trapAlerts: string[];
+  practicalApplicationMarkdown: string;
+  strategyQuiz: StrategyQuizQuestion[];
+}
+
+export type AnnotationCategory = 'vocab' | 'grammar' | 'cohesion' | 'task_response';
+
+export interface AnnotatedSegment {
+  text: string;
+  isHighlight?: boolean;
+  annotationType?: AnnotationCategory;
+  title?: string;
+  explanationVi?: string;
+  bandImpact?: string; // e.g. "Band 8.5 Lexical Resource"
+}
+
+export interface AnnotatedModelAnswer {
+  id: string;
+  skill: 'writing' | 'speaking';
+  taskType: 'Writing Task 1' | 'Writing Task 2' | 'Speaking Part 2' | 'Speaking Part 3';
+  topicVi: string;
+  questionPrompt: string;
+  diagramOrImageDescription?: string;
+  targetBand: number; // e.g. 8.5
+  examinerOverviewVi: string;
+  criteriaAnalysis: {
+    criterion1Name: string; // Task Achievement / Fluency
+    criterion1Score: number;
+    criterion1Notes: string;
+    criterion2Name: string; // Coherence & Cohesion
+    criterion2Score: number;
+    criterion2Notes: string;
+    criterion3Name: string; // Lexical Resource
+    criterion3Score: number;
+    criterion3Notes: string;
+    criterion4Name: string; // Grammatical Range & Accuracy
+    criterion4Score: number;
+    criterion4Notes: string;
+  };
+  annotatedSegments: AnnotatedSegment[];
+  vocabularyGlossary: Array<{
+    phrase: string;
+    meaningVi: string;
+    level: 'C1' | 'C2';
+    usageTip: string;
+  }>;
+}
+
+export interface CommonPitfallTrap {
+  id: string;
+  skill: 'listening' | 'reading' | 'writing' | 'speaking';
+  trapTitle: string;
+  impactBand: 'Mất 0.5 - 1.0 Band' | 'Mất 1.0 - 1.5 Band' | 'Bị kẹt ở Band 6.0';
+  dangerLevel: 'critical' | 'high' | 'medium';
+  frequency: 'Rất phổ biến (>70% thí sinh mắc)' | 'Phổ biến' | 'Bẫy tinh vi';
+  howTrapWorks: string;
+  riskyExample: string;
+  highBandSolution: string;
+  examinerSecretInsight: string;
+}
+
+export interface BandConversionItem {
+  rawScoreRange: string;
+  bandScore: number;
+  skill: 'listening' | 'reading_academic' | 'reading_general';
+  cefrLevel: string;
+  competencyDescription: string;
 }
 
 export interface AITutorMessage {
