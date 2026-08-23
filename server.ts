@@ -4,8 +4,7 @@ import os from "os";
 import crypto from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "fs/promises";
-import { createServer as createViteServer } from "vite";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "fs/promises";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { z } from "zod";
@@ -18,6 +17,15 @@ import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
 import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
 import { requestGroqGroundedForecast } from "./src/lib/groqGrounding";
+import {
+  buildYtDlpRuntimeArgs,
+  classifyMediaImportFailure,
+  consumeFixedWindowQuota,
+  parseYtDlpMetadata,
+  progressForMediaImportPhase,
+  validateTranscriptCoverage,
+} from "./src/lib/mediaImport";
+import type { MediaCapabilities, MediaImportJob, MediaImportPhase, MediaSession } from "./src/types";
 
 dotenv.config();
 
@@ -1565,6 +1573,9 @@ const YT_DLP_ASSETS: Record<string, { name: string; sha256: string }> = {
   linux: { name: "yt-dlp_linux", sha256: "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a" },
   darwin: { name: "yt-dlp_macos", sha256: "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202" },
 };
+const YT_DLP_POT_PLUGIN_RELEASE = "1.3.1";
+const YT_DLP_POT_PLUGIN_SHA256 = "b8ceec7f76143da172aaf5ebeec0c2d218e5680c063b931586bca48567069b38";
+const YT_DLP_POT_PLUGIN_URL = `https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${YT_DLP_POT_PLUGIN_RELEASE}/bgutil-ytdlp-pot-provider.zip`;
 
 async function ensureYtDlpBinary(): Promise<string> {
   if (process.env.YT_DLP_PATH) {
@@ -1591,7 +1602,44 @@ async function ensureYtDlpBinary(): Promise<string> {
   return binaryPath;
 }
 
-async function fetchYouTubeCaptionsWithYtDlp(url: string): Promise<{
+async function ensureYtDlpPotPlugin(): Promise<string | undefined> {
+  const providerUrl = process.env.YT_DLP_POT_PROVIDER_URL?.trim();
+  if (!providerUrl) return undefined;
+
+  const pluginDir = path.join(os.tmpdir(), `omni-ytdlp-plugins-${YT_DLP_POT_PLUGIN_RELEASE}`);
+  const pluginPath = path.join(pluginDir, "bgutil-ytdlp-pot-provider.zip");
+  await mkdir(pluginDir, { recursive: true });
+  try {
+    const existing = await readFile(pluginPath);
+    if (crypto.createHash("sha256").update(existing).digest("hex") === YT_DLP_POT_PLUGIN_SHA256) {
+      return pluginDir;
+    }
+  } catch {
+    // Download the pinned, checksummed plugin below.
+  }
+
+  const response = await fetch(YT_DLP_POT_PLUGIN_URL);
+  if (!response.ok) throw new Error(`POT provider plugin download failed (${response.status}).`);
+  const archive = Buffer.from(await response.arrayBuffer());
+  const checksum = crypto.createHash("sha256").update(archive).digest("hex");
+  if (checksum !== YT_DLP_POT_PLUGIN_SHA256) throw new Error("POT provider plugin checksum mismatch.");
+  await writeFile(pluginPath, archive);
+  return pluginDir;
+}
+
+async function getYtDlpRuntimeArgs() {
+  const pluginDir = await ensureYtDlpPotPlugin();
+  return buildYtDlpRuntimeArgs({
+    nodePath: process.execPath,
+    pluginDir,
+    potProviderUrl: pluginDir ? process.env.YT_DLP_POT_PROVIDER_URL?.trim() : undefined,
+  });
+}
+
+async function fetchYouTubeCaptionsWithYtDlp(
+  url: string,
+  onPhase?: (phase: MediaImportPhase) => void,
+): Promise<{
   title?: string;
   channel?: string;
   duration?: number;
@@ -1600,30 +1648,72 @@ async function fetchYouTubeCaptionsWithYtDlp(url: string): Promise<{
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "omni-ytdlp-"));
   try {
     const binary = await ensureYtDlpBinary();
+    const runtimeArgs = await getYtDlpRuntimeArgs();
     const outputTemplate = path.join(tempDir, "caption.%(ext)s");
-    const { stdout } = await execFileAsync(binary, [
-      "--skip-download",
-      "--write-subs",
-      "--write-auto-subs",
-      "--sub-langs", "en-orig,en",
-      "--sub-format", "vtt",
-      "--js-runtimes", "node",
-      "--no-playlist",
-      "--print-json",
-      "--output", outputTemplate,
-      url,
-    ], { timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
-    const metadataLine = stdout.trim().split(/\r?\n/).at(-1) || "{}";
-    const metadata = JSON.parse(metadataLine);
-    const files = (await readdir(tempDir)).filter((name) => name.toLowerCase().endsWith(".vtt"));
-    const preferred = files.find((name) => /\.en-orig\.vtt$/i.test(name))
-      || files.find((name) => /\.en\.vtt$/i.test(name))
+    let metadata: ReturnType<typeof parseYtDlpMetadata> = {
+      title: undefined,
+      channel: undefined,
+      duration: 0,
+    };
+    let metadataError: unknown;
+    try {
+      onPhase?.('probing');
+      const { stdout } = await execFileAsync(binary, [
+        ...runtimeArgs,
+        "--skip-download",
+        "--no-playlist",
+        "--print", "%(title)j",
+        "--print", "%(channel,uploader)j",
+        "--print", "%(duration)j",
+        url,
+      ], { timeout: 60_000, maxBuffer: 256 * 1024 });
+      metadata = parseYtDlpMetadata(stdout);
+    } catch (error) {
+      metadataError = error;
+    }
+
+    const downloadCaptions = async (automatic: boolean) => {
+      await execFileAsync(binary, [
+        ...runtimeArgs,
+        "--skip-download",
+        automatic ? "--write-auto-subs" : "--write-subs",
+        "--sub-langs", automatic ? "en-orig,en" : "en.*,en",
+        "--sub-format", "vtt",
+        "--no-playlist",
+        "--output", outputTemplate,
+        url,
+      ], { timeout: 90_000, maxBuffer: 512 * 1024 });
+    };
+
+    let captionError: unknown;
+    try {
+      onPhase?.('captions');
+      await downloadCaptions(false);
+    } catch (error) {
+      captionError = error;
+    }
+    let files = (await readdir(tempDir)).filter((name) => name.toLowerCase().endsWith(".vtt"));
+    if (!files.length) {
+      try {
+        await downloadCaptions(true);
+      } catch (error) {
+        captionError = error;
+      }
+      files = (await readdir(tempDir)).filter((name) => name.toLowerCase().endsWith(".vtt"));
+    }
+
+    const preferred = files.find((name) => /\.en\.vtt$/i.test(name))
+      || files.find((name) => /\.en-orig\.vtt$/i.test(name))
       || files[0];
-    if (!preferred) return { title: metadata.title, channel: metadata.channel, duration: metadata.duration, segments: [] };
+    if (!preferred) {
+      if (captionError || metadataError) throw captionError || metadataError;
+      return { ...metadata, segments: [] };
+    }
+    onPhase?.('normalizing');
     const vtt = await readFile(path.join(tempDir, preferred), "utf8");
     return {
       title: metadata.title,
-      channel: metadata.channel || metadata.uploader,
+      channel: metadata.channel,
       duration: metadata.duration,
       segments: normalizeAndAlignVtt(vtt),
     };
@@ -1643,7 +1733,9 @@ async function transcribeYouTubeAudioWithYtDlp(
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'omni-ytaudio-'));
   try {
     const binary = await ensureYtDlpBinary();
+    const runtimeArgs = await getYtDlpRuntimeArgs();
     await execFileAsync(binary, [
+      ...runtimeArgs,
       '--no-playlist',
       '--max-filesize', '14M',
       '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
@@ -1686,44 +1778,67 @@ async function transcribeYouTubeAudioWithYtDlp(
   }
 }
 
-// Import the complete timed transcript. Captions remain the source of truth; AI may only enrich them.
-app.post("/api/media/youtube/import", async (req, res) => {
-  try {
-    const { url, topic } = req.body;
+// Import the complete timed transcript. Captions remain the source of truth;
+// AI is only used when no usable caption source exists.
+async function buildYouTubeMediaSession(
+  req: express.Request,
+  url: string,
+  topic: string | undefined,
+  onPhase: (phase: MediaImportPhase) => void,
+): Promise<{
+  session: MediaSession;
+  validation: { coverage: number; segmentCount: number; durationSeconds: number };
+}> {
     const videoId = extractYouTubeId(url);
-    if (!videoId) return res.status(400).json({ error: "URL YouTube không hợp lệ." });
+    if (!videoId) throw Object.assign(new Error("Invalid YouTube URL"), { code: "INVALID_YOUTUBE_URL" });
+    const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
     let videoTitle = "YouTube lesson";
     let channelTitle = "YouTube";
     let durationSeconds = 0;
     let captionSource: "yt-dlp" | "youtube-transcript" | "gemini-audio" = "yt-dlp";
     let normalized: NormalizedTranscriptSegment[] = [];
-    let ytDlpWarning: string | undefined;
+    let providerFailure: unknown;
 
     try {
-      const imported = await fetchYouTubeCaptionsWithYtDlp(url);
+      const imported = await fetchYouTubeCaptionsWithYtDlp(canonicalUrl, onPhase);
       videoTitle = imported.title || videoTitle;
       channelTitle = imported.channel || channelTitle;
       durationSeconds = Number(imported.duration) || 0;
       normalized = imported.segments;
     } catch (error: any) {
-      ytDlpWarning = error?.message || String(error);
-      console.warn("[Media import] yt-dlp unavailable, trying caption facade:", ytDlpWarning);
+      providerFailure = error;
+    }
+
+    if (normalized.length) {
+      const validation = validateTranscriptCoverage(normalized, durationSeconds);
+      if (!validation.valid) {
+        providerFailure = new Error(validation.issue?.toUpperCase() || 'TRANSCRIPT_INVALID');
+        normalized = [];
+      }
     }
 
     if (!normalized.length) {
       captionSource = "youtube-transcript";
       try {
+        onPhase('captions');
         const { YoutubeTranscript } = await import("youtube-transcript");
         const raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" })
           .catch(() => YoutubeTranscript.fetchTranscript(videoId));
+        onPhase('normalizing');
         normalized = alignTranscriptSentences(raw.map((cue) => ({
           start: cue.offset / 1000,
           end: (cue.offset + cue.duration) / 1000,
           text: cue.text.replace(/\s+/g, " ").trim(),
         })));
-        durationSeconds = normalized.at(-1)?.end || durationSeconds;
-      } catch {
+        if (!durationSeconds) durationSeconds = normalized.at(-1)?.end || 0;
+        const validation = validateTranscriptCoverage(normalized, durationSeconds);
+        if (!validation.valid) {
+          providerFailure = new Error(validation.issue?.toUpperCase() || 'TRANSCRIPT_INVALID');
+          normalized = [];
+        }
+      } catch (error) {
+        providerFailure ||= error;
         normalized = [];
       }
     }
@@ -1731,53 +1846,29 @@ app.post("/api/media/youtube/import", async (req, res) => {
     if (!normalized.length) {
       const ai = getGeminiClient(req);
       if (!ai) {
-        return res.status(422).json({
-          error: "Video không có caption tiếng Anh. Cần Gemini API key để chép lời audio hoặc hãy upload file dưới 14 MB; hệ thống sẽ không tự bịa transcript.",
-          code: "CAPTIONS_UNAVAILABLE",
-          detail: ytDlpWarning,
-        });
+        throw providerFailure || new Error('CAPTIONS_UNAVAILABLE');
       }
       try {
-        normalized = await transcribeYouTubeAudioWithYtDlp(url, durationSeconds, ai);
+        onPhase('transcribing');
+        normalized = await transcribeYouTubeAudioWithYtDlp(canonicalUrl, durationSeconds, ai);
         captionSource = 'gemini-audio';
       } catch (error: any) {
-        return res.status(422).json({
-          error: error?.message || "Không thể chép lời audio YouTube.",
-          code: "AUDIO_TRANSCRIPTION_UNAVAILABLE",
-          detail: ytDlpWarning,
-        });
+        throw error;
       }
     }
 
-    const ai = getGeminiClient(req);
-    let translations: string[] = [];
-    let extractedVocab: any[] = [];
-    if (ai) {
-      const enrichment = await callGeminiResiliently(ai, {
-        taskTier: "balanced",
-        contents: `Translate each numbered English caption to natural Vietnamese without changing, merging, deleting or reordering captions. Also extract at most 8 useful B2-C2 expressions. Return JSON {"translations":[{"index":0,"translation":"..."}],"extractedVocab":[{"word":"...","pos":"...","definitionVi":"...","definitionEn":"...","exampleEn":"...","collocations":[],"cefrLevel":"C1"}]}.
-
-CAPTIONS:\n${normalized.map((segment, index) => `${index}: ${segment.text}`).join("\n")}`,
-        config: { responseMimeType: "application/json" },
-        maxRetriesPerModel: 1,
-      });
-      if (enrichment.text) {
-        try {
-          const parsed = JSON.parse(enrichment.text);
-          if (Array.isArray(parsed.translations)) {
-            translations = parsed.translations.reduce((all: string[], item: any) => {
-              if (Number.isInteger(item.index)) all[item.index] = String(item.translation || "");
-              return all;
-            }, []);
-          }
-          if (Array.isArray(parsed.extractedVocab)) extractedVocab = parsed.extractedVocab;
-        } catch (error) {
-          console.warn("[Media import] enrichment JSON rejected:", error);
-        }
-      }
+    onPhase('validating');
+    const transcriptValidation = validateTranscriptCoverage(normalized, durationSeconds);
+    if (!transcriptValidation.valid) {
+      throw new Error(transcriptValidation.issue?.toUpperCase() || 'TRANSCRIPT_INVALID');
     }
 
-    const session = {
+    // Import stays quota-free when captions are available. Translation and
+    // vocabulary enrichment are explicit learner actions in the Media room.
+    const translations: string[] = [];
+    const extractedVocab: MediaSession['extractedVocab'] = [];
+
+    const session: MediaSession = {
       id: `media_yt_${videoId}_${Date.now()}`,
       title: videoTitle,
       mediaType: "youtube" as const,
@@ -1803,11 +1894,185 @@ CAPTIONS:\n${normalized.map((segment, index) => `${index}: ${segment.text}`).joi
       extractedVocab,
       transcriptVersion: { rawSource: captionSource, normalizerVersion: "vtt-rolling-v1", importedAt: new Date().toISOString() },
     };
-    return res.json({ session, warnings: ytDlpWarning && captionSource !== "yt-dlp" ? [ytDlpWarning] : [] });
-  } catch (error: any) {
-    console.error("YouTube import error:", error);
-    return res.status(500).json({ error: error?.message || "Không thể nhập video YouTube." });
+    return {
+      session,
+      validation: {
+        coverage: transcriptValidation.coverage,
+        segmentCount: normalized.length,
+        durationSeconds: session.durationSeconds,
+      },
+    };
+}
+
+const mediaImportJobs = new Map<string, MediaImportJob>();
+const mediaImportWindows = new Map<string, { startedAt: number; count: number }>();
+const MEDIA_IMPORT_WINDOW_MS = 10 * 60 * 1000;
+const MEDIA_IMPORT_LIMIT_PER_WINDOW = 5;
+const MEDIA_IMPORT_MAX_JOBS = 100;
+let mediaCapabilitiesCache: { expiresAt: number; value: MediaCapabilities } | undefined;
+
+function pruneMediaImportJobs(now = Date.now()) {
+  for (const [id, job] of mediaImportJobs) {
+    if (now - Date.parse(job.updatedAt) >= 60 * 60 * 1000) mediaImportJobs.delete(id);
   }
+}
+
+function updateMediaImportJob(id: string, patch: Partial<MediaImportJob>) {
+  const current = mediaImportJobs.get(id);
+  if (!current) return;
+  mediaImportJobs.set(id, {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function setMediaImportPhase(id: string, phase: MediaImportPhase) {
+  updateMediaImportJob(id, { phase, progress: progressForMediaImportPhase(phase) });
+}
+
+async function detectMediaCapabilities(): Promise<MediaCapabilities> {
+  if (mediaCapabilitiesCache && mediaCapabilitiesCache.expiresAt > Date.now()) {
+    return mediaCapabilitiesCache.value;
+  }
+
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  const jsRuntime = Number.isFinite(nodeMajor) && nodeMajor >= 22;
+  let ytDlp = false;
+  try {
+    const binary = await ensureYtDlpBinary();
+    await execFileAsync(binary, ['--version'], { timeout: 15_000, maxBuffer: 32 * 1024 });
+    ytDlp = true;
+  } catch {
+    ytDlp = false;
+  }
+
+  let potProvider = false;
+  const providerUrl = process.env.YT_DLP_POT_PROVIDER_URL?.trim();
+  if (providerUrl) {
+    try {
+      const pingUrl = new URL('/ping', providerUrl).toString();
+      const response = await fetch(pingUrl, { signal: AbortSignal.timeout(3_000) });
+      potProvider = response.ok;
+    } catch {
+      potProvider = false;
+    }
+  }
+
+  const available = ytDlp && jsRuntime;
+  const value: MediaCapabilities = {
+    youtubeImport: {
+      available,
+      ytDlp,
+      jsRuntime,
+      potProvider,
+      reason: available
+        ? undefined
+        : !ytDlp
+          ? 'Máy chủ chưa cài được yt-dlp đã pin và kiểm tra checksum.'
+          : 'Máy chủ cần Node.js 22 trở lên để giải thử thách JavaScript của YouTube.',
+    },
+    uploadAudio: true,
+    uploadCaptions: true,
+    pasteTranscript: true,
+  };
+  mediaCapabilitiesCache = { value, expiresAt: Date.now() + 30_000 };
+  return value;
+}
+
+app.get('/api/media/capabilities', async (_req, res) => {
+  return res.json(await detectMediaCapabilities());
+});
+
+app.post('/api/media/youtube/import', async (req, res) => {
+  const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+  const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim() : undefined;
+  if (!extractYouTubeId(url)) {
+    return res.status(400).json({
+      code: 'INVALID_YOUTUBE_URL',
+      message: 'URL YouTube không hợp lệ.',
+      retryable: false,
+      recoveryAction: 'retry',
+    });
+  }
+
+  const capabilities = await detectMediaCapabilities();
+  if (!capabilities.youtubeImport.available) {
+    return res.status(503).json({
+      code: 'MEDIA_IMPORT_UNAVAILABLE',
+      message: capabilities.youtubeImport.reason,
+      retryable: false,
+      recoveryAction: 'open_media_help',
+    });
+  }
+
+  pruneMediaImportJobs();
+  if (mediaImportJobs.size >= MEDIA_IMPORT_MAX_JOBS) {
+    return res.status(503).json({
+      code: 'MEDIA_IMPORT_BUSY',
+      message: 'Hàng đợi Media đang đầy. Hãy thử lại sau ít phút hoặc dùng file VTT/SRT hay transcript.',
+      retryable: true,
+      recoveryAction: 'retry_or_upload',
+    });
+  }
+
+  const quota = consumeFixedWindowQuota(
+    mediaImportWindows,
+    req.ip || req.socket.remoteAddress || 'unknown',
+    Date.now(),
+    MEDIA_IMPORT_LIMIT_PER_WINDOW,
+    MEDIA_IMPORT_WINDOW_MS,
+  );
+  if (!quota.allowed) {
+    res.setHeader('Retry-After', String(quota.retryAfterSeconds));
+    return res.status(429).json({
+      code: 'MEDIA_IMPORT_RATE_LIMITED',
+      message: 'Bạn đã tạo nhiều tác vụ Media liên tiếp. Hãy chờ một chút hoặc dùng VTT/SRT hay transcript.',
+      retryable: true,
+      retryAfter: quota.retryAfterSeconds,
+      recoveryAction: 'retry_or_upload',
+    });
+  }
+
+  const now = new Date().toISOString();
+  const job: MediaImportJob = {
+    id: `media_job_${crypto.randomUUID()}`,
+    phase: 'probing',
+    progress: progressForMediaImportPhase('probing'),
+    createdAt: now,
+    updatedAt: now,
+    source: 'youtube',
+  };
+  mediaImportJobs.set(job.id, job);
+
+  void (async () => {
+    try {
+      const result = await buildYouTubeMediaSession(req, url, topic, (phase) => setMediaImportPhase(job.id, phase));
+      updateMediaImportJob(job.id, {
+        phase: 'ready',
+        progress: 100,
+        session: result.session,
+        validation: result.validation,
+      });
+    } catch (error) {
+      const failure = classifyMediaImportFailure(error);
+      console.warn(`[Media import] category=${failure.category} requestId=${failure.requestId}`);
+      updateMediaImportJob(job.id, {
+        phase: 'failed',
+        progress: 100,
+        failure,
+      });
+    }
+  })();
+
+  setTimeout(() => mediaImportJobs.delete(job.id), 60 * 60 * 1000).unref();
+  return res.status(202).json(job);
+});
+
+app.get('/api/media/imports/:id', (req, res) => {
+  const job = mediaImportJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ code: 'MEDIA_IMPORT_NOT_FOUND', message: 'Tác vụ nhập media không còn tồn tại.' });
+  return res.json(job);
 });
 
 app.post("/api/gemini/tts", (req, res) => res.redirect(307, "/api/tts/synthesize"));
@@ -2145,37 +2410,25 @@ Trả về duy nhất 1 JSON hợp lệ:
 });
 
 // Extract High-yield IELTS Vocabulary from Media Session
+const MediaVocabExtractionSchema = z.object({
+  vocabItems: z.array(z.object({
+    word: z.string().min(1),
+    pos: z.enum(['noun', 'verb', 'adj', 'adv', 'phrase']),
+    definitionVi: z.string().min(1),
+    definitionEn: z.string().min(1),
+    exampleEn: z.string().min(1),
+    exampleVi: z.string().optional(),
+    collocations: z.array(z.string()).max(8),
+    cefrLevel: z.enum(['B2', 'C1', 'C2']),
+  })).min(1).max(10),
+});
+
 app.post("/api/media/extract-vocab", async (req, res) => {
   try {
     const { transcriptText, topic } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
 
     if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo từ vựng suy đoán.", status: "unavailable" });
-
-    if (!ai) {
-      return res.json({
-        vocabItems: [
-          {
-            word: "mitigate",
-            pos: "verb",
-            definitionVi: "làm giảm bớt mức độ nghiêm trọng",
-            definitionEn: "make something less severe, serious, or painful",
-            exampleEn: "Government policies can mitigate the adverse effects of climate change.",
-            collocations: ["mitigate climate change", "mitigate risks"],
-            cefrLevel: "C1"
-          },
-          {
-            word: "sustainable",
-            pos: "adj",
-            definitionVi: "bền vững, thân thiện với môi trường",
-            definitionEn: "able to be maintained at a certain rate or level",
-            exampleEn: "Sustainable practices are essential for long-term economic prosperity.",
-            collocations: ["sustainable development", "sustainable future"],
-            cefrLevel: "B2"
-          }
-        ]
-      });
-    }
 
     const prompt = `Bạn là Chuyên gia Khảo thí Ngôn ngữ Cambridge IELTS.
 Hãy trích xuất 6-10 từ vựng hoặc collocations học thuật (Academic C1/C2) đắt giá nhất từ văn bản transcript sau:
@@ -2207,33 +2460,22 @@ Trả về duy nhất 1 JSON hợp lệ theo định dạng:
       },
     });
 
-    if (geminiText) {
-      try {
-        const parsed = JSON.parse(geminiText);
-        return res.json(parsed);
-      } catch (parseErr) {
-        console.warn("Parse extract vocab failed");
-      }
+    if (!geminiText) {
+      return res.status(503).json({ error: 'AI chưa thể trích xuất từ vựng lúc này; không trả dữ liệu mẫu giả.', status: 'unavailable' });
     }
-
-    res.json({
-      vocabularies: [
-        {
-          word: "disproportionate",
-          phonetic: "/ˌdɪsprəˈpɔːʃənət/",
-          pos: "adjective",
-          definitionVi: "không tương xứng, quá mức",
-          definitionEn: "too large or too small in comparison with something else",
-          exampleEn: "The policy imposes a disproportionate burden on lower-income families.",
-          exampleVi: "Chính sách này đặt gánh nặng không tương xứng lên các gia đình có thu nhập thấp hơn.",
-          collocations: ["disproportionate impact", "disproportionate share"],
-          cefrLevel: "C1"
-        }
-      ]
-    });
-  } catch (error: any) {
-    console.error("Extract Vocab Error:", error);
-    res.status(500).json({ error: error.message || "Lỗi trích xuất từ vựng" });
+    let raw: unknown;
+    try {
+      raw = JSON.parse(geminiText);
+    } catch {
+      return res.status(502).json({ error: 'Kết quả AI không đúng định dạng. Hãy thử lại.', code: 'SCHEMA_INVALID' });
+    }
+    const parsed = MediaVocabExtractionSchema.safeParse(raw);
+    if (!parsed.success) {
+      return res.status(502).json({ error: 'Kết quả AI không vượt qua kiểm tra dữ liệu. Hãy thử lại.', code: 'SCHEMA_INVALID' });
+    }
+    return res.json(parsed.data);
+  } catch {
+    return res.status(503).json({ error: 'Không thể trích xuất từ vựng lúc này. Hãy thử lại sau.', status: 'unavailable' });
   }
 });
 
@@ -7286,6 +7528,7 @@ Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] 
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

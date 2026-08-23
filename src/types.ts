@@ -625,6 +625,62 @@ export interface MediaTranscriptSegment {
   shadowingEvaluation?: MediaShadowingEvaluation;
 }
 
+export type MediaImportPhase =
+  | 'probing'
+  | 'captions'
+  | 'normalizing'
+  | 'transcribing'
+  | 'validating'
+  | 'ready'
+  | 'failed';
+
+export type MediaImportFailureCategory =
+  | 'provider_blocked'
+  | 'runtime_missing'
+  | 'provider_timeout'
+  | 'audio_too_large'
+  | 'ai_quota_exhausted'
+  | 'transcript_invalid'
+  | 'provider_failed';
+
+export interface MediaImportFailure {
+  category: MediaImportFailureCategory;
+  code: string;
+  message: string;
+  retryable: boolean;
+  recoveryAction: 'retry' | 'upload_source' | 'retry_or_upload' | 'open_media_help';
+  requestId: string;
+}
+
+export interface MediaImportJob {
+  id: string;
+  phase: MediaImportPhase;
+  progress: number;
+  createdAt: string;
+  updatedAt: string;
+  source: 'youtube';
+  session?: MediaSession;
+  failure?: MediaImportFailure;
+  validation?: {
+    coverage: number;
+    segmentCount: number;
+    durationSeconds: number;
+  };
+}
+
+export interface MediaCapabilities {
+  youtubeImport: {
+    available: boolean;
+    ytDlp: boolean;
+    jsRuntime: boolean;
+    potProvider: boolean;
+    reason?: string;
+  };
+  uploadAudio: boolean;
+  uploadCaptions: boolean;
+  pasteTranscript: boolean;
+}
+
 export interface MediaSession {
   id: string;
   title: string;
@@ -634,7 +690,7 @@ export interface MediaSession {
   channelTitle?: string;
   thumbnail?: string;
   topic: string;
-  level: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.0+';
+  level: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.0+' | 'Adaptive';
   durationSeconds: number;
   currentTimestamp: number;
   transcriptSegments: MediaTranscriptSegment[];
@@ -642,6 +698,11 @@ export interface MediaSession {
   completed: boolean;
   lastPracticedDate?: string;
   extractedVocab?: MediaExtractedVocab[];
+  transcriptVersion?: {
+    rawSource: 'yt-dlp' | 'youtube-transcript' | 'gemini-audio' | 'user-upload';
+    normalizerVersion: string;
+    importedAt: string;
+  };
   shadowingAccuracyAvg?: number;
   dictationAccuracyAvg?: number;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeAndAlignVtt, normalizeRollingVtt } from '../transcriptNormalizer';
+import { normalizeAndAlignVtt, normalizeRollingVtt, parseTimedCaptionText } from '../transcriptNormalizer';
 
 describe('normalizeRollingVtt', () => {
   it('deduplicates rolling captions while preserving the complete lesson', () => {
@@ -72,5 +72,20 @@ Listen to the first sentence. Then repeat the second sentence!`);
     ]);
     expect(result[0].start).toBe(0);
     expect(result.at(-1)?.end).toBe(8);
+  });
+
+  it('accepts user-owned SRT captions as the no-cookie fallback', () => {
+    const result = parseTimedCaptionText(`1
+00:00:00,000 --> 00:00:03,000
+First uploaded caption.
+
+2
+00:00:03,000 --> 00:00:07,000
+Second uploaded caption.`);
+
+    expect(result).toEqual([
+      { start: 0, end: 3, text: 'First uploaded caption.' },
+      { start: 3, end: 7, text: 'Second uploaded caption.' },
+    ]);
   });
 });
