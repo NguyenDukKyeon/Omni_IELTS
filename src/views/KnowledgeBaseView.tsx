@@ -45,7 +45,7 @@ export const KnowledgeBaseView: React.FC = () => {
         </div>
 
         {/* Ask AI Global Quick Trigger */}
-        <button
+        <button data-ux-flow="knowledge.learn"
           onClick={() =>
             openAITutorWithPrompt(
               'Tôi muốn được tư vấn chiến thuật làm bài thi IELTS đạt mục tiêu Band 7.5+. Hãy phân tích giúp tôi lộ trình và các kỹ thuật trọng yếu!'
@@ -60,7 +60,7 @@ export const KnowledgeBaseView: React.FC = () => {
 
       {/* Main Navigation Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-slate-200/80 dark:border-slate-800">
-        <button
+        <button data-ux-flow="knowledge.learn"
           onClick={() => setActiveTab('strategies')}
           className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeTab === 'strategies'
@@ -72,7 +72,7 @@ export const KnowledgeBaseView: React.FC = () => {
           <span>Chiến Thuật Từng Dạng Bài & Quiz Ứng Dụng</span>
         </button>
 
-        <button
+        <button data-ux-flow="knowledge.learn"
           onClick={() => setActiveTab('model_answers')}
           className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeTab === 'model_answers'
@@ -84,7 +84,7 @@ export const KnowledgeBaseView: React.FC = () => {
           <span>Bài Mẫu Band 8.5+ Có Chú Thích AI</span>
         </button>
 
-        <button
+        <button data-ux-flow="knowledge.learn"
           onClick={() => setActiveTab('pitfalls')}
           className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeTab === 'pitfalls'
@@ -96,7 +96,7 @@ export const KnowledgeBaseView: React.FC = () => {
           <span>Sổ Tay Bẫy & Lỗi Phổ Biến</span>
         </button>
 
-        <button
+        <button data-ux-flow="knowledge.learn"
           onClick={() => setActiveTab('overview_calculator')}
           className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
             activeTab === 'overview_calculator'

@@ -14,6 +14,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { MistakeNotebookModal } from './components/MistakeNotebookModal';
 import { DiagnosticPsychometricianModal } from './components/diagnostic/DiagnosticPsychometricianModal';
 import { SentenceAcademicStylistModal } from './components/practice/SentenceAcademicStylistModal';
+import { AppNotification } from './components/AppNotification';
 
 import { DashboardView } from './views/DashboardView';
 import { SourceIngestionView } from './views/SourceIngestionView';
@@ -117,6 +118,7 @@ const MainContent: React.FC = () => {
         initialSentence={sentenceStylistData.sentence}
         initialTopic={sentenceStylistData.topic}
       />
+      <AppNotification />
     </div>
   );
 };

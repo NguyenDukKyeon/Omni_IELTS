@@ -286,7 +286,7 @@ export const ReadingQuestionModule: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <select data-ux-flow="practice.skills"
               value={selectedTopic}
               onChange={(e) => setSelectedTopic(e.target.value)}
               className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -298,7 +298,7 @@ export const ReadingQuestionModule: React.FC = () => {
               <option value="Economics, Global Trade & Energy">⚡ Economics & Energy</option>
             </select>
 
-            <select
+            <select data-ux-flow="practice.skills"
               value={selectedDifficulty}
               onChange={(e) => setSelectedDifficulty(e.target.value)}
               className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -308,7 +308,7 @@ export const ReadingQuestionModule: React.FC = () => {
               <option value="Band 8.5+">Band 8.5+ (Mastery)</option>
             </select>
 
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={() => handleGenerateNew(selectedType)}
               disabled={isGenerating}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
@@ -328,7 +328,7 @@ export const ReadingQuestionModule: React.FC = () => {
           {READING_TYPES.map((t) => {
             const isSelected = selectedType === t.type;
             return (
-              <button
+              <button data-ux-flow="practice.skills"
                 key={t.type}
                 onClick={() => handleSelectType(t.type)}
                 className={`text-left p-3 rounded-xl border transition-all text-xs flex flex-col justify-between ${
@@ -505,7 +505,7 @@ export const ReadingQuestionModule: React.FC = () => {
                     {/* Input Controls according to Question Type */}
                     {exercise.type === 'matching_headings' && exercise.headingsList ? (
                       <div className="space-y-1">
-                        <select
+                        <select data-ux-flow="practice.skills"
                           disabled={isSubmitted}
                           value={userVal}
                           onChange={(e) => handleAnswerChange(q.id, e.target.value)}
@@ -522,7 +522,7 @@ export const ReadingQuestionModule: React.FC = () => {
                     ) : exercise.type === 'true_false_not_given' ? (
                       <div className="flex items-center gap-2">
                         {['TRUE', 'FALSE', 'NOT GIVEN'].map((opt) => (
-                          <button
+                          <button data-ux-flow="practice.skills"
                             key={opt}
                             disabled={isSubmitted}
                             onClick={() => handleAnswerChange(q.id, opt)}
@@ -539,7 +539,7 @@ export const ReadingQuestionModule: React.FC = () => {
                     ) : exercise.type === 'yes_no_not_given' ? (
                       <div className="flex items-center gap-2">
                         {['YES', 'NO', 'NOT GIVEN'].map((opt) => (
-                          <button
+                          <button data-ux-flow="practice.skills"
                             key={opt}
                             disabled={isSubmitted}
                             onClick={() => handleAnswerChange(q.id, opt)}
@@ -556,7 +556,7 @@ export const ReadingQuestionModule: React.FC = () => {
                     ) : exercise.type === 'matching_information' ? (
                       <div className="flex items-center gap-2">
                         {exercise.passage.paragraphs.map((p) => (
-                          <button
+                          <button data-ux-flow="practice.skills"
                             key={p.label}
                             disabled={isSubmitted}
                             onClick={() => handleAnswerChange(q.id, p.label)}
@@ -572,7 +572,7 @@ export const ReadingQuestionModule: React.FC = () => {
                       </div>
                     ) : (
                       <div>
-                        <input
+                        <input data-ux-flow="practice.skills"
                           type="text"
                           disabled={isSubmitted}
                           placeholder="Nhập câu trả lời từ bài đọc..."
@@ -605,7 +605,7 @@ export const ReadingQuestionModule: React.FC = () => {
                         )}
                         {q.relatedGrammarTopicId && (
                           <div className="flex items-center gap-2 pt-1">
-                            <button
+                            <button data-ux-flow="practice.skills"
                               onClick={() =>
                                 openAITutorWithPrompt(
                                   `Hãy giải thích kỹ về bẫy dạng bài Reading này liên quan đến chủ đề ngữ pháp "${q.relatedGrammarTopicId}" và cách nhận diện từ khóa trong bài "${exercise.title}".`
@@ -620,7 +620,7 @@ export const ReadingQuestionModule: React.FC = () => {
 
                         {/* Interactive Trap Classification AI Trigger */}
                         <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                          <button
+                          <button data-ux-flow="practice.skills"
                             type="button"
                             onClick={() => {
                               const snippet = q.paragraphReference
@@ -662,7 +662,7 @@ export const ReadingQuestionModule: React.FC = () => {
             {/* Action buttons */}
             <div className="pt-2 flex items-center gap-3">
               {!isSubmitted ? (
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={handleSubmit}
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
                 >
@@ -670,13 +670,13 @@ export const ReadingQuestionModule: React.FC = () => {
                 </button>
               ) : (
                 <div className="w-full flex gap-2">
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => handleGenerateNew(selectedType)}
                     className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
                   >
                     <Sparkles className="w-4 h-4" /> Sinh đề AI tiếp theo
                   </button>
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => {
                       setIsSubmitted(false);
                       setUserAnswers({});

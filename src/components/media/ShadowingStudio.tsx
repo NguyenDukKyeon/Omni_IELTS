@@ -314,7 +314,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
               <Gauge className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
               {[0.75, 0.9, 1.0].map((spd) => (
-                <button
+                <button data-ux-flow="media.learning"
                   key={spd}
                   onClick={() => setPlaybackSpeed(spd)}
                   className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
@@ -332,7 +332,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
               <Repeat className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
               {[1, 2, 3].map((lp) => (
-                <button
+                <button data-ux-flow="media.learning"
                   key={lp}
                   onClick={() => setLoopCount(lp)}
                   className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
@@ -360,7 +360,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
           {/* Play Native Button */}
           <div className="flex justify-center">
             {isPlayingNative ? (
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={handleStopNativeAudio}
                 className="w-16 h-16 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center shadow-lg shadow-rose-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
                 title="Dừng phát âm"
@@ -368,7 +368,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
                 <Pause className="w-7 h-7" />
               </button>
             ) : (
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={handlePlayNativeAudio}
                 className="w-16 h-16 rounded-full bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center shadow-lg shadow-sky-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer group"
                 title="Nghe phát âm chuẩn bản xứ"
@@ -396,7 +396,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             )}
 
             <div className="pt-2 flex justify-center">
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={() => setShowTranslation(!showTranslation)}
                 className="text-[11px] font-semibold text-stone-500 dark:text-stone-400 hover:text-sky-600 dark:hover:text-sky-400 underline cursor-pointer"
               >
@@ -414,7 +414,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             {isRecording ? (
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={stopRecording}
                 className="px-8 py-4 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-lg shadow-rose-600/30 flex items-center gap-3 animate-pulse cursor-pointer transition-all"
               >
@@ -423,7 +423,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
                 <span>Dừng Thu Âm & Chấm Điểm AI ({recordingSeconds}s)</span>
               </button>
             ) : (
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={startRecording}
                 disabled={isEvaluating}
                 className="px-8 py-4 rounded-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 flex items-center gap-3 cursor-pointer hover:scale-102 active:scale-98 transition-all"
@@ -434,7 +434,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             )}
 
             {userAudioUrl && !isRecording && (
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={handleTogglePlayUserAudio}
                 className="px-5 py-3.5 rounded-full bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-800 dark:text-stone-200 text-xs font-bold flex items-center gap-2 border border-stone-200 dark:border-stone-600 cursor-pointer transition-all"
               >
@@ -488,7 +488,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                <button
+                <button data-ux-flow="media.learning"
                   onClick={() =>
                     openAITutorWithPrompt(
                       `Hãy giải thích chi tiết cách nói tự nhiên câu này và hướng dẫn sửa lỗi phát âm: "${segment.text}". Nhận xét hiện tại của AI: "${evaluation.feedbackVi}"`
@@ -579,7 +579,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
         {/* Bottom Navigation */}
         <div className="pt-4 border-t border-stone-100 dark:border-stone-700 flex items-center justify-between">
-          <button
+          <button data-ux-flow="media.learning"
             onClick={handlePrev}
             disabled={activeSegmentIndex === 0}
             className="px-4 py-2 rounded-xl text-xs font-bold text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700 disabled:opacity-30 transition-all flex items-center gap-1.5 cursor-pointer"
@@ -592,7 +592,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             {activeSegmentIndex + 1} / {session.transcriptSegments.length}
           </span>
 
-          <button
+          <button data-ux-flow="media.learning"
             onClick={handleNext}
             disabled={activeSegmentIndex === session.transcriptSegments.length - 1}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-30 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shadow-indigo-600/20"

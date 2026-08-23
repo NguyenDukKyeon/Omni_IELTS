@@ -141,7 +141,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
           </div>
 
           {/* Pause Button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={onTogglePause}
             title={isPaused ? 'Tiếp tục làm bài' : 'Tạm dừng đồng hồ'}
             className={`p-2 rounded-lg border transition-colors ${
@@ -160,21 +160,21 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
         <div className="flex items-center gap-2">
           {/* Text Size Control */}
           <div className={`hidden sm:flex items-center border rounded-lg p-0.5 text-xs ${colorScheme === 'high_contrast' ? 'bg-black border-yellow-500 text-yellow-300' : colorScheme === 'inverted' ? 'bg-white border-slate-300 text-slate-700' : 'bg-slate-900 border-slate-800 text-slate-400'}`}>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => onChangeTextSize('normal')}
               className={`px-2 py-1 rounded transition-colors ${textSize === 'normal' ? (colorScheme === 'high_contrast' ? 'bg-yellow-400 text-black font-bold' : 'bg-slate-700 text-white font-bold') : 'hover:opacity-80'}`}
               title="Cỡ chữ tiêu chuẩn (Standard)"
             >
               A
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => onChangeTextSize('large')}
               className={`px-2 py-1 rounded transition-colors ${textSize === 'large' ? (colorScheme === 'high_contrast' ? 'bg-yellow-400 text-black font-bold' : 'bg-slate-700 text-white font-bold') : 'hover:opacity-80'}`}
               title="Cỡ chữ lớn (Large)"
             >
               A+
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => onChangeTextSize('xlarge')}
               className={`px-2 py-1 rounded transition-colors ${textSize === 'xlarge' ? (colorScheme === 'high_contrast' ? 'bg-yellow-400 text-black font-bold' : 'bg-slate-700 text-white font-bold') : 'hover:opacity-80'}`}
               title="Cỡ chữ cực lớn (Extra Large)"
@@ -186,21 +186,21 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
           {/* Color Schemes Switcher (IDP/BC standard) */}
           {onChangeColorScheme && (
             <div className={`hidden md:flex items-center border rounded-lg p-0.5 text-xs ${colorScheme === 'high_contrast' ? 'bg-black border-yellow-500' : colorScheme === 'inverted' ? 'bg-white border-slate-300' : 'bg-slate-900 border-slate-800'}`}>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => onChangeColorScheme('standard')}
                 className={`px-2 py-1 rounded text-[11px] font-semibold transition-all ${colorScheme === 'standard' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                 title="Chế độ màu Chuẩn (Standard Dark)"
               >
                 Chuẩn
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => onChangeColorScheme('high_contrast')}
                 className={`px-2 py-1 rounded text-[11px] font-semibold transition-all ${colorScheme === 'high_contrast' ? 'bg-yellow-400 text-black font-bold' : 'text-yellow-400 hover:bg-yellow-950/40'}`}
                 title="Chế độ Tương phản cao: Chữ vàng trên nền đen (High Contrast - Yellow on Black)"
               >
                 Tương phản
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => onChangeColorScheme('inverted')}
                 className={`px-2 py-1 rounded text-[11px] font-semibold transition-all ${colorScheme === 'inverted' ? 'bg-slate-300 text-slate-900 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
                 title="Chế độ Đảo màu: Nền sáng (Inverted Light Paper)"
@@ -211,7 +211,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
           )}
 
           {/* Help Info */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setShowHelpModal(true)}
             title="Quy chế & Hướng dẫn làm bài thi máy"
             className={`p-2 rounded-lg border transition-colors ${colorScheme === 'high_contrast' ? 'bg-black border-yellow-500 text-yellow-300 hover:bg-yellow-950' : colorScheme === 'inverted' ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-200' : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-slate-200'}`}
@@ -220,7 +220,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
           </button>
 
           {/* Exit Exam */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setShowExitConfirm(true)}
             title="Thoát phòng thi"
             className={`p-2 rounded-lg border transition-colors ${colorScheme === 'high_contrast' ? 'bg-black border-yellow-500 text-yellow-400 hover:bg-red-950' : 'bg-slate-900 hover:bg-rose-950/50 border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300'}`}
@@ -229,7 +229,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
           </button>
 
           {/* Submit Section Button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={onSubmitSection}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 ml-1 ${
               colorScheme === 'high_contrast'
@@ -257,7 +257,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
               <span className="font-bold underline block">{timeWarningAlert.type === '5min' ? '🚨 CẢNH BÁO 5 PHÚT CUỐI' : '⚠️ THÔNG BÁO 10 PHÚT'}</span>
               <span>{timeWarningAlert.message}</span>
             </div>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setTimeWarningAlert({ ...timeWarningAlert, show: false })}
               className="ml-2 px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-[11px] font-bold"
             >
@@ -276,7 +276,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
                 <HelpCircle className="w-5 h-5 text-blue-400" />
                 Hướng dẫn & Quy chế Thi IELTS trên Máy (CD-IELTS)
               </h3>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setShowHelpModal(false)}
                 className="text-slate-400 hover:text-white text-sm"
               >
@@ -290,7 +290,7 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
               <p>• <strong>Đánh dấu xem lại (Review Flag):</strong> Nhấn vào nút cờ để đánh dấu những câu còn phân vân và quay lại trước khi hết giờ.</p>
               <p>• <strong>Trình phát Listening & Dictation:</strong> Tùy chỉnh tốc độ 0.75x, 1.0x, 1.25x, tua -5s/+5s và luyện chép chính tả A-B Loop bắt âm.</p>
             </div>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setShowHelpModal(false)}
               className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors"
             >
@@ -312,13 +312,13 @@ export const ExamHeader: React.FC<ExamHeaderProps> = ({
               Nếu bạn thoát bây giờ, phiên làm bài thi thử này sẽ kết thúc. Tiến trình hiện tại sẽ được bảo lưu nếu bạn chọn nộp bài và chấm điểm ngay.
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setShowExitConfirm(false)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition-colors"
               >
                 Tiếp tục làm bài
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => {
                   setShowExitConfirm(false);
                   onExitExam();

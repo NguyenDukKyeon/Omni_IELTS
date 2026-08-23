@@ -125,7 +125,7 @@ export const OnboardingModal: React.FC = () => {
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="app.shared"
             id="close-onboarding-modal-btn"
             onClick={() => setIsOnboardingOpen(false)}
             className="p-1.5 rounded-lg hover:bg-white/20 text-white transition-colors"
@@ -166,7 +166,7 @@ export const OnboardingModal: React.FC = () => {
                 </label>
                 <div className="grid grid-cols-5 gap-2">
                   {[5.5, 6.0, 6.5, 7.0, 7.5, 8.0].map((b) => (
-                    <button
+                    <button data-ux-flow="app.shared"
                       key={b}
                       type="button"
                       onClick={() => setTargetBand(b)}
@@ -188,7 +188,7 @@ export const OnboardingModal: React.FC = () => {
                   <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
                     Thời gian dự kiến thi:
                   </label>
-                  <select
+                  <select data-ux-flow="app.shared"
                     value={examMonths}
                     onChange={(e) => setExamMonths(Number(e.target.value))}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 text-sm focus:ring-2 focus:ring-indigo-500"
@@ -204,7 +204,7 @@ export const OnboardingModal: React.FC = () => {
                   <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
                     Thời gian luyện tập mỗi ngày:
                   </label>
-                  <select
+                  <select data-ux-flow="app.shared"
                     value={dailyMinutes}
                     onChange={(e) => setDailyMinutes(Number(e.target.value))}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 text-sm focus:ring-2 focus:ring-indigo-500"
@@ -218,7 +218,7 @@ export const OnboardingModal: React.FC = () => {
               </div>
 
               <div className="pt-3 flex justify-end">
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={() => setStep(2)}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/20"
                 >
@@ -241,7 +241,7 @@ export const OnboardingModal: React.FC = () => {
                     Bấm nút nghe bên dưới và điền từ khóa hoặc chọn đáp án chính xác.
                   </p>
                 </div>
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={() => playTextToSpeech(listeningAudioScript)}
                   className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 text-xs font-bold"
                 >
@@ -267,7 +267,7 @@ export const OnboardingModal: React.FC = () => {
                     { id: 'garden', label: 'In the solar garden' },
                     { id: 'parking', label: 'At the car parking lot' },
                   ].map((opt) => (
-                    <button
+                    <button data-ux-flow="app.shared"
                       key={opt.id}
                       type="button"
                       onClick={() => setListeningAnswer1(opt.id)}
@@ -295,7 +295,7 @@ export const OnboardingModal: React.FC = () => {
                     { id: 'vegetable', label: 'Organic vegetable garden' },
                     { id: 'rain', label: 'Rainwater garden' },
                   ].map((opt) => (
-                    <button
+                    <button data-ux-flow="app.shared"
                       key={opt.id}
                       type="button"
                       onClick={() => setListeningAnswer2(opt.id)}
@@ -312,13 +312,13 @@ export const OnboardingModal: React.FC = () => {
               </div>
 
               <div className="pt-2 flex justify-between">
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={() => setStep(1)}
                   className="px-4 py-2 rounded-xl text-xs font-medium text-stone-700 dark:text-stone-300"
                 >
                   Quay lại
                 </button>
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={() => setStep(3)}
                   disabled={!listeningAnswer1 || !listeningAnswer2}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs"
@@ -359,7 +359,7 @@ export const OnboardingModal: React.FC = () => {
                     { id: 'ignore', label: 'To disregard completely' },
                     { id: 'monitor', label: 'To observe without action' },
                   ].map((opt) => (
-                    <button
+                    <button data-ux-flow="app.shared"
                       key={opt.id}
                       type="button"
                       onClick={() => setReadingAnswer1(opt.id)}
@@ -387,7 +387,7 @@ export const OnboardingModal: React.FC = () => {
                     { id: 'metropolis', label: 'Metropolis' },
                     { id: 'emissions', label: 'Emissions' },
                   ].map((opt) => (
-                    <button
+                    <button data-ux-flow="app.shared"
                       key={opt.id}
                       type="button"
                       onClick={() => setReadingAnswer2(opt.id)}
@@ -404,13 +404,13 @@ export const OnboardingModal: React.FC = () => {
               </div>
 
               <div className="pt-2 flex justify-between">
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={() => setStep(2)}
                   className="px-4 py-2 rounded-xl text-xs font-medium text-stone-700 dark:text-stone-300"
                 >
                   Quay lại
                 </button>
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={handleFinishDiagnostic}
                   disabled={!readingAnswer1 || !readingAnswer2}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-600/20"
@@ -495,7 +495,7 @@ export const OnboardingModal: React.FC = () => {
               </div>
 
               <div className="pt-2 flex justify-end">
-                <button
+                <button data-ux-flow="app.shared"
                   id="start-omni-ielts-journey-btn"
                   onClick={() => setIsOnboardingOpen(false)}
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs tracking-wide shadow-lg shadow-indigo-600/30"

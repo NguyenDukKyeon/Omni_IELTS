@@ -110,7 +110,7 @@ export const IELTSPracticeView: React.FC = () => {
 
         {/* Quick Review Action */}
         <div className="flex items-center gap-2.5 flex-wrap">
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => setIsFullGraderOpen(true)}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer"
           >
@@ -118,7 +118,7 @@ export const IELTSPracticeView: React.FC = () => {
             <span>⚖️ Giám Khảo Chấm 4 Tiêu Chí (full-grader-v1)</span>
           </button>
 
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => setIsItemWriterOpen(true)}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer"
           >
@@ -126,7 +126,7 @@ export const IELTSPracticeView: React.FC = () => {
             <span>🎯 Cambridge Item Writer (Sinh Đề)</span>
           </button>
 
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() =>
               openAITutorWithPrompt(
                 'Hãy kiểm tra lại các bẫy thường gặp nhất trong kỳ thi IELTS ở cả 4 kỹ năng (Reading, Listening, Writing, Speaking) và cho tôi 5 mẹo khắc phục quan trọng nhất.'
@@ -188,7 +188,7 @@ export const IELTSPracticeView: React.FC = () => {
               : 0;
 
           return (
-            <button
+            <button data-ux-flow="practice.skills"
               key={tab.id}
               onClick={() => setActiveTab(tab.id as PracticeTabType)}
               className={`p-3.5 sm:p-4 rounded-2xl border text-left transition-all relative overflow-hidden flex flex-col justify-between ${

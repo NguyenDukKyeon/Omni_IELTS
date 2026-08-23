@@ -227,7 +227,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
       {/* Speaking Part Navigator Header */}
       <div className="bg-slate-950 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-lg">
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => {
               saveCurrentAnswer();
               setCurrentPart('part1');
@@ -242,7 +242,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
             Part 1: Hỏi đáp cơ bản ({speaking.part1.questions.length} câu)
           </button>
 
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => {
               saveCurrentAnswer();
               setCurrentPart('part2');
@@ -256,7 +256,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
             Part 2: Thuyết trình Cue Card (1m chuẩn bị + 2m nói)
           </button>
 
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => {
               saveCurrentAnswer();
               setCurrentPart('part3');
@@ -309,7 +309,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
               </div>
 
               {/* Speak Audio Button */}
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => {
                   const qText =
                     currentPart === 'part1'
@@ -366,7 +366,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
 
               <div className="flex items-center gap-2">
                 {!isPrepActive && prepSecondsRemaining === 60 && (
-                  <button
+                  <button data-ux-flow="mock.exam"
                     onClick={startPart2Prep}
                     className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
                   >
@@ -374,7 +374,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
                   </button>
                 )}
                 {!isSpeakTimerActive && (
-                  <button
+                  <button data-ux-flow="mock.exam"
                     onClick={startPart2Speaking}
                     className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
                   >
@@ -389,7 +389,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
               <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
                 Ghi chú dàn ý 1 phút chuẩn bị (Candidate Notes):
               </label>
-              <textarea
+              <textarea data-ux-flow="mock.exam"
                 value={speakingAnswers.part2Notes}
                 onChange={(e) =>
                   onUpdateSpeaking({ ...speakingAnswers, part2Notes: e.target.value })
@@ -416,7 +416,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={isRecording ? stopRecording : startRecording}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-lg active:scale-95 ${
                   isRecording
@@ -454,7 +454,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
           {/* Question Navigation for Part 1 and Part 3 */}
           {(currentPart === 'part1' || currentPart === 'part3') && (
             <div className="flex items-center justify-between pt-2">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => {
                   saveCurrentAnswer();
                   if (currentQuestionIndex > 0) setCurrentQuestionIndex(currentQuestionIndex - 1);
@@ -470,7 +470,7 @@ export const SpeakingExamView: React.FC<SpeakingExamViewProps> = ({
                 {currentPart === 'part1' ? speaking.part1.questions.length : speaking.part3.questions.length}
               </span>
 
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => {
                   saveCurrentAnswer();
                   const maxLen =

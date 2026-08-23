@@ -189,14 +189,14 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
           </div>
 
           <div className="flex items-center justify-center gap-3 pt-2">
-            <button
+            <button data-ux-flow="grammar.learning"
               onClick={handleStartWorkout}
               className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95"
             >
               <RotateCcw className="w-4 h-4" />
               <span>Luyện thêm 1 hiệp</span>
             </button>
-            <button
+            <button data-ux-flow="grammar.learning"
               onClick={onCompleteSession}
               className="px-5 py-2.5 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 text-xs font-bold rounded-xl transition-colors"
             >
@@ -229,7 +229,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
             <label className="text-xs font-bold text-stone-700 dark:text-stone-300 block mb-2">
               🎯 Chọn Nhóm Bẫy Muốn Rèn Luyện:
             </label>
-            <select
+            <select data-ux-flow="grammar.learning"
               value={selectedTrapFilter}
               onChange={(e) => setSelectedTrapFilter(e.target.value as any)}
               className="w-full text-xs p-2.5 rounded-xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none"
@@ -256,7 +256,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
                 { count: 10, label: '10 câu (Tiêu chuẩn)' },
                 { count: Math.min(20, sortedMistakes.length || 15), label: `Tối đa (${sortedMistakes.length} câu)` },
               ].map((item) => (
-                <button
+                <button data-ux-flow="grammar.learning"
                   key={item.count}
                   type="button"
                   onClick={() => setWorkoutLimit(item.count)}
@@ -275,14 +275,14 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
 
         {/* Start Button */}
         <div className="flex items-center justify-between pt-2">
-          <button
+          <button data-ux-flow="grammar.learning"
             onClick={onBackToAnalytics}
             className="text-xs font-semibold text-stone-700 hover:text-stone-800 dark:hover:text-stone-200"
           >
             ← Quay lại Bản đồ Điểm yếu
           </button>
 
-          <button
+          <button data-ux-flow="grammar.learning"
             id="start-workout-session-btn"
             onClick={handleStartWorkout}
             disabled={sortedMistakes.length === 0}
@@ -315,7 +315,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
           </span>
         </div>
 
-        <button
+        <button data-ux-flow="grammar.learning"
           onClick={() => setIsSessionFinished(true)}
           className="text-stone-700 hover:text-rose-500 dark:hover:text-rose-400 text-xs font-medium"
         >
@@ -363,7 +363,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
             Đề bài / Câu có bẫy cần xử lý
           </span>
 
-          <button
+          <button data-ux-flow="grammar.learning"
             onClick={() => handlePlayTTS(currentMistake?.errorText || '')}
             disabled={isPlayingAudio}
             className="p-1 text-stone-700 hover:text-amber-500 dark:hover:text-amber-400 transition-colors"
@@ -395,7 +395,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {currentMistake.options.map((opt, i) => (
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     key={i}
                     onClick={() => handleSelectOption(opt)}
                     className="p-3 rounded-xl border border-stone-200 dark:border-stone-700 hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-left text-xs font-medium text-stone-900 dark:text-white transition-all active:scale-98"
@@ -409,19 +409,19 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
               </div>
             </div>
           ) : currentMistake?.drillType === 'gap_fill' ? (
-            <form onSubmit={handleCheckTypedAnswer} className="space-y-2">
+            <form data-ux-flow="grammar.learning" onSubmit={handleCheckTypedAnswer} className="space-y-2">
               <span className="text-xs font-bold text-stone-700 dark:text-stone-300 block">
                 ✍️ Nhập từ hoặc dạng đúng (chú ý số ít/nhiều & chính tả):
               </span>
               <div className="flex gap-2">
-                <input
+                <input data-ux-flow="grammar.learning"
                   type="text"
                   value={typedAnswer}
                   onChange={(e) => setTypedAnswer(e.target.value)}
                   placeholder="Nhập đáp án chuẩn..."
                   className="flex-1 text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />
-                <button
+                <button data-ux-flow="grammar.learning"
                   type="submit"
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
                 >
@@ -431,7 +431,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
             </form>
           ) : (
             <div className="text-center py-2">
-              <button
+              <button data-ux-flow="grammar.learning"
                 onClick={handleRevealAnswer}
                 className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95"
               >
@@ -453,7 +453,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
                 Đáp Án Chuẩn Hóa Band 8.0+
               </span>
 
-              <button
+              <button data-ux-flow="grammar.learning"
                 onClick={() => handlePlayTTS(currentMistake?.correctedText || '')}
                 disabled={isPlayingAudio}
                 className="p-1 text-emerald-700 hover:text-emerald-800 dark:text-emerald-400 transition-colors"
@@ -494,7 +494,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
             )}
 
             <div className="pt-2 flex justify-end">
-              <button
+              <button data-ux-flow="grammar.learning"
                 onClick={handleAskAITutor}
                 className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 hover:underline font-semibold"
               >
@@ -511,7 +511,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
             </span>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <button
+              <button data-ux-flow="grammar.learning"
                 id="rate-srs-again-btn"
                 onClick={() => handleRateCard('again')}
                 className="p-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-sm transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
@@ -520,7 +520,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
                 <span className="text-[10px] font-normal opacity-90">Ôn lại 1 ngày</span>
               </button>
 
-              <button
+              <button data-ux-flow="grammar.learning"
                 id="rate-srs-hard-btn"
                 onClick={() => handleRateCard('hard')}
                 className="p-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
@@ -529,7 +529,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
                 <span className="text-[10px] font-normal opacity-90">Ôn sau 2-3 ngày</span>
               </button>
 
-              <button
+              <button data-ux-flow="grammar.learning"
                 id="rate-srs-good-btn"
                 onClick={() => handleRateCard('good')}
                 className="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
@@ -538,7 +538,7 @@ Thầy AI có thể giải thích chi tiết hơn tại sao cách viết ban đ�
                 <span className="text-[10px] font-normal opacity-90">Ôn sau 7 ngày</span>
               </button>
 
-              <button
+              <button data-ux-flow="grammar.learning"
                 id="rate-srs-easy-btn"
                 onClick={() => handleRateCard('easy')}
                 className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"

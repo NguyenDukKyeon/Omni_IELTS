@@ -41,6 +41,7 @@ import {
 import { validateMockPackage } from '../lib/mockPackageValidator';
 import { playVoiceText } from './voiceService';
 import { getGeminiRequestHeaders } from './aiTutor';
+import { ApiResponseError } from '../lib/apiFailure';
 
 export async function generateReadingPracticeApi(
   type: ReadingQuestionType,
@@ -505,7 +506,7 @@ export async function fetchRealExamForecastApi(params: {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
-    throw new Error(error.error || 'Lỗi tra cứu dữ liệu đề thi thật và dự đoán.');
+    throw new ApiResponseError(error, res.status);
   }
 
   const data = await res.json();

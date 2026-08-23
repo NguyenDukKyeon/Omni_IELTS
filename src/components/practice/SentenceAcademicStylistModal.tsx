@@ -186,7 +186,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -216,7 +216,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                   Giúp AI giữ nguyên lập trường và văn phong học thuật
                 </span>
               </label>
-              <input
+              <input data-ux-flow="practice.skills"
                 type="text"
                 value={essayTopic}
                 onChange={(e) => setEssayTopic(e.target.value)}
@@ -235,7 +235,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                   {sentence.trim().split(/\s+/).filter(Boolean).length} từ
                 </span>
               </div>
-              <textarea
+              <textarea data-ux-flow="practice.skills"
                 rows={3}
                 value={sentence}
                 onChange={(e) => setSentence(e.target.value)}
@@ -251,7 +251,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
               </span>
               <div className="flex flex-wrap gap-2">
                 {PRESET_SENTENCES.map((preset, idx) => (
-                  <button
+                  <button data-ux-flow="practice.skills"
                     key={idx}
                     type="button"
                     onClick={() => {
@@ -269,7 +269,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
 
             {/* Run Button */}
             <div className="pt-2">
-              <button
+              <button data-ux-flow="practice.skills"
                 type="button"
                 onClick={handleRunRewrite}
                 disabled={isLoading}
@@ -314,7 +314,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                             <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-mono font-bold text-[10px]">
                               {err.errorCategory}
                             </span>
-                            <button
+                            <button data-ux-flow="practice.skills"
                               type="button"
                               onClick={() => handleSaveMistake(err, idx)}
                               disabled={isSaved}
@@ -369,7 +369,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                           Clean & Accurate (Sửa đúng 100% ngữ pháp, giữ cấu trúc gốc)
                         </span>
                       </div>
-                      <button
+                      <button data-ux-flow="practice.skills"
                         type="button"
                         onClick={() => handleCopyText(result.upgradedVersions.band65.text, 'band65')}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-stone-800 hover:bg-slate-100 text-xs font-bold text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-stone-700 transition-all cursor-pointer"
@@ -411,7 +411,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                           Academic & Cohesive (Từ vựng B2/C1, nhịp điệu mượt mà)
                         </span>
                       </div>
-                      <button
+                      <button data-ux-flow="practice.skills"
                         type="button"
                         onClick={() => handleCopyText(result.upgradedVersions.band75.text, 'band75')}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-stone-800 hover:bg-indigo-100 text-xs font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer"
@@ -444,7 +444,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                           {result.upgradedVersions.band75.keyCollocations.map((colloc, cIdx) => {
                             const isSaved = savedCollocations.has(colloc);
                             return (
-                              <button
+                              <button data-ux-flow="practice.skills"
                                 key={cIdx}
                                 type="button"
                                 onClick={() => handleSaveCollocation(colloc)}
@@ -485,7 +485,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                           Mastery & Nuance (Cleft sentence, Nominalization, Hedging)
                         </span>
                       </div>
-                      <button
+                      <button data-ux-flow="practice.skills"
                         type="button"
                         onClick={() => handleCopyText(result.upgradedVersions.band85.text, 'band85')}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer"
@@ -528,7 +528,7 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
                             {result.upgradedVersions.band85.keyCollocations.map((colloc, cIdx) => {
                               const isSaved = savedCollocations.has(colloc);
                               return (
-                                <button
+                                <button data-ux-flow="practice.skills"
                                   key={cIdx}
                                   type="button"
                                   onClick={() => handleSaveCollocation(colloc)}

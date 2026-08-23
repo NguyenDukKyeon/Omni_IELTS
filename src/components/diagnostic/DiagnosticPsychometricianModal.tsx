@@ -377,7 +377,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="dashboard.daily"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -418,7 +418,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                     (skill) => {
                       const active = selectedSkills.includes(skill);
                       return (
-                        <button
+                        <button data-ux-flow="dashboard.daily"
                           key={skill}
                           type="button"
                           onClick={() => toggleSkill(skill)}
@@ -450,7 +450,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                     Dùng để Director tính toán khoảng cách năng lực và lộ trình 30 ngày.
                   </p>
                 </div>
-                <select
+                <select data-ux-flow="dashboard.daily"
                   value={targetBand}
                   onChange={(e) => setTargetBand(Number(e.target.value))}
                   className="px-3 py-1.5 rounded-xl bg-white dark:bg-stone-800 border border-sky-300 dark:border-sky-700 text-xs font-bold text-sky-900 dark:text-sky-100"
@@ -478,7 +478,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                   <p className="text-[11px] text-stone-700 dark:text-stone-300">
                     Đề bài mẫu: <em>"Should unpaid community service be compulsory for high school students?"</em>
                   </p>
-                  <textarea
+                  <textarea data-ux-flow="dashboard.daily"
                     rows={4}
                     value={writingSample}
                     onChange={(e) => setWritingSample(e.target.value)}
@@ -516,7 +516,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
 
                   <div className="flex flex-wrap items-center gap-3">
                     {!isRecording ? (
-                      <button
+                      <button data-ux-flow="dashboard.daily"
                         type="button"
                         onClick={startRecording}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition-all"
@@ -525,7 +525,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                         <span>Bắt đầu Ghi Âm Giọng Nói</span>
                       </button>
                     ) : (
-                      <button
+                      <button data-ux-flow="dashboard.daily"
                         type="button"
                         onClick={stopRecording}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-xs font-bold shadow-md transition-all animate-bounce"
@@ -537,14 +537,14 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
 
                     <div className="text-xs text-stone-700 dark:text-stone-300">hoặc</div>
 
-                    <input
+                    <input data-ux-flow="dashboard.daily"
                       ref={fileInputRef}
                       type="file"
                       accept="audio/*"
                       onChange={handleFileUpload}
                       className="hidden"
                     />
-                    <button
+                    <button data-ux-flow="dashboard.daily"
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 text-xs font-bold border border-stone-200 dark:border-stone-700"
@@ -583,7 +583,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                         </p>
                         <div className="flex gap-2">
                           {['TRUE', 'FALSE', 'NOT GIVEN'].map((ans) => (
-                            <button
+                            <button data-ux-flow="dashboard.daily"
                               key={ans}
                               type="button"
                               onClick={() => setReadingQ1(ans)}
@@ -601,7 +601,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                         <p className="pt-1">
                           <strong>Câu 2:</strong> Bẫy phổ biến trong bài đọc là gì?
                         </p>
-                        <select
+                        <select data-ux-flow="dashboard.daily"
                           value={readingQ2}
                           onChange={(e) => setReadingQ2(e.target.value)}
                           className="w-full p-2 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs text-stone-800 dark:text-stone-200"
@@ -624,7 +624,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                         <p>
                           <strong>Câu 1:</strong> "All visitors must check in at the main [_________]."
                         </p>
-                        <input
+                        <input data-ux-flow="dashboard.daily"
                           type="text"
                           value={listeningQ1}
                           onChange={(e) => setListeningQ1(e.target.value)}
@@ -635,7 +635,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                         <p className="pt-1">
                           <strong>Câu 2:</strong> Người nói khẳng định chính sách xanh có tác dụng gì?
                         </p>
-                        <select
+                        <select data-ux-flow="dashboard.daily"
                           value={listeningQ2}
                           onChange={(e) => setListeningQ2(e.target.value)}
                           className="w-full p-2 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs text-stone-800 dark:text-stone-200"
@@ -652,7 +652,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
 
               {/* SUBMIT BUTTON */}
               <div className="pt-2">
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={handleSubmit}
                   className="w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-sm font-bold shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
@@ -935,7 +935,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
 
               {/* ACTION FOOTER */}
               <div className="pt-3 flex items-center justify-between gap-3 border-t border-stone-200 dark:border-stone-800">
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={() => setStage('input')}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 text-xs font-bold transition-colors"
@@ -944,7 +944,7 @@ export const DiagnosticPsychometricianModal: React.FC<DiagnosticPsychometricianM
                   <span>Chẩn Đoán Lại Với Bằng Chứng Khác</span>
                 </button>
 
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={handleApplyToProfile}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/25 transition-all"

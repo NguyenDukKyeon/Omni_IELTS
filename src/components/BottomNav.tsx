@@ -39,7 +39,7 @@ export const BottomNav: React.FC = () => {
         const isActive = activeModule === item.id;
 
         return (
-          <button
+          <button data-ux-flow="app.navigation"
             key={item.id}
             id={`mobile-nav-${item.id}`}
             onClick={() => setActiveModule(item.id)}

@@ -146,7 +146,7 @@ export const MistakeNotebookModal: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
+            <button data-ux-flow="grammar.learning"
               onClick={() => setIsTaggerOpen(true)}
               className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
             >
@@ -154,7 +154,7 @@ export const MistakeNotebookModal: React.FC = () => {
               <span>🏷️ AI Error Tagger (Bóc Tách Lỗi Tự Động)</span>
             </button>
 
-            <button
+            <button data-ux-flow="grammar.learning"
               id="close-mistake-modal-btn"
               onClick={() => setIsMistakeNotebookOpen(false)}
               className="p-2 rounded-xl hover:bg-white/20 text-white transition-colors cursor-pointer"
@@ -167,7 +167,7 @@ export const MistakeNotebookModal: React.FC = () => {
         {/* Tab Navigation */}
         <div className="px-4 sm:px-6 pt-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-2 overflow-x-auto shrink-0">
           <div className="flex items-center gap-1.5 sm:gap-2">
-            <button
+            <button data-ux-flow="grammar.learning"
               id="tab-mistake-analytics"
               onClick={() => setActiveTab('analytics')}
               className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
@@ -180,7 +180,7 @@ export const MistakeNotebookModal: React.FC = () => {
               <span>Bản Đồ Điểm Yếu & Bẫy (Radar)</span>
             </button>
 
-            <button
+            <button data-ux-flow="grammar.learning"
               id="tab-mistake-workout"
               onClick={() => {
                 setWorkoutTrapTarget('all');
@@ -201,7 +201,7 @@ export const MistakeNotebookModal: React.FC = () => {
               )}
             </button>
 
-            <button
+            <button data-ux-flow="grammar.learning"
               id="tab-mistake-vault"
               onClick={() => setActiveTab('vault')}
               className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
@@ -214,7 +214,7 @@ export const MistakeNotebookModal: React.FC = () => {
               <span>Kho Bẫy & Lỗi ({mistakes.length})</span>
             </button>
 
-            <button
+            <button data-ux-flow="grammar.learning"
               id="tab-mistake-add"
               onClick={() => setActiveTab('add')}
               className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
@@ -256,7 +256,7 @@ export const MistakeNotebookModal: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-                  <input
+                  <input data-ux-flow="grammar.learning"
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -266,7 +266,7 @@ export const MistakeNotebookModal: React.FC = () => {
                 </div>
 
                 <div>
-                  <select
+                  <select data-ux-flow="grammar.learning"
                     value={selectedTrapFilter}
                     onChange={(e) => setSelectedTrapFilter(e.target.value as any)}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
@@ -281,7 +281,7 @@ export const MistakeNotebookModal: React.FC = () => {
                 </div>
 
                 <div>
-                  <select
+                  <select data-ux-flow="grammar.learning"
                     value={selectedSkill}
                     onChange={(e) => setSelectedSkill(e.target.value as any)}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
@@ -346,7 +346,7 @@ export const MistakeNotebookModal: React.FC = () => {
                               SRS Hộp {m.srsStage}/5 {m.mastered ? '• Đã làm chủ' : ''}
                             </span>
 
-                            <button
+                            <button data-ux-flow="grammar.learning"
                               onClick={() => deleteMistake(m.id)}
                               className="p-1 text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
                               title="Xóa lỗi này"
@@ -392,7 +392,7 @@ export const MistakeNotebookModal: React.FC = () => {
 
                         {/* Card Actions */}
                         <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
-                          <button
+                          <button data-ux-flow="grammar.learning"
                             onClick={() => playTextToSpeech(m.correctedText || m.errorText)}
                             className="flex items-center gap-1 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors cursor-pointer"
                           >
@@ -400,7 +400,7 @@ export const MistakeNotebookModal: React.FC = () => {
                             <span>Nghe phát âm</span>
                           </button>
 
-                          <button
+                          <button data-ux-flow="grammar.learning"
                             onClick={() => handleStartTargetedDrill(m.trapCategory)}
                             className="flex items-center gap-1 px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
                           >
@@ -418,7 +418,7 @@ export const MistakeNotebookModal: React.FC = () => {
 
           {/* TAB 4: ADD CUSTOM MISTAKE */}
           {activeTab === 'add' && (
-            <form onSubmit={handleCreateMistake} className="space-y-4 max-w-xl mx-auto py-2">
+            <form data-ux-flow="grammar.learning" onSubmit={handleCreateMistake} className="space-y-4 max-w-xl mx-auto py-2">
               <div className="text-center space-y-1 pb-2">
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Thêm Bẫy / Lỗi Sai Vào Sổ Tay Cá Nhân
@@ -433,7 +433,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     Nhóm Bẫy:
                   </label>
-                  <select
+                  <select data-ux-flow="grammar.learning"
                     value={newTrapCategory}
                     onChange={(e) => setNewTrapCategory(e.target.value as any)}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
@@ -450,7 +450,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     Kỹ Năng:
                   </label>
-                  <select
+                  <select data-ux-flow="grammar.learning"
                     value={newSkill}
                     onChange={(e) => setNewSkill(e.target.value as any)}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
@@ -467,7 +467,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     Phân Loại Lỗi:
                   </label>
-                  <select
+                  <select data-ux-flow="grammar.learning"
                     value={newErrorType}
                     onChange={(e) => setNewErrorType(e.target.value as any)}
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
@@ -485,7 +485,7 @@ export const MistakeNotebookModal: React.FC = () => {
                 <label className="text-xs font-bold text-rose-600 dark:text-rose-400 block mb-1">
                   * Câu có lỗi sai / Thí sinh chọn sai:
                 </label>
-                <textarea
+                <textarea data-ux-flow="grammar.learning"
                   rows={2}
                   value={newErrorText}
                   onChange={(e) => setNewErrorText(e.target.value)}
@@ -499,7 +499,7 @@ export const MistakeNotebookModal: React.FC = () => {
                 <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 block mb-1">
                   * Đáp án đúng / Câu sửa chuẩn hóa Band 8.0+:
                 </label>
-                <textarea
+                <textarea data-ux-flow="grammar.learning"
                   rows={2}
                   value={newCorrectedText}
                   onChange={(e) => setNewCorrectedText(e.target.value)}
@@ -513,7 +513,7 @@ export const MistakeNotebookModal: React.FC = () => {
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                   Giải thích chi tiết:
                 </label>
-                <textarea
+                <textarea data-ux-flow="grammar.learning"
                   rows={2}
                   value={newExplanation}
                   onChange={(e) => setNewExplanation(e.target.value)}
@@ -523,14 +523,14 @@ export const MistakeNotebookModal: React.FC = () => {
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
-                <button
+                <button data-ux-flow="grammar.learning"
                   type="button"
                   onClick={() => setActiveTab('vault')}
                   className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
                 >
                   Hủy
                 </button>
-                <button
+                <button data-ux-flow="grammar.learning"
                   type="submit"
                   className="px-6 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer"
                 >

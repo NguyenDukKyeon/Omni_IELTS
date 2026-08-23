@@ -110,7 +110,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="media.learning"
             onClick={onClose}
             disabled={isLoading}
             className="p-2 rounded-xl text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
@@ -121,13 +121,13 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
 
         {/* Content */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form data-ux-flow="media.learning" onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
                 Đường dẫn URL Video YouTube
               </label>
               <div className="relative">
-                <input
+                <input data-ux-flow="media.learning"
                   type="text"
                   required
                   value={url}
@@ -146,7 +146,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {(['Band 5.5-6.5', 'Band 7.0-8.0', 'Band 8.0+'] as const).map((b) => (
-                  <button
+                  <button data-ux-flow="media.learning"
                     key={b}
                     type="button"
                     onClick={() => setTargetBand(b)}
@@ -179,7 +179,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
               </div>
             )}
 
-            <button
+            <button data-ux-flow="media.learning"
               type="submit"
               disabled={isLoading || !url.trim()}
               className="w-full py-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 cursor-pointer transition-all"

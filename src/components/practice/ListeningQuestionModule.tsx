@@ -268,7 +268,7 @@ export const ListeningQuestionModule: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <select data-ux-flow="practice.skills"
               value={selectedTopic}
               onChange={(e) => setSelectedTopic(e.target.value)}
               className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -281,7 +281,7 @@ export const ListeningQuestionModule: React.FC = () => {
               </option>
             </select>
 
-            <select
+            <select data-ux-flow="practice.skills"
               value={selectedDifficulty}
               onChange={(e) => setSelectedDifficulty(e.target.value)}
               className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -291,7 +291,7 @@ export const ListeningQuestionModule: React.FC = () => {
               <option value="Band 8.5+">Band 8.5+ (Mastery)</option>
             </select>
 
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={() => handleGenerateNew(selectedType)}
               disabled={isGenerating}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
@@ -311,7 +311,7 @@ export const ListeningQuestionModule: React.FC = () => {
           {LISTENING_TYPES.map((t) => {
             const isSelected = selectedType === t.type;
             return (
-              <button
+              <button data-ux-flow="practice.skills"
                 key={t.type}
                 onClick={() => handleSelectType(t.type)}
                 className={`text-left p-3.5 rounded-xl border transition-all text-xs flex flex-col justify-between ${
@@ -356,7 +356,7 @@ export const ListeningQuestionModule: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={handlePlayAudio}
               className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all ${
                 isPlayingAudio
@@ -368,7 +368,7 @@ export const ListeningQuestionModule: React.FC = () => {
               {isPlayingAudio ? 'Dừng phát Audio' : 'Phát Audio Cambridge'}
             </button>
 
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={() => setShowTranscript(!showTranscript)}
               className="px-3.5 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition-all"
             >
@@ -531,7 +531,7 @@ export const ListeningQuestionModule: React.FC = () => {
                   {exercise.type === 'map_plan_diagram_labelling' ? (
                     <div className="flex items-center gap-2">
                       {['A', 'B', 'C', 'D', 'E'].map((letter) => (
-                        <button
+                        <button data-ux-flow="practice.skills"
                           key={letter}
                           disabled={isSubmitted}
                           onClick={() => handleAnswerChange(q.id, letter)}
@@ -548,7 +548,7 @@ export const ListeningQuestionModule: React.FC = () => {
                   ) : q.options && q.options.length > 0 ? (
                     <div className="space-y-1.5">
                       {q.options.map((opt, idx) => (
-                        <button
+                        <button data-ux-flow="practice.skills"
                           key={idx}
                           disabled={isSubmitted}
                           onClick={() => handleAnswerChange(q.id, opt)}
@@ -564,7 +564,7 @@ export const ListeningQuestionModule: React.FC = () => {
                     </div>
                   ) : (
                     <div>
-                      <input
+                      <input data-ux-flow="practice.skills"
                         type="text"
                         disabled={isSubmitted}
                         placeholder="Nhập từ bạn nghe được..."
@@ -605,7 +605,7 @@ export const ListeningQuestionModule: React.FC = () => {
           {/* Action buttons */}
           <div className="pt-2">
             {!isSubmitted ? (
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={handleSubmit}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
               >
@@ -613,13 +613,13 @@ export const ListeningQuestionModule: React.FC = () => {
               </button>
             ) : (
               <div className="flex gap-2">
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={() => handleGenerateNew(selectedType)}
                   className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
                 >
                   <Sparkles className="w-4 h-4" /> Sinh đề AI tiếp theo
                 </button>
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={() => {
                     setIsSubmitted(false);
                     setUserAnswers({});

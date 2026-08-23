@@ -128,7 +128,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="dashboard.daily"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -193,7 +193,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
               <div>
                 <p className="font-bold">Lỗi tham vấn Master Mentor Panel</p>
                 <p className="mt-0.5 text-rose-700 dark:text-rose-300">{errorMessage}</p>
-                <button
+                <button data-ux-flow="dashboard.daily"
                   onClick={handleConsultPanel}
                   className="mt-2 text-xs font-bold text-rose-700 underline"
                 >
@@ -244,7 +244,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
 
               {/* Navigation Tabs for the 3 Personas */}
               <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-                <button
+                <button data-ux-flow="dashboard.daily"
                   onClick={() => setActiveTab('flaws')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
                     activeTab === 'flaws'
@@ -258,7 +258,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
                   </span>
                 </button>
 
-                <button
+                <button data-ux-flow="dashboard.daily"
                   onClick={() => setActiveTab('ideas')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
                     activeTab === 'ideas'
@@ -272,7 +272,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
                   </span>
                 </button>
 
-                <button
+                <button data-ux-flow="dashboard.daily"
                   onClick={() => setActiveTab('collocations')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
                     activeTab === 'collocations'
@@ -287,7 +287,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
                 </button>
 
                 {report.perspectiveTensions && report.perspectiveTensions.length > 0 && (
-                  <button
+                  <button data-ux-flow="dashboard.daily"
                     onClick={() => setActiveTab('tensions')}
                     className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
                       activeTab === 'tensions'
@@ -335,7 +335,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
                                 </span>
                               </div>
 
-                              <button
+                              <button data-ux-flow="dashboard.daily"
                                 type="button"
                                 onClick={() => handleSaveFlawToNotebook(flaw, idx)}
                                 disabled={isSynced}
@@ -559,7 +559,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
 
               {/* Bottom Actions */}
               <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={() =>
                     openAITutorWithPrompt(
@@ -572,7 +572,7 @@ export const MasterMentorPanelModal: React.FC<MasterMentorPanelModalProps> = ({
                   <span>Trao đổi thêm với AI Tutor</span>
                 </button>
 
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={onClose}
                   className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all"

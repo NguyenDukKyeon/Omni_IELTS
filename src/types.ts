@@ -1173,19 +1173,24 @@ export interface RealExamForecastItem {
   trendStatus: 'recent_real_exam' | 'quarter_forecast' | 'hot_trend' | 'high_frequency';
   trendBadge: string; // e.g. "🔥 Đề Thi Thật Vừa Ra", "⭐ Trọng Tâm Quý", "📈 Tần Suất Cao"
   frequencyScore?: number; // only present when a cited source supports frequency
-  outlinePEEL: RealExamPEELOutline;
-  topicVocabularyC1C2: RealExamVocabularyItem[];
-  band8ModelAnswer: string;
+  outlinePEEL?: RealExamPEELOutline;
+  topicVocabularyC1C2?: RealExamVocabularyItem[];
+  band8ModelAnswer?: string;
   modelAnswerWordCount?: number;
-  examinerTipsVi: string;
+  examinerTipsVi?: string;
   groundingSourceTitle?: string;
   groundingSourceUrl?: string;
   isCustomGenerated?: boolean;
   evidenceType?: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice';
   citations?: ClaimCitation[];
+  enrichmentStatus?: 'not_requested' | 'loading' | 'ready' | 'unavailable';
 }
 
 export interface ForecastGroundingResponse {
+  status: 'fresh' | 'stale' | 'unavailable';
+  provider?: 'gemini' | 'groq';
+  model?: string;
+  fallbackReason?: ApiFailureCategory;
   forecastItems: RealExamForecastItem[];
   searchQueries: string[];
   groundingSources: Array<{ title: string; url: string }>;
@@ -1194,6 +1199,7 @@ export interface ForecastGroundingResponse {
   detectedTrends?: string[];
   stale?: boolean;
   error?: string;
+  failure?: ApiFailure;
 }
 
 // ==========================================
@@ -1847,6 +1853,28 @@ export interface GroundedResponse<T> {
   retrievedAt: string;
   confidence: 'high' | 'medium' | 'low';
   stale?: boolean;
+}
+
+export type ApiFailureCategory =
+  | 'auth_missing'
+  | 'auth_invalid'
+  | 'rate_limited'
+  | 'quota_exhausted'
+  | 'provider_overloaded'
+  | 'network_failed'
+  | 'schema_invalid'
+  | 'no_results'
+  | 'unknown';
+
+export interface ApiFailure {
+  provider?: 'gemini' | 'groq';
+  category: ApiFailureCategory;
+  httpStatus: number;
+  retryable: boolean;
+  retryAfterMs?: number;
+  requestId: string;
+  messageVi: string;
+  action: 'retry' | 'open_api_settings' | 'open_quota' | 'refine_query' | 'contact_support';
 }
 
 export interface VoiceDescriptor {

@@ -626,7 +626,7 @@ export const MockTestView: React.FC = () => {
 
             {/* Tab Navigation */}
             <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-700 shrink-0 text-xs font-semibold">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setActiveTab('available')}
                 className={`px-3.5 py-1.5 rounded-lg transition-all ${
                   activeTab === 'available'
@@ -636,7 +636,7 @@ export const MockTestView: React.FC = () => {
               >
                 Đề Thi Khả Dụng ({ALL_FULL_MOCK_TESTS.length})
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setActiveTab('live_hub')}
                 className={`px-3.5 py-1.5 rounded-lg transition-all ${
                   activeTab === 'live_hub'
@@ -646,7 +646,7 @@ export const MockTestView: React.FC = () => {
               >
                 Live Hub
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setActiveTab('progress')}
                 className={`px-3.5 py-1.5 rounded-lg transition-all ${
                   activeTab === 'progress'
@@ -656,7 +656,7 @@ export const MockTestView: React.FC = () => {
               >
                 Tiến Trình & Radar
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setActiveTab('history')}
                 className={`px-3.5 py-1.5 rounded-lg transition-all ${
                   activeTab === 'history'
@@ -680,7 +680,7 @@ export const MockTestView: React.FC = () => {
                       {resumeSnapshot.package.title} • {resumeSnapshot.currentSkill} • lưu lúc {new Date(resumeSnapshot.savedAt).toLocaleString('vi-VN')}
                     </p>
                   </div>
-                  <button
+                  <button data-ux-flow="mock.exam"
                     type="button"
                     onClick={handleResumeExam}
                     className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-2 shrink-0"
@@ -709,7 +709,7 @@ export const MockTestView: React.FC = () => {
                   </p>
                 </div>
 
-                <button
+                <button data-ux-flow="mock.exam"
                   type="button"
                   onClick={() => setIsOrchestratorOpen(true)}
                   className="px-5 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md transition-all cursor-pointer shrink-0"
@@ -786,7 +786,7 @@ export const MockTestView: React.FC = () => {
                         <span>Bảo lưu phòng thi tự động</span>
                       </div>
 
-                      <button
+                      <button data-ux-flow="mock.exam"
                         onClick={() => handleStartExam(pkg, 'listening')}
                         className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl shadow-sm hover:shadow-md transition-all flex items-center gap-2 active:scale-95"
                       >

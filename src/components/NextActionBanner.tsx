@@ -158,7 +158,7 @@ export const NextActionBanner: React.FC = () => {
         </div>
       </div>
 
-      <button
+      <button data-ux-flow="app.shared"
         id="next-action-trigger-btn"
         onClick={handleActionClick}
         className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold tracking-wide shadow-xs hover:shadow-sm transition-all shrink-0 cursor-pointer active:scale-95"

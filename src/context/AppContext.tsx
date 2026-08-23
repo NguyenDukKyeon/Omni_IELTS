@@ -227,6 +227,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               return {
                 ...initS,
                 ...savedMatch,
+                // Bundled sample provenance is controlled by the current release; never revive
+                // stale or misleading provider URLs from an older local snapshot.
+                title: initS.title,
+                mediaType: initS.mediaType,
+                mediaUrl: initS.mediaUrl,
+                youtubeId: initS.youtubeId,
+                channelTitle: initS.channelTitle,
+                thumbnail: initS.thumbnail,
                 transcriptSegments: Array.isArray(savedMatch.transcriptSegments) && savedMatch.transcriptSegments.length > 0
                   ? savedMatch.transcriptSegments
                   : initS.transcriptSegments,

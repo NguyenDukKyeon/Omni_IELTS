@@ -50,6 +50,8 @@ export const LearnerProfileView: React.FC = () => {
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [geminiKey, setGeminiKey] = useState('');
   const [hasSessionKey, setHasSessionKey] = useState(() => Boolean(sessionStorage.getItem('omni_gemini_api_key')));
+  const [groqKey, setGroqKey] = useState('');
+  const [hasGroqSessionKey, setHasGroqSessionKey] = useState(() => Boolean(sessionStorage.getItem('omni_groq_api_key')));
   const [dataStatus, setDataStatus] = useState<string>('');
 
   useEffect(() => {
@@ -65,6 +67,15 @@ export const LearnerProfileView: React.FC = () => {
     setGeminiKey('');
     setHasSessionKey(true);
     setDataStatus('Đã lưu Gemini API key trong tab hiện tại; key không được ghi vào localStorage/Supabase.');
+  };
+
+  const saveGroqKeyForSession = () => {
+    const value = groqKey.trim();
+    if (!value) return;
+    sessionStorage.setItem('omni_groq_api_key', value);
+    setGroqKey('');
+    setHasGroqSessionKey(true);
+    setDataStatus('Đã lưu Groq API key trong tab hiện tại; key không được ghi vào localStorage/Supabase.');
   };
 
   const handleSync = async () => {
@@ -128,21 +139,21 @@ export const LearnerProfileView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <button
+          <button data-ux-flow="profile.settings"
             onClick={() => setIsDiagnosticOpen(true)}
             className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition-all cursor-pointer"
           >
             <Compass className="w-4 h-4 text-sky-200" />
             <span>Chẩn Đoán 8 Trục (gemini-3.1-pro)</span>
           </button>
-          <button
+          <button data-ux-flow="profile.settings"
             onClick={() => setIsOnboardingOpen(true)}
             className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-200/80 dark:border-blue-800/60 hover:bg-blue-100 cursor-pointer"
           >
             <Compass className="w-4 h-4" />
             <span>Test Nhanh</span>
           </button>
-          <button
+          <button data-ux-flow="profile.settings"
             onClick={() => setIsEditing(!isEditing)}
             className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 text-white text-xs font-bold hover:bg-slate-800 cursor-pointer border border-slate-700"
           >
@@ -166,11 +177,11 @@ export const LearnerProfileView: React.FC = () => {
           ) : authEmail ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{authEmail}</span>
-              <button type="button" onClick={() => void handleSync()} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">Đồng bộ ngay</button>
-              <button type="button" onClick={() => void signOut()} className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-slate-700"><LogOut className="h-3.5 w-3.5" /> Đăng xuất</button>
+              <button data-ux-flow="profile.settings" type="button" onClick={() => void handleSync()} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">Đồng bộ ngay</button>
+              <button data-ux-flow="profile.settings" type="button" onClick={() => void signOut()} className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold dark:border-slate-700"><LogOut className="h-3.5 w-3.5" /> Đăng xuất</button>
             </div>
           ) : (
-            <button type="button" onClick={() => void signInWithGoogle()} className="flex w-fit items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white dark:bg-blue-600"><LogIn className="h-4 w-4" /> Đăng nhập bằng Google</button>
+            <button data-ux-flow="profile.settings" type="button" onClick={() => void signInWithGoogle()} className="flex w-fit items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white dark:bg-blue-600"><LogIn className="h-4 w-4" /> Đăng nhập bằng Google</button>
           )}
         </section>
 
@@ -178,14 +189,19 @@ export const LearnerProfileView: React.FC = () => {
           <div className="flex items-center gap-2">
             <KeyRound className="h-5 w-5 text-violet-600" />
             <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Gemini BYOK</h2>
-              <p className="text-[11px] text-slate-500">Chỉ giữ trong sessionStorage của tab; không đồng bộ key.</p>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">AI Provider BYOK</h2>
+              <p className="text-[11px] text-slate-500">Gemini là chính, Groq Web Search là fallback. Cả hai key chỉ tồn tại trong sessionStorage của tab.</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <input type="password" autoComplete="off" value={geminiKey} onChange={(event) => setGeminiKey(event.target.value)} placeholder={hasSessionKey ? 'Đã có key cho phiên này' : 'Dán Gemini API key'} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
-            <button type="button" onClick={saveGeminiKeyForSession} disabled={!geminiKey.trim()} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Lưu phiên</button>
-            {hasSessionKey && <button type="button" onClick={() => { sessionStorage.removeItem('omni_gemini_api_key'); setHasSessionKey(false); }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700">Xóa</button>}
+          <div className="flex flex-wrap gap-2">
+            <input data-ux-flow="profile.settings" type="password" autoComplete="off" value={geminiKey} onChange={(event) => setGeminiKey(event.target.value)} placeholder={hasSessionKey ? 'Đã có key cho phiên này' : 'Dán Gemini API key'} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+            <button data-ux-flow="profile.settings" type="button" onClick={saveGeminiKeyForSession} disabled={!geminiKey.trim()} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Lưu Gemini</button>
+            {hasSessionKey && <button data-ux-flow="profile.settings" type="button" onClick={() => { sessionStorage.removeItem('omni_gemini_api_key'); setHasSessionKey(false); }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700">Xóa</button>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <input data-ux-flow="profile.settings" type="password" autoComplete="off" value={groqKey} onChange={(event) => setGroqKey(event.target.value)} placeholder={hasGroqSessionKey ? 'Đã có Groq key cho phiên này' : 'Dán Groq API key'} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
+            <button data-ux-flow="profile.settings" type="button" onClick={saveGroqKeyForSession} disabled={!groqKey.trim()} className="rounded-xl bg-orange-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Lưu Groq</button>
+            {hasGroqSessionKey && <button data-ux-flow="profile.settings" type="button" onClick={() => { sessionStorage.removeItem('omni_groq_api_key'); setHasGroqSessionKey(false); }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700">Xóa Groq</button>}
           </div>
         </section>
       </div>
@@ -194,7 +210,7 @@ export const LearnerProfileView: React.FC = () => {
 
       {/* EDIT PROFILE FORM */}
       {isEditing && (
-        <form
+        <form data-ux-flow="profile.settings"
           onSubmit={handleSave}
           className="p-6 rounded-3xl bg-blue-50/60 dark:bg-slate-900/80 border border-blue-200 dark:border-blue-900/60 space-y-4 animate-fadeIn"
         >
@@ -207,7 +223,7 @@ export const LearnerProfileView: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Tên của bạn:
               </label>
-              <input
+              <input data-ux-flow="profile.settings"
                 type="text"
                 required
                 value={name}
@@ -220,7 +236,7 @@ export const LearnerProfileView: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Ngày thi dự kiến:
               </label>
-              <input
+              <input data-ux-flow="profile.settings"
                 type="date"
                 required
                 value={examDate}
@@ -233,7 +249,7 @@ export const LearnerProfileView: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Band hiện tại:
               </label>
-              <input
+              <input data-ux-flow="profile.settings"
                 type="number"
                 step="0.5"
                 min="3.0"
@@ -248,7 +264,7 @@ export const LearnerProfileView: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Band mục tiêu:
               </label>
-              <input
+              <input data-ux-flow="profile.settings"
                 type="number"
                 step="0.5"
                 min="4.0"
@@ -263,7 +279,7 @@ export const LearnerProfileView: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Thời gian học mỗi ngày (phút):
               </label>
-              <input
+              <input data-ux-flow="profile.settings"
                 type="number"
                 min="15"
                 max="240"
@@ -275,14 +291,14 @@ export const LearnerProfileView: React.FC = () => {
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button
+            <button data-ux-flow="profile.settings"
               type="button"
               onClick={() => setIsEditing(false)}
               className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer"
             >
               Hủy
             </button>
-            <button
+            <button data-ux-flow="profile.settings"
               type="submit"
               className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-600/20 cursor-pointer"
             >
@@ -315,7 +331,7 @@ export const LearnerProfileView: React.FC = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
           {/* Light Mode Option */}
-          <button
+          <button data-ux-flow="profile.settings"
             type="button"
             onClick={() => {
               if (darkMode) toggleDarkMode();
@@ -341,7 +357,7 @@ export const LearnerProfileView: React.FC = () => {
           </button>
 
           {/* Dark Mode Option */}
-          <button
+          <button data-ux-flow="profile.settings"
             type="button"
             onClick={() => {
               if (!darkMode) toggleDarkMode();

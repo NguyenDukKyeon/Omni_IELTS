@@ -290,7 +290,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={handleSaveAllMistakes}
                 disabled={hasSavedAllMistakes}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
@@ -339,7 +339,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
                   </p>
                 </div>
 
-                <button
+                <button data-ux-flow="mock.exam"
                   onClick={() => handleNavigateRoadmapItem(dayPlan.targetModule)}
                   className="mt-3 w-full py-1.5 bg-white dark:bg-slate-900 hover:bg-blue-50 dark:hover:bg-blue-950/60 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 text-[11px] font-semibold rounded-lg flex items-center justify-center gap-1 transition-colors"
                 >
@@ -535,7 +535,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
 
           {/* Skill Filter Tabs */}
           <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setActiveReviewTab('all')}
               className={`px-3 py-1.5 rounded-lg font-semibold transition-colors ${
                 activeReviewTab === 'all'
@@ -545,7 +545,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
             >
               Tất cả ({allReviews.length})
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setActiveReviewTab('listening')}
               className={`px-3 py-1.5 rounded-lg font-semibold transition-colors ${
                 activeReviewTab === 'listening'
@@ -555,7 +555,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
             >
               Listening
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setActiveReviewTab('reading')}
               className={`px-3 py-1.5 rounded-lg font-semibold transition-colors ${
                 activeReviewTab === 'reading'
@@ -570,7 +570,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
 
         {/* Status Filter Buttons */}
         <div className="flex items-center gap-2 text-xs">
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setFilterStatus('all')}
             className={`px-3 py-1 rounded-lg border transition-colors ${
               filterStatus === 'all'
@@ -580,7 +580,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
           >
             Tất cả kết quả
           </button>
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setFilterStatus('incorrect')}
             className={`px-3 py-1 rounded-lg border flex items-center gap-1 transition-colors ${
               filterStatus === 'incorrect'
@@ -591,7 +591,7 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
             <XCircle className="w-3.5 h-3.5" />
             <span>Chỉ xem câu sai</span>
           </button>
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setFilterStatus('correct')}
             className={`px-3 py-1 rounded-lg border flex items-center gap-1 transition-colors ${
               filterStatus === 'correct'
@@ -696,14 +696,14 @@ export const MockTestReportView: React.FC<MockTestReportViewProps> = ({
 
       {/* Action Footer Buttons */}
       <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
-        <button
+        <button data-ux-flow="mock.exam"
           onClick={onBackToDashboard}
           className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition-colors"
         >
           Quay lại Danh sách Đề thi
         </button>
 
-        <button
+        <button data-ux-flow="mock.exam"
           onClick={onRetakeTest}
           className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-md transition-all active:scale-95"
         >

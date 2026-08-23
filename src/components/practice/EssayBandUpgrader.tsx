@@ -230,7 +230,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
 
           {/* Quick Bank Button */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={() => setIsPromptBankOpen(true)}
               className="px-4 py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 border border-indigo-400/40 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
             >
@@ -252,7 +252,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
               { id: 'task1_academic', label: 'Task 1 Academic (Biểu đồ / Quy trình)' },
               { id: 'task1_general', label: 'Task 1 General (Thư tín)' },
             ].map((t) => (
-              <button
+              <button data-ux-flow="practice.skills"
                 key={t.id}
                 onClick={() => setTaskType(t.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
@@ -269,7 +269,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
           <div className="flex items-center gap-2 text-xs">
             <span className="font-bold text-slate-500 dark:text-slate-400">Mục tiêu nâng cấp:</span>
             {[7.0, 8.0, 8.5].map((b) => (
-              <button
+              <button data-ux-flow="practice.skills"
                 key={b}
                 onClick={() => setUserTargetBand(b)}
                 className={`px-2.5 py-1 rounded-lg font-black text-xs transition-all ${
@@ -291,14 +291,14 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
               <FileText className="w-3.5 h-3.5 text-indigo-500" />
               Đề bài IELTS Writing:
             </label>
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={() => setIsPromptBankOpen(true)}
               className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
             >
               Chọn đề có sẵn trong thư viện ➔
             </button>
           </div>
-          <input
+          <input data-ux-flow="practice.skills"
             type="text"
             value={promptStatement}
             onChange={(e) => setPromptStatement(e.target.value)}
@@ -318,7 +318,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
               <span>
                 Số từ: <strong className="text-indigo-600 dark:text-indigo-400">{wordCount}</strong> từ
               </span>
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={() => setOriginalEssay(ESSAY_PROMPT_BANK[0].sampleStudentEssayBand55)}
                 className="text-[11px] text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 underline"
               >
@@ -326,7 +326,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
               </button>
             </div>
           </div>
-          <textarea
+          <textarea data-ux-flow="practice.skills"
             rows={7}
             value={originalEssay}
             onChange={(e) => setOriginalEssay(e.target.value)}
@@ -351,7 +351,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
+            <button data-ux-flow="practice.skills"
               type="button"
               onClick={() => openSentenceStylist('', promptStatement)}
               className="px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
@@ -360,7 +360,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
               <span>Nâng Cấp Câu Lẻ (3 Tiers)</span>
             </button>
 
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={handleRunUpgrade}
               disabled={isUpgrading}
               className={`px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
@@ -480,7 +480,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                 const Icon = m.icon;
                 const isActive = viewMode === m.id;
                 return (
-                  <button
+                  <button data-ux-flow="practice.skills"
                     key={m.id}
                     onClick={() => setViewMode(m.id as any)}
                     className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
@@ -497,7 +497,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
             </div>
 
             {/* Quick Action: Ask AI Tutor about this upgrade */}
-            <button
+            <button data-ux-flow="practice.skills"
               onClick={() =>
                 openAITutorWithPrompt(
                   `Hãy phân tích chi tiết sự khác biệt giữa bản gốc Band ${upgradeResult.originalAnalysis.estimatedBand} và bản nâng cấp Band 8.5+ của bài viết này. Chỉ ra 3 kỹ thuật quan trọng nhất tôi cần áp dụng trong phòng thi.`
@@ -561,7 +561,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
 
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-700 text-[11px] text-slate-500 flex items-center justify-between">
                   <span>{upgradeResult.originalAnalysis.wordCount} từ</span>
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => handleCopyText(originalEssay, 'original')}
                     className="flex items-center gap-1 text-slate-600 hover:text-indigo-600 font-bold"
                   >
@@ -612,7 +612,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
 
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-700 text-[11px] text-indigo-600 dark:text-indigo-300 flex items-center justify-between font-bold">
                   <span>{upgradeResult.band7Upgrade.wordCount} từ</span>
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => handleCopyText(upgradeResult.band7Upgrade.essayText, 'band7')}
                     className="flex items-center gap-1 hover:text-indigo-700"
                   >
@@ -663,7 +663,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
 
                 <div className="pt-3 border-t border-amber-100 dark:border-slate-700 text-[11px] text-amber-700 dark:text-amber-300 flex items-center justify-between font-bold">
                   <span>{upgradeResult.band85Upgrade.wordCount} từ</span>
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => handleCopyText(upgradeResult.band85Upgrade.essayText, 'band85')}
                     className="flex items-center gap-1 hover:text-amber-800"
                   >
@@ -684,7 +684,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                   <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                     Đối chiếu bản gốc với:
                   </span>
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => setDiffTargetBand('band7')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                       diffTargetBand === 'band7'
@@ -694,7 +694,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                   >
                     Bản Band 7.0 (Sửa lỗi & Mạch lạc)
                   </button>
-                  <button
+                  <button data-ux-flow="practice.skills"
                     onClick={() => setDiffTargetBand('band85')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                       diffTargetBand === 'band85'
@@ -735,7 +735,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                           Mắt xích #{index + 1}: {diff.category.replace(/_/g, ' ')}
                         </span>
                         <div className="flex items-center gap-2">
-                          <button
+                          <button data-ux-flow="practice.skills"
                             onClick={() => setSelectedPhraseDiff(diff)}
                             className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 text-xs font-bold flex items-center gap-1 transition-all"
                           >
@@ -743,7 +743,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                             <span>Tại sao cụm này hay hơn?</span>
                           </button>
 
-                          <button
+                          <button data-ux-flow="practice.skills"
                             onClick={() => handleSavePhraseToNotebook(diff)}
                             className={`p-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all ${
                               isSaved
@@ -887,7 +887,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                   </p>
                 </div>
 
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={handleSaveAllCollocations}
                   className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
                 >
@@ -941,7 +941,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
 
                       <div className="pt-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
                         <span className="text-[11px] text-slate-500">Chủ đề: {colloc.ieltsTopic}</span>
-                        <button
+                        <button data-ux-flow="practice.skills"
                           onClick={() => handleSaveGoldenCollocation(colloc)}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
                             isSaved
@@ -981,7 +981,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                   </p>
                 </div>
               </div>
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={() => setSelectedPhraseDiff(null)}
                 className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
               >
@@ -1048,7 +1048,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
 
             {/* Footer Buttons */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700">
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={() => {
                   setSelectedPhraseDiff(null);
                   openAITutorWithPrompt(
@@ -1061,7 +1061,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                 <span>Hỏi thêm AI Tutor</span>
               </button>
 
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={() => {
                   handleSavePhraseToNotebook(selectedPhraseDiff);
                   setSelectedPhraseDiff(null);
@@ -1094,7 +1094,7 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
                   </p>
                 </div>
               </div>
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={() => setIsPromptBankOpen(false)}
                 className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-500 flex items-center justify-center"
               >

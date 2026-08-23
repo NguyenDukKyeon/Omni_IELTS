@@ -505,7 +505,7 @@ export const VocabularySRSView: React.FC = () => {
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* AI Lexicographer Enricher Button */}
-          <button
+          <button data-ux-flow="vocabulary.srs"
             id="enrich-vocab-btn"
             onClick={() => setIsEnricherOpen(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-teal-600/20 active:scale-95 transition-all cursor-pointer"
@@ -515,7 +515,7 @@ export const VocabularySRSView: React.FC = () => {
           </button>
 
           {/* Add Word Button */}
-          <button
+          <button data-ux-flow="vocabulary.srs"
             id="add-vocab-btn"
             onClick={() => setIsAddModalOpen(true)}
             className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
@@ -525,7 +525,7 @@ export const VocabularySRSView: React.FC = () => {
           </button>
 
           {/* Curated Decks Explorer */}
-          <button
+          <button data-ux-flow="vocabulary.srs"
             id="browse-decks-btn"
             onClick={() => setStudyMode('decks')}
             className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-xs sm:text-sm font-bold transition-all cursor-pointer ${
@@ -539,7 +539,7 @@ export const VocabularySRSView: React.FC = () => {
           </button>
 
           {/* Export Modal Trigger */}
-          <button
+          <button data-ux-flow="vocabulary.srs"
             id="export-vocab-btn"
             onClick={() => setIsExportModalOpen(true)}
             className="p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-blue-600 transition-colors cursor-pointer"
@@ -602,7 +602,7 @@ export const VocabularySRSView: React.FC = () => {
                 Hộp 1 • Mới nạp
               </span>
               <span className="text-2xl font-black text-rose-700 dark:text-rose-300 mt-0.5 block">{stage0Count}</span>
-              <span className="text-[10px] text-rose-600/80 dark:text-rose-400/80 font-medium">Chu kỳ: 1 ngày</span>
+              <span className="text-[10px] text-rose-800 dark:text-rose-300 font-medium">Chu kỳ: 1 ngày</span>
             </div>
 
             {/* Box 2 */}
@@ -611,7 +611,7 @@ export const VocabularySRSView: React.FC = () => {
                 Hộp 2 • Đang nhớ
               </span>
               <span className="text-2xl font-black text-amber-700 dark:text-amber-300 mt-0.5 block">{stage12Count}</span>
-              <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80 font-medium">Chu kỳ: 3 - 5 ngày</span>
+              <span className="text-[10px] text-amber-800 dark:text-amber-300 font-medium">Chu kỳ: 3 - 5 ngày</span>
             </div>
 
             {/* Box 3 */}
@@ -620,7 +620,7 @@ export const VocabularySRSView: React.FC = () => {
                 Hộp 3 • Nhớ vững
               </span>
               <span className="text-2xl font-black text-sky-700 dark:text-sky-300 mt-0.5 block">{stage34Count}</span>
-              <span className="text-[10px] text-sky-600/80 dark:text-sky-400/80 font-medium">Chu kỳ: 7 - 15 ngày</span>
+              <span className="text-[10px] text-sky-800 dark:text-sky-300 font-medium">Chu kỳ: 7 - 15 ngày</span>
             </div>
 
             {/* Box 4 */}
@@ -629,7 +629,7 @@ export const VocabularySRSView: React.FC = () => {
                 Hộp 4 • Thành thạo
               </span>
               <span className="text-2xl font-black text-emerald-700 dark:text-emerald-300 mt-0.5 block">{stageMasteredCount}</span>
-              <span className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 font-medium">Chu kỳ: 30+ ngày</span>
+              <span className="text-[10px] text-emerald-800 dark:text-emerald-300 font-medium">Chu kỳ: 30+ ngày</span>
             </div>
           </div>
 
@@ -645,7 +645,7 @@ export const VocabularySRSView: React.FC = () => {
 
       {/* 3. 5-MODE NAVIGATION TAB BAR (MOCHI STYLE) */}
       <div className="p-1.5 bg-slate-100 dark:bg-slate-800/90 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-1 overflow-x-auto no-scrollbar">
-        <button
+        <button data-ux-flow="vocabulary.srs"
           id="mode-flashcard-btn"
           onClick={() => setStudyMode('flashcard')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -658,7 +658,7 @@ export const VocabularySRSView: React.FC = () => {
           <span>1. Thẻ Flashcard 3D</span>
         </button>
 
-        <button
+        <button data-ux-flow="vocabulary.srs"
           id="mode-quiz-btn"
           onClick={() => setStudyMode('quiz')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -671,7 +671,7 @@ export const VocabularySRSView: React.FC = () => {
           <span>2. Trắc Nghiệm Nghĩa</span>
         </button>
 
-        <button
+        <button data-ux-flow="vocabulary.srs"
           id="mode-dictation-btn"
           onClick={() => setStudyMode('dictation')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -684,7 +684,7 @@ export const VocabularySRSView: React.FC = () => {
           <span>3. Nghe & Gõ Từ</span>
         </button>
 
-        <button
+        <button data-ux-flow="vocabulary.srs"
           id="mode-context-btn"
           onClick={() => setStudyMode('context')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -697,7 +697,7 @@ export const VocabularySRSView: React.FC = () => {
           <span>4. Điền Từ Ngữ Cảnh</span>
         </button>
 
-        <button
+        <button data-ux-flow="vocabulary.srs"
           id="mode-pronunciation-btn"
           onClick={() => setStudyMode('pronunciation')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -712,7 +712,7 @@ export const VocabularySRSView: React.FC = () => {
 
         <div className="h-4 w-px bg-slate-300 dark:bg-slate-700 mx-1 shrink-0" />
 
-        <button
+        <button data-ux-flow="vocabulary.srs"
           id="mode-lexicon-btn"
           onClick={() => setStudyMode('lexicon')}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
@@ -744,7 +744,7 @@ export const VocabularySRSView: React.FC = () => {
 
                 {/* Voice Accent Switcher */}
                 <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={() => setVoiceAccent('uk')}
                     className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                       voiceAccent === 'uk'
@@ -754,7 +754,7 @@ export const VocabularySRSView: React.FC = () => {
                   >
                     🇬🇧 Anh - Anh
                   </button>
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={() => setVoiceAccent('us')}
                     className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                       voiceAccent === 'us'
@@ -807,7 +807,7 @@ export const VocabularySRSView: React.FC = () => {
                             ? currentCard.usPhonetic || currentCard.phonetic
                             : currentCard.ukPhonetic || currentCard.phonetic}
                         </span>
-                        <button
+                        <button data-ux-flow="vocabulary.srs"
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -923,7 +923,7 @@ export const VocabularySRSView: React.FC = () => {
                   <span>
                     Trạng thái SRS: <strong>Hộp {currentCard.srsStage}</strong> ({currentCard.intervalDays} ngày)
                   </span>
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -940,43 +940,43 @@ export const VocabularySRSView: React.FC = () => {
               {/* 4 SM-2 SRS FEEDBACK BUTTONS */}
               <div className="grid grid-cols-4 gap-2 pt-2">
                 {/* 1. Again */}
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   id="srs-rate-again"
                   onClick={() => handleSRSResponse('again')}
                   className="p-3 rounded-2xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-900/60 flex flex-col items-center gap-0.5 transition-all active:scale-95 cursor-pointer"
                 >
                   <span className="text-xs font-black">🔴 Chưa nhớ (1)</span>
-                  <span className="text-[10px] opacity-75">Ôn lại ngay</span>
+                  <span className="text-[10px]">Ôn lại ngay</span>
                 </button>
 
                 {/* 2. Hard */}
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   id="srs-rate-hard"
                   onClick={() => handleSRSResponse('hard')}
                   className="p-3 rounded-2xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-900/60 flex flex-col items-center gap-0.5 transition-all active:scale-95 cursor-pointer"
                 >
                   <span className="text-xs font-black">🟠 Hơi khó (2)</span>
-                  <span className="text-[10px] opacity-75">1 - 2 ngày</span>
+                  <span className="text-[10px]">1 - 2 ngày</span>
                 </button>
 
                 {/* 3. Good */}
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   id="srs-rate-good"
                   onClick={() => handleSRSResponse('good')}
                   className="p-3 rounded-2xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-900/60 flex flex-col items-center gap-0.5 transition-all active:scale-95 cursor-pointer"
                 >
                   <span className="text-xs font-black">🟢 Nhớ tốt (3)</span>
-                  <span className="text-[10px] opacity-75">3 - 7 ngày</span>
+                  <span className="text-[10px]">3 - 7 ngày</span>
                 </button>
 
                 {/* 4. Easy */}
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   id="srs-rate-easy"
                   onClick={() => handleSRSResponse('easy')}
                   className="p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-900/60 flex flex-col items-center gap-0.5 transition-all active:scale-95 cursor-pointer"
                 >
                   <span className="text-xs font-black">🔵 Dễ ợt (4)</span>
-                  <span className="text-[10px] opacity-75">10 - 15 ngày</span>
+                  <span className="text-[10px]">10 - 15 ngày</span>
                 </button>
               </div>
             </div>
@@ -1024,7 +1024,7 @@ export const VocabularySRSView: React.FC = () => {
                   <h2 className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-slate-100 font-display">
                     {quizCard.word}
                   </h2>
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={() => handlePlayVoice(quizCard.word)}
                     className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 hover:bg-blue-100 transition-colors"
                   >
@@ -1053,7 +1053,7 @@ export const VocabularySRSView: React.FC = () => {
                   }
 
                   return (
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       key={i}
                       disabled={quizSelectedOption !== null}
                       onClick={() => handleSelectQuizOption(opt.text, opt.isCorrect)}
@@ -1070,7 +1070,7 @@ export const VocabularySRSView: React.FC = () => {
               {/* Next Button */}
               {quizSelectedOption !== null && (
                 <div className="pt-2 flex justify-end">
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={handleNextQuiz}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
                   >
@@ -1096,7 +1096,7 @@ export const VocabularySRSView: React.FC = () => {
 
               {/* Audio Player Box */}
               <div className="p-6 rounded-3xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40 text-center space-y-3">
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   type="button"
                   onClick={() => handlePlayVoice(dictationCard.word)}
                   className="w-16 h-16 rounded-full bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center mx-auto shadow-lg shadow-purple-600/30 hover:scale-105 active:scale-95 transition-all cursor-pointer"
@@ -1111,9 +1111,9 @@ export const VocabularySRSView: React.FC = () => {
               </div>
 
               {/* Dictation Input Form */}
-              <form onSubmit={handleCheckDictation} className="space-y-4">
+              <form data-ux-flow="vocabulary.srs" onSubmit={handleCheckDictation} className="space-y-4">
                 <div className="relative">
-                  <input
+                  <input data-ux-flow="vocabulary.srs"
                     type="text"
                     value={dictationInput}
                     onChange={(e) => setDictationInput(e.target.value)}
@@ -1133,7 +1133,7 @@ export const VocabularySRSView: React.FC = () => {
                 {/* Hint Button */}
                 {dictationResult === null && (
                   <div className="flex items-center justify-between text-xs">
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       type="button"
                       onClick={() => setDictationHintCount((prev) => prev + 1)}
                       className="text-purple-600 dark:text-purple-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
@@ -1166,7 +1166,7 @@ export const VocabularySRSView: React.FC = () => {
                 {/* Actions */}
                 <div className="flex justify-end gap-2 pt-2">
                   {dictationResult === null ? (
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       type="submit"
                       disabled={!dictationInput.trim()}
                       className="px-6 py-2.5 rounded-2xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
@@ -1174,7 +1174,7 @@ export const VocabularySRSView: React.FC = () => {
                       Kiểm tra đáp án
                     </button>
                   ) : (
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       type="button"
                       onClick={handleNextDictation}
                       className="flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
@@ -1231,7 +1231,7 @@ export const VocabularySRSView: React.FC = () => {
                   }
 
                   return (
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       key={i}
                       disabled={contextSelectedChoice !== null}
                       onClick={() => handleSelectContextChoice(word)}
@@ -1245,7 +1245,7 @@ export const VocabularySRSView: React.FC = () => {
 
               {contextSelectedChoice !== null && (
                 <div className="pt-2 flex justify-end">
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={handleNextContext}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
                   >
@@ -1276,7 +1276,7 @@ export const VocabularySRSView: React.FC = () => {
                 </h2>
                 <div className="flex items-center justify-center gap-2 text-slate-500 font-mono text-sm">
                   <span>{pronCard.phonetic}</span>
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={() => handlePlayVoice(pronCard.word)}
                     className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-blue-600"
                   >
@@ -1288,7 +1288,7 @@ export const VocabularySRSView: React.FC = () => {
 
               {/* Record Mic Button */}
               <div className="text-center space-y-3">
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   id="pron-record-btn"
                   onClick={startVoiceRecording}
                   disabled={isRecording || isEvaluatingPron}
@@ -1343,7 +1343,7 @@ export const VocabularySRSView: React.FC = () => {
               {/* Next Button */}
               {pronEvaluation && (
                 <div className="pt-2 flex justify-end">
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     onClick={handleNextPron}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer"
                   >
@@ -1414,7 +1414,7 @@ export const VocabularySRSView: React.FC = () => {
                     <span className="text-xs text-slate-500 font-medium">
                       <strong>{deck.cards.length}</strong> từ vựng C1/C2
                     </span>
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       onClick={() => {
                         importCuratedDeck(deck.id);
                         setStudyMode('flashcard');
@@ -1438,7 +1438,7 @@ export const VocabularySRSView: React.FC = () => {
           <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[220px]">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
+              <input data-ux-flow="vocabulary.srs"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -1448,7 +1448,7 @@ export const VocabularySRSView: React.FC = () => {
             </div>
 
             {/* Deck Selector */}
-            <select
+            <select data-ux-flow="vocabulary.srs"
               value={selectedDeckFilter}
               onChange={(e) => setSelectedDeckFilter(e.target.value)}
               className="px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold"
@@ -1463,7 +1463,7 @@ export const VocabularySRSView: React.FC = () => {
             </select>
 
             {/* CEFR Level Filter */}
-            <select
+            <select data-ux-flow="vocabulary.srs"
               value={selectedCefrFilter}
               onChange={(e) => setSelectedCefrFilter(e.target.value)}
               className="px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold"
@@ -1497,7 +1497,7 @@ export const VocabularySRSView: React.FC = () => {
                     <h4 className="text-lg font-bold text-slate-900 dark:text-slate-100 group-hover:text-blue-600 transition-colors">
                       {card.word}
                     </h4>
-                    <button
+                    <button data-ux-flow="vocabulary.srs"
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1546,7 +1546,7 @@ export const VocabularySRSView: React.FC = () => {
                   <p className="text-xs text-slate-400">Gõ 1 từ hoặc cụm từ, AI sẽ tự sinh 100% nội dung học thuật</p>
                 </div>
               </div>
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 onClick={() => {
                   setIsAddModalOpen(false);
                   setGeneratedDraft(null);
@@ -1565,7 +1565,7 @@ export const VocabularySRSView: React.FC = () => {
                   Từ hoặc Cụm từ cần học (Word / Collocation) *
                 </label>
                 <div className="flex gap-2">
-                  <input
+                  <input data-ux-flow="vocabulary.srs"
                     type="text"
                     value={inputWord}
                     onChange={(e) => setInputWord(e.target.value)}
@@ -1573,7 +1573,7 @@ export const VocabularySRSView: React.FC = () => {
                     className="flex-1 px-4 py-2.5 text-sm rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-semibold"
                     autoFocus
                   />
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     type="button"
                     onClick={() => handleAiAutoGenerate()}
                     disabled={!inputWord.trim() || isAiGenerating}
@@ -1596,7 +1596,7 @@ export const VocabularySRSView: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-500 mb-1">Chủ đề (Deck):</label>
-                    <select
+                    <select data-ux-flow="vocabulary.srs"
                       value={inputTopicDeck}
                       onChange={(e) => setInputTopicDeck(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs"
@@ -1612,7 +1612,7 @@ export const VocabularySRSView: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-500 mb-1">Gợi ý ngữ cảnh thêm (tùy chọn):</label>
-                    <input
+                    <input data-ux-flow="vocabulary.srs"
                       type="text"
                       value={inputContextHint}
                       onChange={(e) => setInputContextHint(e.target.value)}
@@ -1672,7 +1672,7 @@ export const VocabularySRSView: React.FC = () => {
 
             {/* Modal Footer */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2 shrink-0">
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 type="button"
                 onClick={() => {
                   setIsAddModalOpen(false);
@@ -1682,7 +1682,7 @@ export const VocabularySRSView: React.FC = () => {
               >
                 Hủy
               </button>
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 type="button"
                 onClick={handleSaveDraftCard}
                 disabled={!generatedDraft}
@@ -1706,7 +1706,7 @@ export const VocabularySRSView: React.FC = () => {
                 </span>
                 <span className="text-xs text-slate-400">Hộp SRS: {selectedCardDetail.srsStage}</span>
               </div>
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 onClick={() => setSelectedCardDetail(null)}
                 className="p-1 rounded-lg text-slate-400 hover:text-white"
               >
@@ -1724,7 +1724,7 @@ export const VocabularySRSView: React.FC = () => {
                     UK: {selectedCardDetail.ukPhonetic || selectedCardDetail.phonetic} | US: {selectedCardDetail.usPhonetic || selectedCardDetail.phonetic}
                   </div>
                 </div>
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   onClick={() => handlePlayVoice(selectedCardDetail.word)}
                   className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 hover:bg-blue-100 transition-colors cursor-pointer"
                 >
@@ -1762,7 +1762,7 @@ export const VocabularySRSView: React.FC = () => {
 
               {/* Actions */}
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   type="button"
                   onClick={() => {
                     resetVocabSRS(selectedCardDetail.id);
@@ -1772,7 +1772,7 @@ export const VocabularySRSView: React.FC = () => {
                 >
                   Reset lại Hộp 1
                 </button>
-                <button
+                <button data-ux-flow="vocabulary.srs"
                   type="button"
                   onClick={() => {
                     deleteVocabCard(selectedCardDetail.id);
@@ -1797,7 +1797,7 @@ export const VocabularySRSView: React.FC = () => {
                 <Download className="w-4 h-4 text-blue-600" />
                 <span>Xuất Dữ Liệu & Ôn Offline</span>
               </h3>
-              <button onClick={() => setIsExportModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button data-ux-flow="vocabulary.srs" onClick={() => setIsExportModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1807,7 +1807,7 @@ export const VocabularySRSView: React.FC = () => {
             </p>
 
             <div className="space-y-2.5 pt-2">
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 onClick={handleExportAnkiTSV}
                 className="w-full p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/50 border border-slate-200 dark:border-slate-700 text-left flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
               >
@@ -1821,7 +1821,7 @@ export const VocabularySRSView: React.FC = () => {
                 <ArrowRight className="w-4 h-4 text-slate-400" />
               </button>
 
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 onClick={handleExportJSON}
                 className="w-full p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/50 border border-slate-200 dark:border-slate-700 text-left flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
               >
@@ -1835,7 +1835,7 @@ export const VocabularySRSView: React.FC = () => {
                 <ArrowRight className="w-4 h-4 text-slate-400" />
               </button>
 
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 onClick={handlePrintList}
                 className="w-full p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/50 border border-slate-200 dark:border-slate-700 text-left flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
               >

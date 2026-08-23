@@ -108,7 +108,7 @@ export const OverviewBandCalculator: React.FC = () => {
                 {lBand.toFixed(1)}
               </span>
             </div>
-            <input
+            <input data-ux-flow="knowledge.learn"
               type="range"
               min={4.0}
               max={9.0}
@@ -134,7 +134,7 @@ export const OverviewBandCalculator: React.FC = () => {
                 {rBand.toFixed(1)}
               </span>
             </div>
-            <input
+            <input data-ux-flow="knowledge.learn"
               type="range"
               min={4.0}
               max={9.0}
@@ -160,7 +160,7 @@ export const OverviewBandCalculator: React.FC = () => {
                 {wBand.toFixed(1)}
               </span>
             </div>
-            <input
+            <input data-ux-flow="knowledge.learn"
               type="range"
               min={4.0}
               max={9.0}
@@ -186,7 +186,7 @@ export const OverviewBandCalculator: React.FC = () => {
                 {sBand.toFixed(1)}
               </span>
             </div>
-            <input
+            <input data-ux-flow="knowledge.learn"
               type="range"
               min={4.0}
               max={9.0}
@@ -247,7 +247,7 @@ export const OverviewBandCalculator: React.FC = () => {
 
           {/* Skill Selector Tabs */}
           <div className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl flex items-center gap-1 border border-slate-200 dark:border-slate-700 text-xs font-semibold shrink-0">
-            <button
+            <button data-ux-flow="knowledge.learn"
               onClick={() => setConversionSkill('listening')}
               className={`px-3 py-1.5 rounded-lg transition-all ${
                 conversionSkill === 'listening'
@@ -257,7 +257,7 @@ export const OverviewBandCalculator: React.FC = () => {
             >
               Listening (40 câu)
             </button>
-            <button
+            <button data-ux-flow="knowledge.learn"
               onClick={() => setConversionSkill('reading_academic')}
               className={`px-3 py-1.5 rounded-lg transition-all ${
                 conversionSkill === 'reading_academic'
@@ -267,7 +267,7 @@ export const OverviewBandCalculator: React.FC = () => {
             >
               Reading Academic
             </button>
-            <button
+            <button data-ux-flow="knowledge.learn"
               onClick={() => setConversionSkill('reading_general')}
               className={`px-3 py-1.5 rounded-lg transition-all ${
                 conversionSkill === 'reading_general'

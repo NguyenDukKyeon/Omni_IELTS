@@ -82,7 +82,7 @@ export const DashboardView: React.FC = () => {
               Bạn đang ở <strong>Band {profile.currentBand.toFixed(1)}</strong>. Hệ thống đã chuẩn bị bài ôn tập ngắt quãng (SRS) và các lỗi sai cần củng cố hôm nay từ các nguồn học liệu của bạn.
             </p>
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <button
+              <button data-ux-flow="dashboard.daily"
                 type="button"
                 onClick={() => setIsDiagnosticOpen(true)}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
@@ -122,10 +122,10 @@ export const DashboardView: React.FC = () => {
 
           <div className="space-y-4 relative z-10">
             <div className="flex items-center justify-between">
-              <span className="text-xs uppercase font-bold tracking-wider text-blue-100 bg-white/15 px-3 py-1 rounded-full border border-white/20">
+              <span className="text-xs uppercase font-bold tracking-wider text-white bg-blue-800 px-3 py-1 rounded-full border border-blue-300/60">
                 Chuỗi học tập
               </span>
-              <div className="flex items-center gap-1 text-xs font-bold bg-white/20 px-2.5 py-1 rounded-full">
+              <div className="flex items-center gap-1 text-xs font-bold bg-blue-800 px-2.5 py-1 rounded-full">
                 <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
                 <span>Lv.{level}</span>
               </div>
@@ -285,7 +285,7 @@ export const DashboardView: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
+            <button data-ux-flow="dashboard.daily"
               onClick={() => {
                 setSpeedDrillType('paraphrase_blitz');
                 setIsSpeedDrillOpen(true);
@@ -294,7 +294,7 @@ export const DashboardView: React.FC = () => {
             >
               ⚡ Paraphrase
             </button>
-            <button
+            <button data-ux-flow="dashboard.daily"
               onClick={() => {
                 setSpeedDrillType('cohesive_jigsaw');
                 setIsSpeedDrillOpen(true);
@@ -303,7 +303,7 @@ export const DashboardView: React.FC = () => {
             >
               🧩 Jigsaw
             </button>
-            <button
+            <button data-ux-flow="dashboard.daily"
               onClick={() => {
                 setSpeedDrillType('collocation_match');
                 setIsSpeedDrillOpen(true);
@@ -381,7 +381,7 @@ export const DashboardView: React.FC = () => {
           ].map((mod) => {
             const Icon = mod.icon;
             return (
-              <button
+              <button data-ux-flow="dashboard.daily"
                 key={mod.id}
                 onClick={() => setActiveModule(mod.id as any)}
                 className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 shadow-xs hover:shadow-sm text-left transition-all group flex flex-col justify-between cursor-pointer"
@@ -417,7 +417,7 @@ export const DashboardView: React.FC = () => {
               <GraduationCap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>Lịch Sử Thi Thử Gần Nhất</span>
             </h3>
-            <button
+            <button data-ux-flow="dashboard.daily"
               onClick={() => setActiveModule('mock_test')}
               className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
             >
@@ -483,7 +483,7 @@ export const DashboardView: React.FC = () => {
           </div>
 
           <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-            <button
+            <button data-ux-flow="dashboard.daily"
               onClick={() => setActiveModule('sources')}
               className="w-full py-3 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs tracking-wide shadow-xs hover:shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
             >

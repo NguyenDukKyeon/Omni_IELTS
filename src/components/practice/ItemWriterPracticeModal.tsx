@@ -158,7 +158,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => {
               window.speechSynthesis?.cancel();
               onClose();
@@ -178,7 +178,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                 Kỹ năng:
               </label>
               <div className="flex gap-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
-                <button
+                <button data-ux-flow="practice.skills"
                   type="button"
                   onClick={() => {
                     setSkill('reading');
@@ -192,7 +192,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                 >
                   📖 Reading
                 </button>
-                <button
+                <button data-ux-flow="practice.skills"
                   type="button"
                   onClick={() => {
                     setSkill('listening');
@@ -213,7 +213,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Dạng câu hỏi IELTS:
               </label>
-              <select
+              <select data-ux-flow="practice.skills"
                 value={questionType}
                 onChange={(e) => {
                   setQuestionType(e.target.value);
@@ -233,7 +233,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Chủ đề học thuật:
               </label>
-              <select
+              <select data-ux-flow="practice.skills"
                 value={topicDomain}
                 onChange={(e) => {
                   setTopicDomain(e.target.value);
@@ -257,7 +257,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
               <span className="font-bold">Band mục tiêu:</span>
               <div className="flex gap-1">
                 {[6.0, 6.5, 7.0, 7.5, 8.0].map((b) => (
-                  <button
+                  <button data-ux-flow="practice.skills"
                     key={b}
                     type="button"
                     onClick={() => {
@@ -276,7 +276,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
               </div>
             </div>
 
-            <button
+            <button data-ux-flow="practice.skills"
               type="button"
               onClick={() => handleGenerate()}
               disabled={isLoading}
@@ -398,7 +398,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                         </div>
 
                         <div className="flex items-center gap-2 flex-1 sm:max-w-md">
-                          <select
+                          <select data-ux-flow="practice.skills"
                             value={selectedHeading}
                             onChange={(e) =>
                               setUserHeadingMapping((prev) => ({
@@ -441,7 +441,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                     </div>
                   )}
 
-                  <button
+                  <button data-ux-flow="practice.skills"
                     type="button"
                     onClick={() => setShowResults(true)}
                     className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all"
@@ -490,7 +490,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
 
                       <div className="flex gap-2">
                         {['true', 'false', 'not_given'].map((opt) => (
-                          <button
+                          <button data-ux-flow="practice.skills"
                             key={opt}
                             type="button"
                             onClick={() => setUserAnswers((prev) => ({ ...prev, [qIdx]: opt }))}
@@ -514,7 +514,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                   );
                 })}
 
-                <button
+                <button data-ux-flow="practice.skills"
                   type="button"
                   onClick={() => setShowResults(true)}
                   className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all"
@@ -565,7 +565,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                         {q.options && q.options.length > 0 ? (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {q.options.map((opt, oIdx) => (
-                              <button
+                              <button data-ux-flow="practice.skills"
                                 key={oIdx}
                                 type="button"
                                 onClick={() =>
@@ -582,7 +582,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                             ))}
                           </div>
                         ) : (
-                          <input
+                          <input data-ux-flow="practice.skills"
                             type="text"
                             value={userAnswers[qIdx] || ''}
                             onChange={(e) =>
@@ -605,7 +605,7 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
                     );
                   })}
 
-                  <button
+                  <button data-ux-flow="practice.skills"
                     type="button"
                     onClick={() => setShowResults(true)}
                     className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all"

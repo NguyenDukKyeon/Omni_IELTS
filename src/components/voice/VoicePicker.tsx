@@ -29,7 +29,7 @@ export const VoicePicker: React.FC<{ useCase?: VoiceUseCase; compact?: boolean }
   return (
     <div className={`flex flex-wrap items-center gap-2 ${compact ? '' : 'rounded-2xl border border-slate-200 p-3 dark:border-slate-700'}`}>
       <Volume2 className="h-4 w-4 shrink-0 text-indigo-500" />
-      <select
+      <select data-ux-flow="app.shared"
         value={selected ? JSON.stringify(selected) : ''}
         onChange={(event) => {
           const voice = voices.find((candidate) => JSON.stringify(candidate) === event.target.value);
@@ -45,18 +45,18 @@ export const VoicePicker: React.FC<{ useCase?: VoiceUseCase; compact?: boolean }
           {GEMINI_VOICES.map((voice) => <option key={voice.id} value={JSON.stringify(voice)}>{voice.name}</option>)}
         </optgroup>
       </select>
-      <select aria-label="Phong cách giọng" value={style} onChange={event => saveSettings(pace, event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
+      <select data-ux-flow="app.shared" aria-label="Phong cách giọng" value={style} onChange={event => saveSettings(pace, event.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
         <option>Clear and mature</option>
         <option>Warm examiner</option>
         <option>Academic narrator</option>
         <option>Slow pronunciation coach</option>
       </select>
-      <select aria-label="Tốc độ giọng" value={pace} onChange={event => saveSettings(Number(event.target.value), style)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
+      <select data-ux-flow="app.shared" aria-label="Tốc độ giọng" value={pace} onChange={event => saveSettings(Number(event.target.value), style)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
         <option value={0.8}>0.80×</option>
         <option value={0.94}>0.94×</option>
         <option value={1}>1.00×</option>
       </select>
-      <button type="button" onClick={() => void playVoiceText('Welcome to your Omni IELTS practice session.', { descriptor: selected, useCase: useCase as VoiceUseCase, rate: pace, style })} className="rounded-lg bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-950/50" title="Nghe thử giọng">
+      <button data-ux-flow="app.shared" type="button" onClick={() => void playVoiceText('Welcome to your Omni IELTS practice session.', { descriptor: selected, useCase: useCase as VoiceUseCase, rate: pace, style })} className="rounded-lg bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-950/50" title="Nghe thử giọng">
         <Play className="h-3.5 w-3.5" />
       </button>
     </div>

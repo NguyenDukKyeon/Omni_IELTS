@@ -179,7 +179,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="vocabulary.srs"
             onClick={() => {
               window.speechSynthesis?.cancel();
               onClose();
@@ -197,7 +197,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                 Từ hoặc cụm từ tiếng Anh:
               </label>
-              <input
+              <input data-ux-flow="vocabulary.srs"
                 type="text"
                 value={inputWord}
                 onChange={(e) => setInputWord(e.target.value)}
@@ -210,7 +210,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                 Ngữ cảnh / Chủ đề quan tâm (tùy chọn):
               </label>
-              <input
+              <input data-ux-flow="vocabulary.srs"
                 type="text"
                 value={interestContext}
                 onChange={(e) => setInterestContext(e.target.value)}
@@ -224,7 +224,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
           <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="text-slate-400">Từ gợi ý:</span>
             {SAMPLE_WORDS.map((s, idx) => (
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 key={idx}
                 type="button"
                 onClick={() => {
@@ -240,7 +240,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
           </div>
 
           <div className="flex justify-end">
-            <button
+            <button data-ux-flow="vocabulary.srs"
               type="button"
               onClick={() => handleEnrich()}
               disabled={isLoading || !inputWord.trim()}
@@ -306,7 +306,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
                 </div>
 
                 {result.ttsScript && (
-                  <button
+                  <button data-ux-flow="vocabulary.srs"
                     type="button"
                     onClick={() => handlePlayVoice(result.ttsScript || result.word)}
                     className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
@@ -402,7 +402,7 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
 
             {/* Save to SRS Button */}
             <div className="pt-2">
-              <button
+              <button data-ux-flow="vocabulary.srs"
                 type="button"
                 onClick={handleSaveToSRS}
                 disabled={isSynced}
