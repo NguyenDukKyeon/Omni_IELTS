@@ -26,7 +26,7 @@ const parseTime = (value: string): number => {
 };
 
 /** Parse VTT captions and collapse YouTube's rolling-caption duplicates. */
-export function normalizeRollingVtt(vtt: string): NormalizedTranscriptSegment[] {
+function parseVttCues(vtt: string): NormalizedTranscriptSegment[] {
   const blocks = vtt.replace(/^\uFEFF/, '').split(/\r?\n\s*\r?\n/);
   const parsed: NormalizedTranscriptSegment[] = [];
 
@@ -40,6 +40,12 @@ export function normalizeRollingVtt(vtt: string): NormalizedTranscriptSegment[] 
     if (!text || /^\[(music|applause|laughter)\]$/i.test(text)) continue;
     parsed.push({ start: parseTime(timing[1]), end: parseTime(timing[2]), text });
   }
+
+  return parsed;
+}
+
+export function normalizeRollingVtt(vtt: string): NormalizedTranscriptSegment[] {
+  const parsed = parseVttCues(vtt);
 
   const normalized: NormalizedTranscriptSegment[] = [];
   for (const cue of parsed) {
@@ -64,4 +70,87 @@ export function normalizeRollingVtt(vtt: string): NormalizedTranscriptSegment[] 
   }
 
   return normalized;
+}
+
+const comparableToken = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+
+function rollingCaptionDeltas(cues: NormalizedTranscriptSegment[]) {
+  const deltas: NormalizedTranscriptSegment[] = [];
+  let previousCue: NormalizedTranscriptSegment | undefined;
+
+  for (const cue of cues) {
+    if (!previousCue) {
+      deltas.push({ ...cue });
+      previousCue = cue;
+      continue;
+    }
+
+    const previousWords = previousCue.text.split(/\s+/);
+    const currentWords = cue.text.split(/\s+/);
+    const maxOverlap = Math.min(previousWords.length, currentWords.length);
+    let overlap = 0;
+    for (let size = maxOverlap; size > 0; size -= 1) {
+      const previousSuffix = previousWords.slice(-size).map(comparableToken).join(' ');
+      const currentPrefix = currentWords.slice(0, size).map(comparableToken).join(' ');
+      if (previousSuffix && previousSuffix === currentPrefix) {
+        overlap = size;
+        break;
+      }
+    }
+
+    const novelText = currentWords.slice(overlap).join(' ').trim();
+    if (novelText) {
+      deltas.push({
+        start: overlap > 0 ? Math.min(cue.end, Math.max(cue.start, previousCue.end)) : cue.start,
+        end: cue.end,
+        text: novelText,
+      });
+    }
+    previousCue = cue;
+  }
+
+  return deltas;
+}
+
+function splitTimedSentences(cues: NormalizedTranscriptSegment[]): NormalizedTranscriptSegment[] {
+  return cues.flatMap((cue) => {
+    const sentences = cue.text.match(/[^.!?]+[.!?]+(?:[\]"')]*)|[^.!?]+$/g)
+      ?.map((sentence) => sentence.trim())
+      .filter(Boolean) || [cue.text];
+    if (sentences.length <= 1) return [cue];
+
+    const weights = sentences.map((sentence) => Math.max(1, sentence.split(/\s+/).length));
+    const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+    const duration = Math.max(0, cue.end - cue.start);
+    let consumedWeight = 0;
+    return sentences.map((text, index) => {
+      const start = cue.start + duration * (consumedWeight / totalWeight);
+      consumedWeight += weights[index];
+      const end = index === sentences.length - 1
+        ? cue.end
+        : cue.start + duration * (consumedWeight / totalWeight);
+      return { start, end, text };
+    });
+  });
+}
+
+export function alignTranscriptSentences(cues: NormalizedTranscriptSegment[]): NormalizedTranscriptSegment[] {
+  const result: NormalizedTranscriptSegment[] = [];
+  let pending: NormalizedTranscriptSegment | null = null;
+  for (const cue of cues) {
+    pending = pending
+      ? { start: pending.start, end: cue.end, text: `${pending.text} ${cue.text}`.replace(/\s+/g, ' ').trim() }
+      : { ...cue };
+    const complete = /[.!?][\]"')]*$/.test(pending.text);
+    if (complete || pending.end - pending.start >= 18 || pending.text.length >= 260) {
+      result.push(pending);
+      pending = null;
+    }
+  }
+  if (pending) result.push(pending);
+  return result;
+}
+
+export function normalizeAndAlignVtt(vtt: string) {
+  return alignTranscriptSentences(splitTimedSentences(rollingCaptionDeltas(parseVttCues(vtt))));
 }

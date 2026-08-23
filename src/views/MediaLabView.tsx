@@ -18,20 +18,26 @@ import {
   CheckCircle2,
   Clock,
   Flame,
+  Pencil,
+  Save,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { MediaSession } from '../types';
+import { MediaSession, MediaTranscriptSegment } from '../types';
 import { YouTubeUrlInputModal } from '../components/media/YouTubeUrlInputModal';
 import { AudioTranscribeModal } from '../components/media/AudioTranscribeModal';
 import { ShadowingStudio } from '../components/media/ShadowingStudio';
 import { DictationStudio } from '../components/media/DictationStudio';
 import { MediaVocabDrawer } from '../components/media/MediaVocabDrawer';
 import { playTextToSpeech } from '../services/aiTutor';
+import { saveMediaTranscript } from '../services/mediaService';
 
 export const MediaLabView: React.FC = () => {
   const {
     mediaSessions,
     addMediaSession,
+    updateMediaSession,
     deleteMediaSession,
     openAITutorWithPrompt,
   } = useApp();
@@ -46,6 +52,11 @@ export const MediaLabView: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isAudioTranscribeOpen, setIsAudioTranscribeOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false);
+  const [editedSegments, setEditedSegments] = useState<MediaTranscriptSegment[]>([]);
+  const [isSavingTranscript, setIsSavingTranscript] = useState(false);
+  const [transcriptNotice, setTranscriptNotice] = useState<string | null>(null);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
 
   // Selected session helper
   const selectedSession =
@@ -57,8 +68,7 @@ export const MediaLabView: React.FC = () => {
     const q = searchQuery.toLowerCase();
     return (
       s.title.toLowerCase().includes(q) ||
-      s.topic.toLowerCase().includes(q) ||
-      s.level.toLowerCase().includes(q)
+      s.topic.toLowerCase().includes(q)
     );
   });
 
@@ -67,6 +77,43 @@ export const MediaLabView: React.FC = () => {
     setSelectedSessionId(newSession.id);
     setActiveSegmentIndex(0);
     setActiveTab('studio');
+  };
+
+  const beginTranscriptEdit = () => {
+    if (!selectedSession) return;
+    setEditedSegments(selectedSession.transcriptSegments.map((segment) => ({ ...segment })));
+    setTranscriptNotice(null);
+    setTranscriptError(null);
+    setIsEditingTranscript(true);
+  };
+
+  const updateEditedSegment = (index: number, patch: Partial<MediaTranscriptSegment>) => {
+    setEditedSegments((segments) =>
+      segments.map((segment, currentIndex) => currentIndex === index ? { ...segment, ...patch } : segment)
+    );
+  };
+
+  const handleSaveTranscript = async () => {
+    if (!selectedSession) return;
+    const invalid = editedSegments.some((segment) =>
+      !segment.text.trim() || !Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.end < segment.start
+    );
+    if (invalid) {
+      setTranscriptError('Mỗi câu cần có nội dung và mốc kết thúc không nhỏ hơn mốc bắt đầu.');
+      return;
+    }
+    setIsSavingTranscript(true);
+    setTranscriptError(null);
+    try {
+      await saveMediaTranscript(selectedSession.id, editedSegments);
+      updateMediaSession({ ...selectedSession, transcriptSegments: editedSegments });
+      setIsEditingTranscript(false);
+      setTranscriptNotice('Đã lưu phiên bản transcript mới.');
+    } catch (error: any) {
+      setTranscriptError(error?.message || 'Không thể lưu transcript.');
+    } finally {
+      setIsSavingTranscript(false);
+    }
   };
 
   const handleDeleteSession = (id: string, e: React.MouseEvent) => {
@@ -194,9 +241,6 @@ export const MediaLabView: React.FC = () => {
 
                     <div className="flex items-center justify-between pt-1 border-t border-stone-100 dark:border-stone-700/60 text-[10px]">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-extrabold px-1.5 py-0.5 rounded-md bg-stone-200/80 dark:bg-stone-800 text-stone-700 dark:text-stone-300">
-                          {session.level}
-                        </span>
                         <span className="text-stone-500 dark:text-stone-400">
                           {session.transcriptSegments.length} câu
                         </span>
@@ -251,9 +295,6 @@ export const MediaLabView: React.FC = () => {
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 uppercase">
                         {selectedSession.mediaType}
-                      </span>
-                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300">
-                        {selectedSession.level}
                       </span>
                       <span className="text-xs text-stone-500 dark:text-stone-400">
                         {selectedSession.topic}
@@ -360,18 +401,60 @@ export const MediaLabView: React.FC = () => {
                       <ListOrdered className="w-4 h-4 text-sky-500" />
                       <span>Danh Sách Từng Câu Khớp Thời Gian</span>
                     </h3>
-                    <span className="text-xs text-stone-500">
-                      Bấm vào câu bất kỳ để bắt đầu luyện tập
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {!isEditingTranscript ? (
+                        <button
+                          type="button"
+                          data-ux-flow="media.learning"
+                          onClick={beginTranscriptEdit}
+                          className="rounded-xl border border-stone-200 px-3 py-2 text-xs font-bold text-stone-700 hover:border-sky-400 dark:border-stone-700 dark:text-stone-200"
+                        >
+                          <Pencil className="mr-1.5 inline h-3.5 w-3.5" />
+                          Chỉnh sửa transcript
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            data-ux-flow="media.learning"
+                            onClick={() => setIsEditingTranscript(false)}
+                            className="rounded-xl px-3 py-2 text-xs font-bold text-stone-500"
+                          >
+                            <X className="mr-1 inline h-3.5 w-3.5" /> Hủy
+                          </button>
+                          <button
+                            type="button"
+                            data-ux-flow="media.learning"
+                            disabled={isSavingTranscript}
+                            onClick={handleSaveTranscript}
+                            className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                          >
+                            <Save className="mr-1 inline h-3.5 w-3.5" /> Lưu transcript
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
+                  {transcriptNotice && (
+                    <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
+                      {transcriptNotice}
+                    </div>
+                  )}
+                  {transcriptError && (
+                    <div role="alert" className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
+                      <AlertCircle className="h-4 w-4" /> {transcriptError}
+                    </div>
+                  )}
+
                   <div className="space-y-3">
-                    {selectedSession.transcriptSegments.map((seg, idx) => {
+                    {(isEditingTranscript ? editedSegments : selectedSession.transcriptSegments).map((seg, idx) => {
                       const isActive = activeSegmentIndex === idx;
                       return (
                         <div
                           key={seg.id || idx}
                           onClick={() => {
+                            if (isEditingTranscript) return;
                             setActiveSegmentIndex(idx);
                             setActiveTab('studio');
                           }}
@@ -393,14 +476,61 @@ export const MediaLabView: React.FC = () => {
                             </span>
                           </div>
 
-                          <p className="text-sm font-serif font-bold text-stone-900 dark:text-stone-100 leading-relaxed">
-                            "{seg.text}"
-                          </p>
-
-                          {seg.translation && (
-                            <p className="text-xs text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
-                              {seg.translation}
-                            </p>
+                          {isEditingTranscript ? (
+                            <div className="space-y-2" onClick={(event) => event.stopPropagation()}>
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[11px] font-semibold text-stone-500">
+                                  Bắt đầu (giây)
+                                  <input
+                                    data-ux-flow="media.learning"
+                                    aria-label={`Bắt đầu câu ${idx + 1}`}
+                                    type="number"
+                                    step="0.1"
+                                    value={seg.start}
+                                    onChange={(event) => updateEditedSegment(idx, { start: Number(event.target.value) })}
+                                    className="mt-1 w-full rounded-lg border border-stone-200 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900"
+                                  />
+                                </label>
+                                <label className="text-[11px] font-semibold text-stone-500">
+                                  Kết thúc (giây)
+                                  <input
+                                    data-ux-flow="media.learning"
+                                    aria-label={`Kết thúc câu ${idx + 1}`}
+                                    type="number"
+                                    step="0.1"
+                                    value={seg.end}
+                                    onChange={(event) => updateEditedSegment(idx, { end: Number(event.target.value) })}
+                                    className="mt-1 w-full rounded-lg border border-stone-200 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900"
+                                  />
+                                </label>
+                              </div>
+                              <textarea
+                                data-ux-flow="media.learning"
+                                aria-label={`Nội dung câu ${idx + 1}`}
+                                value={seg.text}
+                                onChange={(event) => updateEditedSegment(idx, { text: event.target.value })}
+                                className="w-full rounded-xl border border-stone-200 bg-white p-3 text-sm font-semibold dark:border-stone-700 dark:bg-stone-900"
+                              />
+                              <textarea
+                                data-ux-flow="media.learning"
+                                aria-label={`Bản dịch câu ${idx + 1}`}
+                                value={seg.translation || ''}
+                                onChange={(event) => updateEditedSegment(idx, { translation: event.target.value })}
+                                placeholder="Bản dịch (không bắt buộc)"
+                                className="w-full rounded-xl border border-stone-200 bg-white p-3 text-xs dark:border-stone-700 dark:bg-stone-900"
+                              />
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm font-serif font-bold text-stone-900 dark:text-stone-100 leading-relaxed">
+                                "{seg.text}"
+                              </p>
+                              {seg.translation && (
+                                <p className="text-xs text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
+                                  {seg.translation}
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
                       );

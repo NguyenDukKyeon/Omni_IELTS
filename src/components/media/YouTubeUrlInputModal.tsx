@@ -23,16 +23,14 @@ const PRESET_VIDEOS = [
   {
     title: 'TED-Ed: Urban Planning & Climate Resilience',
     url: 'https://www.youtube.com/watch?v=0k7yF_Ggq40',
-    band: 'Band 7.0-8.0' as const,
     topic: 'Environment & Urban Architecture',
     desc: 'Luyện cấu trúc học thuật C1 về quy hoạch không gian xanh và đảo nhiệt đô thị.',
   },
   {
     title: 'IELTS Speaking Part 3 Mock: Artificial Intelligence & Workforce',
     url: 'https://www.youtube.com/watch?v=sR2E_j_gO1A',
-    band: 'Band 8.0+' as const,
     topic: 'Labor Economics & AI Ethics',
-    desc: 'Mẫu câu trả lời Band 8.5 với phản xạ lập luận đa chiều và collocations đắt giá.',
+    desc: 'Luyện phản xạ lập luận đa chiều và các collocation học thuật theo ngữ cảnh.',
   },
 ];
 
@@ -42,9 +40,6 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
   onSessionCreated,
 }) => {
   const [url, setUrl] = useState<string>('');
-  const [targetBand, setTargetBand] = useState<'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.0+'>(
-    'Band 7.0-8.0'
-  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingStep, setLoadingStep] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -69,7 +64,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
         setLoadingStep('Đang dịch song ngữ & trích xuất từ vựng học thuật C1/C2...');
       }, 3200);
 
-      const session = await processYouTubeUrl(url.trim(), targetBand);
+      const session = await processYouTubeUrl(url.trim());
       clearTimeout(timer1);
       clearTimeout(timer2);
 
@@ -84,9 +79,8 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
     }
   };
 
-  const handleSelectPreset = (presetUrl: string, presetBand: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.0+') => {
+  const handleSelectPreset = (presetUrl: string) => {
     setUrl(presetUrl);
-    setTargetBand(presetBand);
   };
 
   return (
@@ -111,6 +105,7 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
             </div>
           </div>
           <button data-ux-flow="media.learning"
+            aria-label="Close"
             onClick={onClose}
             disabled={isLoading}
             className="p-2 rounded-xl text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
@@ -137,28 +132,6 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
                   disabled={isLoading}
                 />
                 <Youtube className="w-4 h-4 text-stone-400 absolute right-3.5 top-3.5 pointer-events-none" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
-                Mục tiêu Band điểm IELTS
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['Band 5.5-6.5', 'Band 7.0-8.0', 'Band 8.0+'] as const).map((b) => (
-                  <button data-ux-flow="media.learning"
-                    key={b}
-                    type="button"
-                    onClick={() => setTargetBand(b)}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                      targetBand === b
-                        ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-500 shadow-xs'
-                        : 'bg-stone-50 dark:bg-stone-950 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-800 hover:border-stone-300'
-                    }`}
-                  >
-                    {b}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -209,10 +182,12 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
 
             <div className="space-y-2">
               {PRESET_VIDEOS.map((preset, idx) => (
-                <div
+                <button
+                  type="button"
+                  data-ux-flow="media.learning"
                   key={idx}
-                  onClick={() => handleSelectPreset(preset.url, preset.band)}
-                  className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 hover:border-rose-400 dark:hover:border-rose-700 transition-all cursor-pointer flex items-center justify-between gap-3 group"
+                  onClick={() => handleSelectPreset(preset.url)}
+                  className="w-full p-3 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 hover:border-rose-400 dark:hover:border-rose-700 transition-all cursor-pointer flex items-center justify-between gap-3 group text-left"
                 >
                   <div className="min-w-0">
                     <div className="font-bold text-xs text-stone-900 dark:text-stone-100 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
@@ -223,9 +198,9 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
                     </div>
                   </div>
                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 shrink-0">
-                    {preset.band}
+                    {preset.topic}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
