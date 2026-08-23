@@ -1587,4 +1587,28 @@ export interface SourceToLearningPackageResult {
   extractedVocabulary: CourseDesignerVocabItem[];
 }
 
+// ==========================================
+// Lexicographer Vocab Enricher Types
+// ==========================================
+
+export interface VocabEnricherInput {
+  word: string;
+  userInterestContext?: string;
+}
+
+export interface VocabEnricherResult {
+  promptVersion: string; // "vocab-enricher-v1"
+  invalidInput: boolean;
+  word: string;
+  definitionSimpleVi?: string;
+  definitionAcademicVi?: string;
+  exampleSentences?: string[];
+  synonyms?: string[];
+  antonyms?: string[];
+  collocations?: string[];
+  mnemonicVi?: string;
+  cefrLevel?: string;
+  ttsScript?: string;
+}
+
 

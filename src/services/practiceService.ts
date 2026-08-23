@@ -24,6 +24,8 @@ import {
   SpeedDrillEvaluationResult,
   SourceToLearningPackageInput,
   SourceToLearningPackageResult,
+  VocabEnricherInput,
+  VocabEnricherResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -308,6 +310,21 @@ export async function generateSourceToLearningPackageApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi thiết kế gói bài học 4 kỹ năng (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function enrichVocabCardApi(
+  params: VocabEnricherInput
+): Promise<VocabEnricherResult> {
+  const res = await fetch('/api/gemini/enrich-vocab-card', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi làm giàu thẻ từ vựng (HTTP ${res.status}).`);
   }
   return await res.json();
 }

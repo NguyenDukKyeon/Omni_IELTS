@@ -42,6 +42,7 @@ import { VocabCard, VocabExample, VocabSynonym } from '../types';
 import { ReviewRating, getDueVocabCards, isDueForReview } from '../services/srsScheduler';
 import { playTextToSpeech, generateVocabCardApi, evaluatePronunciationApi } from '../services/aiTutor';
 import { curatedIELTSDecks, CuratedDeckMeta } from '../data/curatedDecks';
+import { VocabEnricherModal } from '../components/vocab/VocabEnricherModal';
 
 type StudyMode = 'flashcard' | 'quiz' | 'dictation' | 'context' | 'pronunciation' | 'lexicon' | 'decks';
 
@@ -111,6 +112,7 @@ export const VocabularySRSView: React.FC = () => {
   const [selectedCardDetail, setSelectedCardDetail] = useState<VocabCard | null>(null);
   const [selectedCuratedDeck, setSelectedCuratedDeck] = useState<CuratedDeckMeta | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  const [isEnricherOpen, setIsEnricherOpen] = useState<boolean>(false);
 
   // AI Auto-Gen Form State in Add Modal
   const [inputWord, setInputWord] = useState('');
@@ -506,14 +508,24 @@ export const VocabularySRSView: React.FC = () => {
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* AI Lexicographer Enricher Button */}
+          <button
+            id="enrich-vocab-btn"
+            onClick={() => setIsEnricherOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-teal-600/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>✨ AI Lexicographer (Làm Giàu Từ Vựng)</span>
+          </button>
+
           {/* Add Word Button */}
           <button
             id="add-vocab-btn"
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-blue-600/20 active:scale-95 transition-all cursor-pointer"
           >
-            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-            <span>+ Thêm Từ Mới (AI Sinh)</span>
+            <Plus className="w-4 h-4" />
+            <span>Thêm Thủ Công</span>
           </button>
 
           {/* Curated Decks Explorer */}
@@ -1841,6 +1853,12 @@ export const VocabularySRSView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* AI Lexicographer Vocab Enricher Modal */}
+      <VocabEnricherModal
+        isOpen={isEnricherOpen}
+        onClose={() => setIsEnricherOpen(false)}
+      />
     </div>
   );
 };
