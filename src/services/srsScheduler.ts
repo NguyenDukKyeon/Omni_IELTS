@@ -1,4 +1,5 @@
-import { VocabCard, MistakeEntry, TrapCategory } from '../types';
+import { fsrs, Rating, State, type Card, type CardInput, type Grade } from 'ts-fsrs';
+import { VocabCard, MistakeEntry, TrapCategory, FsrsCardState } from '../types';
 
 export type ReviewRating = 'again' | 'hard' | 'good' | 'easy'; // 1 (Again), 2 (Hard), 3 (Good), 4 (Easy)
 
@@ -9,6 +10,135 @@ export interface SRSItemResult {
   easeFactor: number;
   repetitions: number;
   mastered: boolean;
+  fsrs: FsrsCardState;
+}
+
+interface LegacySrsState {
+  srsStage: number;
+  intervalDays?: number;
+  nextReviewDate: string;
+  easeFactor?: number;
+  repetitions?: number;
+  lastReviewedDate?: string;
+  fsrs?: FsrsCardState;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const scheduler = fsrs({
+  request_retention: 0.9,
+  maximum_interval: 36500,
+  enable_fuzz: false,
+  enable_short_term: true,
+});
+
+const ratingMap: Record<ReviewRating, Grade> = {
+  again: Rating.Again as Grade,
+  hard: Rating.Hard as Grade,
+  good: Rating.Good as Grade,
+  easy: Rating.Easy as Grade,
+};
+
+function validDateOr(value: string | undefined, fallback: Date): Date {
+  const parsed = value ? new Date(value) : fallback;
+  return Number.isFinite(parsed.getTime()) ? parsed : fallback;
+}
+
+function isValidFsrsState(state: FsrsCardState | undefined): state is FsrsCardState {
+  if (!state || state.version !== 'fsrs-6') return false;
+  const finiteNonNegative = [state.elapsedDays, state.scheduledDays, state.learningSteps, state.reps, state.lapses]
+    .every((value) => Number.isFinite(value) && value >= 0);
+  return Number.isFinite(new Date(state.due).getTime())
+    && Number.isFinite(state.stability) && state.stability > 0
+    && Number.isFinite(state.difficulty) && state.difficulty >= 1 && state.difficulty <= 10
+    && finiteNonNegative
+    && [State.New, State.Learning, State.Review, State.Relearning].includes(state.state);
+}
+
+export function migrateLegacySrsCard(item: LegacySrsState): FsrsCardState {
+  if (isValidFsrsState(item.fsrs)) return item.fsrs;
+  const now = new Date();
+  const intervalDays = Math.max(0, Number(item.intervalDays) || 0);
+  const reps = Math.max(0, Math.trunc(Number(item.repetitions) || 0));
+  const stage = Math.max(0, Math.min(5, Math.trunc(Number(item.srsStage) || 0)));
+  const state = stage === 0 ? State.New : stage === 1 ? State.Learning : State.Review;
+  const easeFactor = Math.max(1.3, Number(item.easeFactor) || 2.5);
+  const lastReview = item.lastReviewedDate ? validDateOr(item.lastReviewedDate, now) : undefined;
+
+  return {
+    version: 'fsrs-6',
+    due: validDateOr(item.nextReviewDate, now).toISOString(),
+    stability: Math.max(0.1, intervalDays || 0.1),
+    difficulty: Math.max(1, Math.min(10, 11 - easeFactor * 2)),
+    elapsedDays: intervalDays,
+    scheduledDays: intervalDays,
+    learningSteps: state === State.Learning ? 1 : 0,
+    reps,
+    lapses: 0,
+    state,
+    lastReview: lastReview?.toISOString(),
+  };
+}
+
+function toCardInput(state: FsrsCardState): CardInput {
+  return {
+    due: state.due,
+    stability: state.stability,
+    difficulty: state.difficulty,
+    elapsed_days: state.elapsedDays,
+    scheduled_days: state.scheduledDays,
+    learning_steps: state.learningSteps,
+    reps: state.reps,
+    lapses: state.lapses,
+    state: state.state,
+    last_review: state.lastReview,
+  };
+}
+
+function toPersistedFsrs(card: Card): FsrsCardState {
+  return {
+    version: 'fsrs-6',
+    due: card.due.toISOString(),
+    stability: card.stability,
+    difficulty: card.difficulty,
+    elapsedDays: card.elapsed_days,
+    scheduledDays: card.scheduled_days,
+    learningSteps: card.learning_steps,
+    reps: card.reps,
+    lapses: card.lapses,
+    state: card.state,
+    lastReview: card.last_review?.toISOString(),
+  };
+}
+
+function legacyStageFromFsrs(state: FsrsCardState) {
+  if (state.state === State.New) return 0;
+  if (state.state === State.Learning || state.state === State.Relearning) return 1;
+  if (state.reps >= 5 && state.scheduledDays >= 30) return 5;
+  if (state.scheduledDays >= 14) return 4;
+  if (state.scheduledDays >= 3) return 3;
+  return 2;
+}
+
+export function scheduleFsrsReview(
+  item: LegacySrsState,
+  rating: ReviewRating,
+  now: Date = new Date()
+): SRSItemResult {
+  const migrated = migrateLegacySrsCard(item);
+  const result = scheduler.next(toCardInput(migrated), now, ratingMap[rating]);
+  const persisted = toPersistedFsrs(result.card);
+  const stage = legacyStageFromFsrs(persisted);
+  const dueDeltaDays = Math.max(0, (result.card.due.getTime() - now.getTime()) / DAY_MS);
+
+  return {
+    srsStage: stage,
+    intervalDays: Math.max(result.card.scheduled_days, Number(dueDeltaDays.toFixed(4))),
+    nextReviewDate: result.card.due.toISOString(),
+    easeFactor: Number(Math.max(1.3, (11 - result.card.difficulty) / 2).toFixed(2)),
+    repetitions: result.card.reps,
+    mastered: stage >= 5,
+    fsrs: persisted,
+  };
 }
 
 export interface TrapCategoryMeta {
@@ -124,84 +254,25 @@ export const TRAP_CATEGORY_METAS: Record<TrapCategory, TrapCategoryMeta> = {
 };
 
 /**
- * SuperMemo SM-2 / Leitner Hybrid Engine
- * Used uniformly across Vocabulary, Mistakes, and Grammar topics.
+ * Compatibility facade for existing callers; scheduling is handled by FSRS-6.
  */
 export function calculateNextSRS(
   currentStage: number,
   currentInterval: number = 1,
   currentEaseFactor: number = 2.5,
   currentRepetitions: number = 0,
-  rating: ReviewRating
+  rating: ReviewRating,
+  existingFsrs?: FsrsCardState,
+  now: Date = new Date()
 ): SRSItemResult {
-  let stage = currentStage;
-  let interval = currentInterval;
-  let ef = currentEaseFactor;
-  let reps = currentRepetitions;
-
-  const now = new Date();
-
-  switch (rating) {
-    case 'again':
-      // Reset or drop stage
-      stage = Math.max(0, stage - 1);
-      interval = 1;
-      reps = 0;
-      ef = Math.max(1.3, ef - 0.2);
-      break;
-
-    case 'hard':
-      // Keep stage or minor step
-      interval = Math.max(1, Math.round(interval * 1.2));
-      ef = Math.max(1.3, ef - 0.15);
-      reps += 1;
-      break;
-
-    case 'good':
-      // Normal progression (1d -> 3d -> 7d -> 14d -> 30d)
-      stage = Math.min(5, stage + 1);
-      reps += 1;
-      if (reps === 1) {
-        interval = 1;
-      } else if (reps === 2) {
-        interval = 3;
-      } else if (reps === 3) {
-        interval = 7;
-      } else if (reps === 4) {
-        interval = 14;
-      } else {
-        interval = Math.round(interval * ef);
-      }
-      break;
-
-    case 'easy':
-      // Accelerated progression (3d -> 7d -> 14d -> 30d+)
-      stage = Math.min(5, stage + 2);
-      reps += 1;
-      ef = Math.min(3.0, ef + 0.15);
-      if (reps === 1) {
-        interval = 3;
-      } else if (reps === 2) {
-        interval = 7;
-      } else if (reps === 3) {
-        interval = 14;
-      } else {
-        interval = Math.round(interval * ef * 1.4);
-      }
-      break;
-  }
-
-  // Calculate next review date
-  const nextDate = new Date(now.getTime() + interval * 24 * 60 * 60 * 1000);
-
-  return {
-    srsStage: stage,
-    intervalDays: interval,
-    nextReviewDate: nextDate.toISOString(),
-    easeFactor: Number(ef.toFixed(2)),
-    repetitions: reps,
-    mastered: stage >= 5,
-  };
+  return scheduleFsrsReview({
+    srsStage: currentStage,
+    intervalDays: currentInterval,
+    nextReviewDate: now.toISOString(),
+    easeFactor: currentEaseFactor,
+    repetitions: currentRepetitions,
+    fsrs: existingFsrs,
+  }, rating, now);
 }
 
 /**

@@ -91,4 +91,36 @@ describe('requestGroqGroundedForecast', () => {
       fetchImpl,
     })).rejects.toMatchObject({ code: 'NO_RESULTS' });
   });
+
+  it('can route the same grounded request through the full Compound system', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify(modelPayload),
+          executed_tools: [{
+            type: 'search',
+            arguments: JSON.stringify({ query: 'recent IELTS Vietnam recall' }),
+            search_results: {
+              results: [{
+                title: 'IELTS recall report',
+                url: 'https://example.org/ielts-recall',
+              }],
+            },
+          }],
+        },
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await requestGroqGroundedForecast({
+      apiKey: 'test-key',
+      model: 'groq/compound',
+      prompt: 'Search. Return JSON.',
+      originalQuery: 'IELTS recall',
+      fetchImpl,
+    });
+
+    expect(response.model).toBe('groq/compound');
+    const request = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(request.model).toBe('groq/compound');
+  });
 });

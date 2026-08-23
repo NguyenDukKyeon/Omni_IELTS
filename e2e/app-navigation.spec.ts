@@ -8,7 +8,7 @@ test('global navigation opens every public beta learning module without runtime 
 
   const destinations = [
     ['sources', 'Nguồn Học Liệu (Tạo Bài Học 4 Kỹ Năng)'],
-    ['vocabulary', 'Kho Từ Vựng & Thuật Toán SRS SM-2 / Leitner 5'],
+    ['vocabulary', 'Kho Từ Vựng & Thuật Toán SRS FSRS-6'],
     ['grammar', 'Ngữ Pháp Trọng Điểm IELTS (Grammar for Band 7.0 - 8.5+)'],
     ['media', 'Media Lab: Shadowing & Nghe Chép Chính Tả (Dictation)'],
     ['practice', 'Luyện Tập IELTS & Kho Đề Thi Thật Forecast'],

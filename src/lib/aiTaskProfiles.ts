@@ -15,7 +15,7 @@ export const AI_TASK_PROFILES: Record<AiTaskTier, AiTaskProfile> = {
   instant: { tier: 'instant', model: 'gemini-3.5-flash-lite', capability: 'text', tools: [], timeoutMs: 15_000, fallbacks: [] },
   balanced: { tier: 'balanced', model: 'gemini-3.7-flash', capability: 'text', thinkingLevel: 'low', tools: [], timeoutMs: 45_000, fallbacks: ['gemini-3.5-flash-lite'] },
   deep: { tier: 'deep', model: 'gemini-3.7-flash', capability: 'text', thinkingLevel: 'high', tools: [], timeoutMs: 90_000, fallbacks: ['gemini-3.5-flash-lite'] },
-  grounded: { tier: 'grounded', model: 'gemini-3.7-flash', capability: 'search', thinkingLevel: 'low', tools: ['googleSearch'], timeoutMs: 90_000, fallbacks: ['groq/compound-mini'] },
+  grounded: { tier: 'grounded', model: 'gemini-3.7-flash', capability: 'search', thinkingLevel: 'low', tools: ['googleSearch'], timeoutMs: 90_000, fallbacks: ['gemini-3.5-flash-lite', 'groq/compound-mini', 'groq/compound'] },
   audio_eval: { tier: 'audio_eval', model: 'gemini-3.7-flash', capability: 'audio-input', thinkingLevel: 'high', tools: [], timeoutMs: 120_000, fallbacks: [] },
   tts: { tier: 'tts', model: 'gemini-3.1-flash-tts-preview', capability: 'audio-output', tools: [], timeoutMs: 90_000, fallbacks: [] },
 };

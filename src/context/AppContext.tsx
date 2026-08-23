@@ -502,6 +502,7 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
           easeFactor: 2.5,
           repetitions: 0,
           mastered: false,
+          fsrs: undefined,
         };
       })
     );
@@ -532,7 +533,8 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
           card.intervalDays,
           card.easeFactor,
           card.repetitions,
-          rating
+          rating,
+          card.fsrs
         );
         return {
           ...card,
@@ -558,6 +560,7 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
       const next = [...prev];
       next[existingIndex] = {
         ...transitionMistakeLifecycle(next[existingIndex], 'taxonomy-recurred'),
+        fsrs: undefined,
         errorText: entry.errorText,
         correctedText: entry.correctedText,
         explanation: entry.explanation,
@@ -582,7 +585,8 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
           item.intervalDays || 1,
           item.easeFactor || 2.5,
           item.repetitions || item.reviewCount || 0,
-          rating
+          rating,
+          item.fsrs
         );
         const updated = {
           ...item,

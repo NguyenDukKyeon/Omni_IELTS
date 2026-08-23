@@ -37,6 +37,33 @@ describe('GroundedProviderRouter', () => {
     expect(fallback).toHaveBeenCalledTimes(1);
   });
 
+  it('tries another grounded Gemini model before Groq and isolates circuit state per model', async () => {
+    const primary = vi.fn().mockRejectedValue({ status: 429, message: 'Daily quota exhausted' });
+    const gemini35Fallback = vi.fn().mockRejectedValue({ status: 429, message: 'Monthly quota exhausted' });
+    const groqMiniFallback = vi.fn().mockRejectedValue({ status: 429, message: 'Daily quota exhausted' });
+    const groqFallback = vi.fn().mockResolvedValue({ forecastItems: [{ id: 'groq-compound-item' }] });
+    const router = new GroundedProviderRouter({
+      now: () => Date.parse('2026-08-23T12:00:00.000Z'),
+      dailyResetAt: () => Date.parse('2026-08-24T07:00:00.000Z'),
+    });
+
+    const result = await router.execute({
+      primary: { provider: 'gemini', model: 'gemini-3.7-flash', run: primary },
+      fallbacks: [
+        { provider: 'gemini', model: 'gemini-3.5-flash-lite', run: gemini35Fallback },
+        { provider: 'groq', model: 'groq/compound-mini', run: groqMiniFallback },
+        { provider: 'groq', model: 'groq/compound', run: groqFallback },
+      ],
+    });
+
+    expect(result.provider).toBe('groq');
+    expect(result.model).toBe('groq/compound');
+    expect(result.fallbackReason).toBe('quota_exhausted');
+    expect(gemini35Fallback).toHaveBeenCalledTimes(1);
+    expect(groqMiniFallback).toHaveBeenCalledTimes(1);
+    expect(groqFallback).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps Gemini circuit open until the daily reset instead of spending another failed request', async () => {
     const primary = vi.fn().mockRejectedValue({ status: 429, message: 'Daily quota exhausted' });
     const fallback = vi.fn().mockResolvedValue({ ok: true });

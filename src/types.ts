@@ -49,6 +49,9 @@ export interface ExtractedVocabItem {
   exampleEn: string;
   exampleVi: string;
   collocations: string[];
+  wordFamily?: string[];
+  paraphrases?: string[];
+  usageNoteVi?: string;
   cefrLevel: 'B1' | 'B2' | 'C1' | 'C2';
 }
 
@@ -161,6 +164,20 @@ export interface VocabSynonym {
   nuance?: string;
 }
 
+export interface FsrsCardState {
+  version: 'fsrs-6';
+  due: string;
+  stability: number;
+  difficulty: number;
+  elapsedDays: number;
+  scheduledDays: number;
+  learningSteps: number;
+  reps: number;
+  lapses: number;
+  state: 0 | 1 | 2 | 3;
+  lastReview?: string;
+}
+
 export interface VocabCard {
   id: string;
   word: string;
@@ -175,17 +192,20 @@ export interface VocabCard {
   exampleVi: string;
   examples?: VocabExample[]; // 2-3 rich contextual examples
   collocations: string[];
+  wordFamily?: string[];
+  paraphrases?: string[];
+  usageNoteVi?: string;
   synonyms?: VocabSynonym[];
   antonyms?: string[];
   mnemonic?: string; // Memory aid/image trigger
   imageUrl?: string;
-  cefrLevel?: 'B1' | 'B2' | 'C1' | 'C2';
+  cefrLevel?: 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
   topicDeck?: string; // e.g. 'Environment', 'Science & AI', 'Academic Core (AWL)'
   contextHint?: string;
   originSourceId?: string;
   originSourceTitle?: string;
   originModule: ModuleId | 'manual' | 'writing_eval' | 'source_import' | 'curated_deck';
-  // Leitner / SuperMemo SRS Fields
+  // Legacy display fields retained during the FSRS migration.
   srsStage: number; // 0 to 5 (0: New, 1: Learning, 2: Review 1, 3: Review 2, 4: Retained, 5: Mastered)
   intervalDays: number;
   nextReviewDate: string; // ISO date string
@@ -194,6 +214,12 @@ export interface VocabCard {
   repetitions: number;
   audioUrl?: string;
   mastered: boolean;
+  fsrs?: FsrsCardState;
+  adaptiveProvenance?: {
+    topicId: string;
+    tier: 'foundation' | 'bridge' | 'advanced';
+    generatedAt: string;
+  };
 }
 
 export type ErrorCategory = 'grammar' | 'vocab' | 'pronunciation' | 'cohesion' | 'task_response';
@@ -556,6 +582,7 @@ export interface MistakeEntry {
   lifecycle?: 'active' | 'due' | 'mastered' | 'archived' | 'relapsed';
   taxonomyKey?: string;
   relapseCount?: number;
+  fsrs?: FsrsCardState;
 }
 
 export interface MediaShadowingEvaluation {

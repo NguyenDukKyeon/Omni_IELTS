@@ -2,7 +2,8 @@ import { z } from 'zod';
 import type { ForecastGroundingResponse } from '../types';
 import { normalizeForecastGroundingPayload } from './forecastGrounding';
 
-const GROQ_FORECAST_MODEL = 'groq/compound-mini';
+export type GroqGroundedModel = 'groq/compound-mini' | 'groq/compound';
+const DEFAULT_GROQ_FORECAST_MODEL: GroqGroundedModel = 'groq/compound-mini';
 const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const SearchResultSchema = z.object({
@@ -32,6 +33,7 @@ function providerError(message: string, values: Record<string, unknown>) {
 
 export async function requestGroqGroundedForecast(input: {
   apiKey: string;
+  model?: GroqGroundedModel;
   prompt: string;
   originalQuery: string;
   retrievedAt?: string;
@@ -43,6 +45,7 @@ export async function requestGroqGroundedForecast(input: {
   }
 
   const fetchImpl = input.fetchImpl || fetch;
+  const model = input.model || DEFAULT_GROQ_FORECAST_MODEL;
   const response = await fetchImpl(GROQ_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
@@ -51,7 +54,7 @@ export async function requestGroqGroundedForecast(input: {
       'Groq-Model-Version': '2025-08-16',
     },
     body: JSON.stringify({
-      model: GROQ_FORECAST_MODEL,
+      model,
       messages: [{ role: 'user', content: input.prompt }],
       response_format: { type: 'json_object' },
       compound_custom: { tools: { enabled_tools: ['web_search'] } },
@@ -115,6 +118,6 @@ export async function requestGroqGroundedForecast(input: {
   return {
     ...normalized,
     provider: 'groq',
-    model: GROQ_FORECAST_MODEL,
+    model,
   };
 }
