@@ -1746,4 +1746,91 @@ export interface FullGraderResult {
   detectedErrors: StandardErrorObject[];
 }
 
+// ==========================================
+// Mock Test Orchestrator & Assembler (mock-assembler-v1)
+// ==========================================
+
+export interface MockAssemblerInput {
+  targetBand?: number;
+  recentPromptIds?: string[];
+  learnerProfile?: LearnerProfileWeighting;
+}
+
+export interface MockAssemblerPackage {
+  promptVersion: string; // "mock-assembler-v1"
+  testId: string;
+  testTitle: string;
+  readingPackage: {
+    passages: Array<{
+      passageIndex: number;
+      title: string;
+      text: string;
+      questionTypesIncluded: string[];
+      questionCount: number;
+    }>;
+    totalQuestions: number;
+  };
+  listeningPackage: {
+    sections: Array<{
+      sectionIndex: number;
+      scenario: string;
+      difficultyLevel: string;
+      questionCount: number;
+    }>;
+    totalQuestions: number;
+  };
+  writingPackage: {
+    task1: {
+      type: string;
+      prompt: string;
+      chartDescription: string;
+    };
+    task2: {
+      category: string;
+      prompt: string;
+    };
+  };
+  speakingPackage: {
+    examinerName: string;
+    part1Topics: string[];
+    part2CueCard: {
+      topic: string;
+      bulletPoints: string[];
+    };
+    part3AbstractThemes: string[];
+  };
+}
+
+export interface MockSynthesizerInput {
+  skillBands: {
+    reading: number;
+    listening: number;
+    writing: number;
+    speaking: number;
+  };
+  learnerProfile?: LearnerProfileWeighting;
+  detailedSubmissions?: {
+    readingScoreRaw?: number;
+    listeningScoreRaw?: number;
+    writingTask1Summary?: string;
+    writingTask2Summary?: string;
+    speakingTranscript?: string;
+  };
+}
+
+export interface MockSynthesizerResult {
+  promptVersion: string; // "mock-assembler-v1"
+  disclaimerVi: string;
+  skillBands: {
+    reading: number;
+    listening: number;
+    writing: number;
+    speaking: number;
+  };
+  overallBand: number;
+  strongestSkill: 'reading' | 'listening' | 'writing' | 'speaking';
+  weakestSkill: 'reading' | 'listening' | 'writing' | 'speaking';
+  recommendedNextStepsVi: string[];
+}
+
 

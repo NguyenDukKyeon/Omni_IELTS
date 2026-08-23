@@ -6736,6 +6736,184 @@ Evaluate the submission rigorously across the 4 independent criteria and output 
   }
 });
 
+// =========================================================================
+// Mock Test Orchestrator & Assembler (mock-assembler-v1)
+// =========================================================================
+
+// 1. Assemble Full 4-Skill Mock Test Package
+app.post("/api/mock/assemble-full-package", async (req, res) => {
+  try {
+    const { targetBand = 7.0, recentPromptIds = [], learnerProfile } = req.body;
+    const ai = getGeminiClient();
+
+    if (!ai) {
+      return res.status(503).json({
+        error: "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env.",
+      });
+    }
+
+    const systemInstruction = `### SYSTEM ROLE
+Bạn là Mock Test Orchestrator — không tự chấm trực tiếp mà ĐIỀU PHỐI: lắp ráp 1 bộ đề thi đầy đủ 4 kỹ năng chuẩn Cambridge IELTS.
+
+### QUY TẮC LẮP ĐỀ
+- Reading: 3 passage học thuật (độ khó tăng dần), tổng 40 câu, trộn tối thiểu 4 dạng câu hỏi khác nhau (Matching Headings, True/False/Not Given, Multiple Choice, Summary Completion, Matching Info).
+- Listening: 4 section độ khó tăng dần (Section 1 social dialogue, Section 2 monolog guide, Section 3 academic tutorial, Section 4 lecture), tổng 40 câu.
+- Writing: 1 Task 1 (Academic Chart/Graph/Process) + 1 Task 2 (Discussion/Opinion Essay), đảm bảo đề mới, không trùng lặp các đề gần đây: [${recentPromptIds.join(", ")}].
+- Speaking: 3 phần phỏng vấn trực tiếp chuẩn Giám khảo Dr. Jonathan Vance (Part 1 Daily/Study, Part 2 Cue Card 4 bullet points, Part 3 Abstract Discussion).
+- Lệch trọng số bẫy từ vựng/ngữ pháp theo điểm yếu trong learnerProfile nếu có.
+- promptVersion phải luôn là "mock-assembler-v1".`;
+
+    const promptText = `LEARNER PROFILE:
+${JSON.stringify(learnerProfile || { targetBand, weakestAxes: [], recentMistakeTags: [] }, null, 2)}
+
+Assemble a complete 4-skill Cambridge IELTS Mock Exam package conforming strictly to promptVersion = "mock-assembler-v1". Output valid JSON.`;
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Mock Assembler Engine] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi lắp ráp bộ đề thi thử.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    parsed.promptVersion = "mock-assembler-v1";
+    parsed.testId = parsed.testId || `mock_ai_${Date.now()}`;
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Mock Assembler Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình điều phối và lắp ráp bộ đề thi 4 kỹ năng.",
+    });
+  }
+});
+
+// 2. Synthesize Final Mock Exam Report
+app.post("/api/mock/synthesize-final-report", async (req, res) => {
+  try {
+    const { skillBands, learnerProfile, detailedSubmissions } = req.body;
+
+    if (!skillBands || typeof skillBands !== "object") {
+      return res.status(400).json({
+        error: "Vui lòng cung cấp đầy đủ điểm số 4 kỹ năng (reading, listening, writing, speaking).",
+      });
+    }
+
+    const r = Number(skillBands.reading) || 0;
+    const l = Number(skillBands.listening) || 0;
+    const w = Number(skillBands.writing) || 0;
+    const s = Number(skillBands.speaking) || 0;
+
+    // Deterministic overall band calculation in code
+    const overallBand = calculateDeterministicIeltsBand([r, l, w, s]);
+
+    // Find strongest and weakest skills
+    const skillsList: Array<{ skill: 'reading' | 'listening' | 'writing' | 'speaking'; band: number }> = [
+      { skill: 'reading', band: r },
+      { skill: 'listening', band: l },
+      { skill: 'writing', band: w },
+      { skill: 'speaking', band: s },
+    ];
+
+    skillsList.sort((a, b) => b.band - a.band);
+    const strongestSkill = skillsList[0].skill;
+    const weakestSkill = skillsList[skillsList.length - 1].skill;
+
+    const ai = getGeminiClient();
+    let recommendedNextStepsVi: string[] = [
+      `Tập trung cải thiện kỹ năng ${weakestSkill.toUpperCase()} bằng các bài tập chuyên sâu dạng điểm yếu.`,
+      `Duy trì phong độ cho kỹ năng ${strongestSkill.toUpperCase()} qua các bài thi thử định kỳ.`,
+      "Thực hiện ôn tập lại các thẻ flashcard trong Sổ tay lỗi sai mỗi ngày theo chu kỳ Spaced Repetition.",
+    ];
+
+    if (ai) {
+      try {
+        const synthPrompt = `Bạn là Mock Test Orchestrator. Tổng hợp đề xuất luyện tập cụ thể (3-5 gạch đầu dòng) cho thí sinh dựa trên kết quả thi thử 4 kỹ năng:
+- Reading: ${r}, Listening: ${l}, Writing: ${w}, Speaking: ${s} => Overall Band: ${overallBand}
+- Kỹ năng mạnh nhất: ${strongestSkill}, Kỹ năng yếu nhất: ${weakestSkill}
+- Learner Profile Weaknesses: ${JSON.stringify(learnerProfile?.weakestAxes || [])}
+- Recent Mistake Tags: ${JSON.stringify(learnerProfile?.recentMistakeTags || [])}
+
+Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] }`;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.1-pro",
+          contents: synthPrompt,
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0.2,
+          },
+        });
+
+        if (response && response.text) {
+          const parsed = JSON.parse(response.text);
+          if (Array.isArray(parsed.recommendedNextStepsVi) && parsed.recommendedNextStepsVi.length > 0) {
+            recommendedNextStepsVi = parsed.recommendedNextStepsVi;
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Mock Synthesizer AI Recommendation fallback]:", err?.message || err);
+      }
+    }
+
+    return res.json({
+      promptVersion: "mock-assembler-v1",
+      disclaimerVi: "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức.",
+      skillBands: {
+        reading: r,
+        listening: l,
+        writing: w,
+        speaking: s,
+      },
+      overallBand,
+      strongestSkill,
+      weakestSkill,
+      recommendedNextStepsVi,
+    });
+  } catch (error: any) {
+    console.error("Mock Synthesizer Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình tổng hợp báo cáo kết quả thi thử 4 kỹ năng.",
+    });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
