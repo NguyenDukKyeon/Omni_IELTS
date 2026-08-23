@@ -7,6 +7,7 @@ type ProviderErrorShape = {
   status?: number | string;
   code?: number | string;
   message?: string;
+  retryAfterMs?: number;
   error?: { code?: number | string; message?: string; status?: string };
 };
 
@@ -119,6 +120,10 @@ export function classifyApiFailure(
     return { ...(error as ApiFailure), provider: (error as ApiFailure).provider || provider };
   }
   const { status, message } = normalizedError(error);
+  const providerRetryAfterMs = error && typeof error === 'object'
+    && Number.isFinite(Number((error as ProviderErrorShape).retryAfterMs))
+    ? Math.max(0, Number((error as ProviderErrorShape).retryAfterMs))
+    : undefined;
   let category: ApiFailureCategory = 'unknown';
 
   if (message.includes('no_ai_client') || message.includes('not configured') || message.includes('chưa được cấu hình')) {
@@ -189,6 +194,7 @@ export function classifyApiFailure(
 
   return {
     ...publicFailure,
+    ...(providerRetryAfterMs !== undefined ? { retryAfterMs: providerRetryAfterMs } : {}),
     provider,
     messageVi: providerMessage || `${providerLabel} chưa thể hoàn tất tác vụ.`,
     requestId: requestId(context),

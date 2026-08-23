@@ -70,6 +70,7 @@ describe('requestGroqGroundedForecast', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer test-key' }),
       }),
     );
+    expect(fetchImpl.mock.calls[0][1]?.headers).not.toHaveProperty('Groq-Model-Version');
     const request = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
     expect(request).toMatchObject({
       model: 'groq/compound-mini',
@@ -122,5 +123,44 @@ describe('requestGroqGroundedForecast', () => {
     expect(response.model).toBe('groq/compound');
     const request = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
     expect(request.model).toBe('groq/compound');
+  });
+
+  it('preserves the provider retry window when the Groq request quota resets soon', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      error: { message: 'Rate limit reached. Please try again later.' },
+    }), {
+      status: 429,
+      headers: {
+        'retry-after': '180',
+        'x-ratelimit-remaining-requests': '0',
+      },
+    }));
+
+    await expect(requestGroqGroundedForecast({
+      apiKey: 'test-key',
+      prompt: 'Search.',
+      originalQuery: 'IELTS recall',
+      fetchImpl,
+    })).rejects.toMatchObject({
+      code: 'QUOTA_EXCEEDED',
+      retryAfterMs: 180_000,
+    });
+  });
+
+  it('classifies Compound 413 orchestration overflow as retryable provider overload', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      error: { message: 'Request Entity Too Large' },
+    }), { status: 413 }));
+
+    await expect(requestGroqGroundedForecast({
+      apiKey: 'test-key',
+      model: 'groq/compound',
+      prompt: 'Search.',
+      originalQuery: 'IELTS recall',
+      fetchImpl,
+    })).rejects.toMatchObject({
+      status: 413,
+      code: 'PROVIDER_OVERLOADED',
+    });
   });
 });

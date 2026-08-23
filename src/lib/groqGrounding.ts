@@ -51,7 +51,6 @@ export async function requestGroqGroundedForecast(input: {
     headers: {
       Authorization: `Bearer ${input.apiKey}`,
       'Content-Type': 'application/json',
-      'Groq-Model-Version': '2025-08-16',
     },
     body: JSON.stringify({
       model,
@@ -65,11 +64,25 @@ export async function requestGroqGroundedForecast(input: {
 
   if (!response.ok) {
     const body = await response.text();
+    const retryAfterSeconds = Number(response.headers.get('retry-after') || 0);
+    const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? Math.ceil(retryAfterSeconds * 1000)
+      : undefined;
+    if (response.status === 413) {
+      throw providerError('PROVIDER_OVERLOADED: Groq Compound context overflow', {
+        status: response.status,
+        code: 'PROVIDER_OVERLOADED',
+      });
+    }
     const dailyQuotaExhausted = response.status === 429
       && response.headers.get('x-ratelimit-remaining-requests') === '0';
     throw providerError(
       `${dailyQuotaExhausted ? 'Daily quota exhausted. ' : ''}${body || response.statusText}`,
-      { status: response.status, code: dailyQuotaExhausted ? 'QUOTA_EXCEEDED' : undefined },
+      {
+        status: response.status,
+        code: dailyQuotaExhausted ? 'QUOTA_EXCEEDED' : undefined,
+        retryAfterMs,
+      },
     );
   }
 

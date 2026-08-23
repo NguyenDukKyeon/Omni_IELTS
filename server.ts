@@ -24,7 +24,11 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 const execFileAsync = promisify(execFile);
-const groundedProviderRouter = new GroundedProviderRouter();
+const groundedProviderRouter = new GroundedProviderRouter({
+  onAttemptFailure: ({ provider, model, category }) => {
+    console.warn(`[Grounded router] provider=${provider} model=${model} category=${category}`);
+  },
+});
 
 const TutorEnvelopeSchema = z.object({
   reply: z.string().min(1),
@@ -7058,47 +7062,40 @@ A verified_report must have a direct source that explicitly supports that exact 
   };
 
   try {
+    const groundedFallbackAttempts = AI_TASK_PROFILES.grounded.fallbacks.map((model) => {
+      if (model.startsWith('gemini-')) {
+        return {
+          provider: 'gemini' as const,
+          model,
+          run: () => runGeminiGrounded(model),
+        };
+      }
+      if (model === 'groq/compound-mini' || model === 'groq/compound') {
+        return {
+          provider: 'groq' as const,
+          model,
+          run: () => retryProviderCall(
+            () => requestGroqGroundedForecast({
+              apiKey: groqApiKey,
+              model,
+              prompt,
+              originalQuery: searchTopicQuery,
+              retrievedAt,
+            }),
+            { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
+          ),
+        };
+      }
+      throw new Error(`Unsupported grounded fallback model: ${model}`);
+    });
+
     const routed = await groundedProviderRouter.execute({
       primary: {
         provider: 'gemini',
         model: AI_TASK_PROFILES.grounded.model,
         run: () => runGeminiGrounded(AI_TASK_PROFILES.grounded.model),
       },
-      fallbacks: [
-        {
-          provider: 'gemini',
-          model: AI_TASK_PROFILES.grounded.fallbacks[0],
-          run: () => runGeminiGrounded(AI_TASK_PROFILES.grounded.fallbacks[0]),
-        },
-        {
-          provider: 'groq',
-          model: AI_TASK_PROFILES.grounded.fallbacks[1],
-          run: () => retryProviderCall(
-            () => requestGroqGroundedForecast({
-              apiKey: groqApiKey,
-              model: 'groq/compound-mini',
-              prompt,
-              originalQuery: searchTopicQuery,
-              retrievedAt,
-            }),
-            { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
-          ),
-        },
-        {
-          provider: 'groq',
-          model: AI_TASK_PROFILES.grounded.fallbacks[2],
-          run: () => retryProviderCall(
-            () => requestGroqGroundedForecast({
-              apiKey: groqApiKey,
-              model: 'groq/compound',
-              prompt,
-              originalQuery: searchTopicQuery,
-              retrievedAt,
-            }),
-            { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
-          ),
-        },
-      ],
+      fallbacks: groundedFallbackAttempts,
     });
     return res.json({
       ...routed.value,
