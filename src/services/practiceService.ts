@@ -14,6 +14,8 @@ import {
   SentenceAcademicStylistResult,
   SpeakingLiveAudioScoringInput,
   SpeakingLiveEvaluationReport,
+  QuestionTrapAnalysisInput,
+  QuestionTrapAnalysisResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -204,6 +206,21 @@ export async function evaluateSpeakingLiveAudioApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi chấm điểm Audio Speaking (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function analyzeQuestionDistractorTrapApi(
+  params: QuestionTrapAnalysisInput
+): Promise<QuestionTrapAnalysisResult> {
+  const res = await fetch('/api/gemini/trap-analysis', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi phân tích bẫy câu hỏi (HTTP ${res.status}).`);
   }
   return await res.json();
 }

@@ -4975,6 +4975,156 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
   }
 });
 
+// =========================================================================
+// IELTS Reading & Listening Question Distractor / Trap Classification Analysis
+// =========================================================================
+app.post("/api/gemini/trap-analysis", async (req, res) => {
+  try {
+    const {
+      questionNumber = 1,
+      questionType = "True/False/Not Given",
+      questionStatement,
+      passageSnippet,
+      userAnswer,
+      correctAnswer,
+      targetBand = 7.5,
+    } = req.body;
+
+    // 1. Input Validation
+    if (!questionStatement || !userAnswer || !correctAnswer) {
+      return res.status(400).json({
+        error:
+          "Vui lòng cung cấp đầy đủ thông tin câu hỏi, câu trả lời của thí sinh và đáp án chuẩn để phân tích bẫy.",
+      });
+    }
+
+    // 2. AI Client Verification
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env để sử dụng Trap Classification Diagnostics.",
+      });
+    }
+
+    const systemInstruction = `You are the Senior IELTS Reading and Listening Psychometrician and Distractor Specialist.
+Analyze the learner's submitted answer against the question and the cited passage snippet using the official Trap Classification Taxonomy.
+
+### TRAP CLASSIFICATION TAXONOMY
+- Trap 1: False Contradiction vs. Absence (TFNG Confusion)
+- Trap 2: Overgeneralization (extreme words: always, all, sole)
+- Trap 3: Temporal/Timeline Shift (past vs. present conflation)
+- Trap 4: Lexical Mirage (same words, opposite/shifted context)
+- Trap 5: Scope Shift (broader claim in question vs. narrower fact in passage, or ngược lại)
+- Trap 6: Causality Reversal (đảo ngược quan hệ nhân-quả gốc)
+- Trap Other: nếu không khớp 6 loại trên, mô tả cơ chế bẫy bằng lời thay vì ép nhãn sai
+
+### HARD CONSTRAINTS
+- Cite the minimum passage text needed to prove the trap (a short phrase, not full sentences) — this is study material, not a passage republishing tool.
+- If trapTypeIdentified is "Other", trapDescriptionIfOther MUST describe the precise trap mechanism in Vietnamese.
+- If trapTypeIdentified is one of Trap 1, Trap 2, Trap 3, Trap 4, Trap 5, Trap 6, set trapDescriptionIfOther to null or empty string.
+- Provide a precise paraphraseMapping (mapping keywords from the question to the passage equivalent phrases).
+- Provide clear Vietnamese distractorMechanismVi and examinerAdviceVi explaining how to avoid falling into this exact trap.`;
+
+    const promptText = `QUESTION DATA:
+- Question Number: ${questionNumber}
+- Question Type: ${questionType}
+- Question Statement: """${questionStatement}"""
+- Passage Context / Evidence Snippet: """${passageSnippet || 'Refer to the passage text for this question.'}"""
+- Learner's Submitted Answer: "${userAnswer}"
+- Official Correct Answer: "${correctAnswer}"
+- Target Band: ${targetBand}
+
+Please classify the distractor trap and output JSON matching the strict responseSchema.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        questionNumber: { type: Type.NUMBER },
+        questionType: { type: Type.STRING },
+        userAnswer: { type: Type.STRING },
+        correctAnswer: { type: Type.STRING },
+        trapTypeIdentified: { type: Type.STRING },
+        trapDescriptionIfOther: { type: Type.STRING, nullable: true },
+        distractorMechanismVi: { type: Type.STRING },
+        paraphraseMapping: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              questionKeyword: { type: Type.STRING },
+              passageEquivalent: { type: Type.STRING },
+            },
+            required: ["questionKeyword", "passageEquivalent"],
+          },
+        },
+        examinerAdviceVi: { type: Type.STRING },
+      },
+      required: [
+        "questionNumber",
+        "questionType",
+        "userAnswer",
+        "correctAnswer",
+        "trapTypeIdentified",
+        "distractorMechanismVi",
+        "paraphraseMapping",
+        "examinerAdviceVi",
+      ],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Trap Analysis] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi phân tích bẫy câu hỏi.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Trap Analysis API Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình phân tích bẫy câu hỏi với gemini-3.1-pro.",
+    });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
