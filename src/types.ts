@@ -1427,4 +1427,38 @@ export interface MasterMentorPanelInput {
   targetBand?: number;
 }
 
+// ==========================================
+// Intelligent Error Tagger & SRS Card Types
+// ==========================================
+
+export interface ErrorTaggerCardContent {
+  front: string;
+  backDefinitionVi: string;
+  phonetic: string;
+  cefrLevel: string; // e.g. "B2", "C1", "C2"
+  sampleSentence: string;
+}
+
+export interface ExtractedErrorTaggerItem {
+  errorTag: string; // e.g. "LEXICAL_COLLOCATION", "GRAMMAR_MODAL", "SUBJECT_VERB_AGREEMENT", "PHONETIC_STRESS", etc.
+  skillSource: string; // e.g. "writing_task2", "writing_task1", "speaking_part2", "reading", "listening"
+  originalText: string;
+  correctedText: string;
+  explanationVi: string;
+  severity: 'minor' | 'moderate' | 'major';
+  srsCardContent: ErrorTaggerCardContent;
+}
+
+export interface IntelligentErrorTaggerReport {
+  disclaimerVi?: string;
+  extractedErrors: ExtractedErrorTaggerItem[];
+}
+
+export interface IntelligentErrorTaggerInput {
+  submissionText: string;
+  skillSource?: string;
+  contextOrPrompt?: string;
+  targetBand?: number;
+}
+
 

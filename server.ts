@@ -5322,6 +5322,163 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
   }
 });
 
+// =========================================================================
+// Intelligent Error Tagger & SRS Flashcard Generator
+// =========================================================================
+app.post("/api/gemini/intelligent-error-tagger", async (req, res) => {
+  try {
+    const {
+      submissionText,
+      skillSource = "writing_task2",
+      contextOrPrompt = "",
+      targetBand = 7.5,
+    } = req.body;
+
+    // 1. Input Validation
+    if (!submissionText || typeof submissionText !== "string" || submissionText.trim().length < 10) {
+      return res.status(400).json({
+        error:
+          "Vui lòng cung cấp nội dung bài làm hoặc đoạn văn bản (tối thiểu 10 ký tự) để Intelligent Error Tagger bóc tách lỗi sai & tạo Flashcard SRS.",
+      });
+    }
+
+    // 2. AI Client Verification
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env để sử dụng Intelligent Error Tagger.",
+      });
+    }
+
+    const systemInstruction = `You are an Intelligent Error Tagger for IELTS candidates.
+Extract every linguistic, phonetic, or strategic mistake from the user's submission and output flashcard CONTENT using the shared StandardErrorObject taxonomy plus flashcard fields.
+
+### HARD CONSTRAINTS
+- Do NOT compute spaced-repetition scheduling (interval / ease factor / next review date) — that is handled deterministically by application code once the card is created (initial state: interval=1, repetitions=0, easeFactor=2.5).
+- Provide accurate errorTag (e.g., LEXICAL_COLLOCATION, GRAMMAR_MODAL, SUBJECT_VERB_AGREEMENT, PHONETIC_STRESS, COHESION_OVERUSE, etc.).
+- Provide skillSource (e.g., writing_task2, writing_task1, speaking_part1, speaking_part2, speaking_part3, reading, listening).
+- Provide exact originalText and accurate academic correctedText.
+- Provide pedagogical Vietnamese explanationVi.
+- Provide severity: "minor" | "moderate" | "major".
+- Provide srsCardContent: { front, backDefinitionVi, phonetic, cefrLevel, sampleSentence }.`;
+
+    const promptText = `SUBMISSION CONTEXT:
+- Skill Source: ${skillSource}
+- Prompt / Question Context: """${contextOrPrompt || 'General IELTS Academic submission'}"""
+- Target Band: ${targetBand}
+
+CANDIDATE'S SUBMISSION TEXT:
+"""${submissionText}"""
+
+Extract all mistakes, construct high-yield SRS flashcard content for each error, and return JSON conforming to responseSchema.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        disclaimerVi: { type: Type.STRING },
+        extractedErrors: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              errorTag: { type: Type.STRING },
+              skillSource: { type: Type.STRING },
+              originalText: { type: Type.STRING },
+              correctedText: { type: Type.STRING },
+              explanationVi: { type: Type.STRING },
+              severity: { type: Type.STRING },
+              srsCardContent: {
+                type: Type.OBJECT,
+                properties: {
+                  front: { type: Type.STRING },
+                  backDefinitionVi: { type: Type.STRING },
+                  phonetic: { type: Type.STRING },
+                  cefrLevel: { type: Type.STRING },
+                  sampleSentence: { type: Type.STRING },
+                },
+                required: [
+                  "front",
+                  "backDefinitionVi",
+                  "phonetic",
+                  "cefrLevel",
+                  "sampleSentence",
+                ],
+              },
+            },
+            required: [
+              "errorTag",
+              "skillSource",
+              "originalText",
+              "correctedText",
+              "explanationVi",
+              "severity",
+              "srsCardContent",
+            ],
+          },
+        },
+      },
+      required: ["extractedErrors"],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Error Tagger] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi bóc tách lỗi sai.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    if (!parsed.disclaimerVi) {
+      parsed.disclaimerVi =
+        "Dữ liệu bóc tách lỗi sai được tối ưu cho hệ thống Spaced Repetition (SRS), không phải kết quả thi chính thức.";
+    }
+
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Intelligent Error Tagger API Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình bóc tách lỗi sai & tạo Flashcard với gemini-3.1-pro.",
+    });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
