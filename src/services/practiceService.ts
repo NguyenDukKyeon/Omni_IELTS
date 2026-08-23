@@ -22,6 +22,8 @@ import {
   ChallengeType,
   SpeedDrillChallenge,
   SpeedDrillEvaluationResult,
+  SourceToLearningPackageInput,
+  SourceToLearningPackageResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -291,6 +293,21 @@ export async function evaluateSpeedDrillApi(params: {
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi chấm điểm Speed Drill (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function generateSourceToLearningPackageApi(
+  params: SourceToLearningPackageInput
+): Promise<SourceToLearningPackageResult> {
+  const res = await fetch('/api/gemini/source-to-learning-package', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi thiết kế gói bài học 4 kỹ năng (HTTP ${res.status}).`);
   }
   return await res.json();
 }
