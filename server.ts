@@ -5125,6 +5125,203 @@ Please classify the distractor trap and output JSON matching the strict response
   }
 });
 
+// =========================================================================
+// IELTS Master Mentor Panel (3 Personas: Dr. Vance, Mia, Prof. Arthur)
+// =========================================================================
+app.post("/api/gemini/mentor-panel", async (req, res) => {
+  try {
+    const {
+      contentOrEssay,
+      taskType = "Writing Task 2",
+      taskPrompt = "",
+      targetBand = 7.5,
+    } = req.body;
+
+    // 1. Input Validation
+    if (!contentOrEssay || typeof contentOrEssay !== "string" || contentOrEssay.trim().length < 15) {
+      return res.status(400).json({
+        error:
+          "Vui lòng cung cấp nội dung bài viết/đoạn văn (tối thiểu 15 ký tự) để Hội Đồng Cố Vấn IELTS Master Mentor Panel đánh giá.",
+      });
+    }
+
+    // 2. AI Client Verification
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env để tham vấn Master Mentor Panel.",
+      });
+    }
+
+    const systemInstruction = `You are the IELTS Master Mentor Panel comprised of 3 top academic authorities:
+1. [Cambridge Examiner - Dr. Vance]: Rigorous, evaluates according to official Cambridge band descriptors, strictly identifies critical flaws.
+2. [Band Booster Coach - Mia]: Idea development & PEEL scaffolding specialist (Point, Explanation, Example, Link), strengthens arguments, nuances and real-world counterarguments.
+3. [Lexical Maestro - Professor Arthur]: Collocations and academic hedging master, elevates natural academic register with sophisticated C1/C2 upgrades.
+
+### CONSISTENCY RULE (CRITICAL)
+The three personas MUST NOT contradict each other's factual or grammatical judgments.
+- If Dr. Vance flags a sentence/segment as a critical flaw, Professor Arthur's lexical suggestion for that same sentence MUST build on the FIXED version, never on the flawed original.
+- If perspectives genuinely differ (e.g., Coach Mia prioritizes expanding the complexity and depth of the idea while Examiner Dr. Vance prioritizes accuracy and syntactic control), state this tension explicitly in "perspectiveTensions" rather than silently disagreeing.
+
+### OUTPUT STRUCTURE
+- criticalFlaws: Array of StandardErrorObject (each with errorSubstring, errorCategory, explanationVi, severity).
+- ideaExpansion: Array of PEEL scaffolds (pointOrParagraph, currentArgument, peelScaffolding: { point, explanation, example, link }, counterArgumentOrNuance, coachAdviceVi).
+- collocationUpgrades: Array of C1/C2 upgrades (originalPhrase, fixedBaseSentence, upgradedC1C2Collocation, academicHedgingOption, maestroNotesVi).
+- perspectiveTensions: Array of explicit tensions between examiner accuracy and coach idea development (issue, examinerStance, coachStance, resolutionAdviceVi).
+- panelSummaryVi: Unified consensus summary and actionable roadmap in Vietnamese.`;
+
+    const promptText = `TASK CONTEXT:
+- Task Type: ${taskType}
+- Target Band: ${targetBand}
+- Prompt / Question Statement: """${taskPrompt || 'General IELTS Academic Topic'}"""
+
+LEARNER'S WRITING / CONTENT:
+"""${contentOrEssay}"""
+
+Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming to responseSchema.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        disclaimerVi: { type: Type.STRING },
+        criticalFlaws: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              errorSubstring: { type: Type.STRING },
+              errorCategory: { type: Type.STRING },
+              explanationVi: { type: Type.STRING },
+              severity: { type: Type.STRING },
+            },
+            required: ["errorSubstring", "errorCategory", "explanationVi", "severity"],
+          },
+        },
+        ideaExpansion: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              pointOrParagraph: { type: Type.STRING },
+              currentArgument: { type: Type.STRING },
+              peelScaffolding: {
+                type: Type.OBJECT,
+                properties: {
+                  point: { type: Type.STRING },
+                  explanation: { type: Type.STRING },
+                  example: { type: Type.STRING },
+                  link: { type: Type.STRING },
+                },
+                required: ["point", "explanation", "example", "link"],
+              },
+              counterArgumentOrNuance: { type: Type.STRING },
+              coachAdviceVi: { type: Type.STRING },
+            },
+            required: ["pointOrParagraph", "currentArgument", "peelScaffolding", "coachAdviceVi"],
+          },
+        },
+        collocationUpgrades: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              originalPhrase: { type: Type.STRING },
+              fixedBaseSentence: { type: Type.STRING },
+              upgradedC1C2Collocation: { type: Type.STRING },
+              academicHedgingOption: { type: Type.STRING },
+              maestroNotesVi: { type: Type.STRING },
+            },
+            required: [
+              "originalPhrase",
+              "fixedBaseSentence",
+              "upgradedC1C2Collocation",
+              "academicHedgingOption",
+              "maestroNotesVi",
+            ],
+          },
+        },
+        perspectiveTensions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              issue: { type: Type.STRING },
+              examinerStance: { type: Type.STRING },
+              coachStance: { type: Type.STRING },
+              resolutionAdviceVi: { type: Type.STRING },
+            },
+            required: ["issue", "examinerStance", "coachStance", "resolutionAdviceVi"],
+          },
+        },
+        panelSummaryVi: { type: Type.STRING },
+      },
+      required: [
+        "criticalFlaws",
+        "ideaExpansion",
+        "collocationUpgrades",
+        "panelSummaryVi",
+      ],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Mentor Panel] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi tham vấn Master Mentor Panel.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    if (!parsed.disclaimerVi) {
+      parsed.disclaimerVi =
+        "Đây là phân tích từ Hội Đồng Cố Vấn IELTS AI để tham khảo rèn luyện, không phải kết quả thi chính thức.";
+    }
+
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Mentor Panel API Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình tham vấn Hội đồng Cố vấn với gemini-3.1-pro.",
+    });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

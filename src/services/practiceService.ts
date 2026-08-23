@@ -13,9 +13,10 @@ import {
   SentenceAcademicStylistInput,
   SentenceAcademicStylistResult,
   SpeakingLiveAudioScoringInput,
-  SpeakingLiveEvaluationReport,
   QuestionTrapAnalysisInput,
   QuestionTrapAnalysisResult,
+  MasterMentorPanelInput,
+  MasterMentorPanelReport,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -221,6 +222,21 @@ export async function analyzeQuestionDistractorTrapApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi phân tích bẫy câu hỏi (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function consultMasterMentorPanelApi(
+  params: MasterMentorPanelInput
+): Promise<MasterMentorPanelReport> {
+  const res = await fetch('/api/gemini/mentor-panel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tham vấn Master Mentor Panel (HTTP ${res.status}).`);
   }
   return await res.json();
 }

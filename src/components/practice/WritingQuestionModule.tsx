@@ -11,14 +11,15 @@ import {
   Zap,
   BookOpen,
   ArrowRight,
-  Lightbulb,
   FileText,
+  Users,
 } from 'lucide-react';
 import {
   WritingPracticeType,
   WritingPracticePrompt,
   WritingEvaluationResult,
   TrapCategory,
+  MasterMentorPanelInput,
 } from '../../types';
 import {
   generateWritingPracticePromptApi,
@@ -26,6 +27,7 @@ import {
 } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
 import { EssayBandUpgrader } from './EssayBandUpgrader';
+import { MasterMentorPanelModal } from '../mentors/MasterMentorPanelModal';
 
 const WRITING_TASK_TYPES: Array<{
   type: WritingPracticeType;
@@ -151,6 +153,8 @@ export const WritingQuestionModule: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [evaluation, setEvaluation] = useState<WritingEvaluationResult | null>(null);
   const [writingSubModule, setWritingSubModule] = useState<'mock_practice' | 'band_upgrader'>('band_upgrader');
+  const [mentorModalOpen, setMentorModalOpen] = useState<boolean>(false);
+  const [mentorInput, setMentorInput] = useState<MasterMentorPanelInput | null>(null);
 
   // Timer State
   const [secondsRemaining, setSecondsRemaining] = useState<number>(40 * 60);
@@ -623,11 +627,25 @@ export const WritingQuestionModule: React.FC = () => {
               />
             </div>
 
-            {/* Submit Button */}
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                AI sẽ chấm chi tiết Task Response, Coherence, Lexical Resource và Grammar.
-              </span>
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMentorInput({
+                    contentOrEssay: essayText,
+                    taskType: prompt.title || 'Writing Task 2',
+                    taskPrompt: prompt.promptStatement,
+                    targetBand: profile.targetBand || 7.5,
+                  });
+                  setMentorModalOpen(true);
+                }}
+                disabled={wordCount < 15}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/80 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-2 border border-slate-300 dark:border-slate-600 transition-all disabled:opacity-50"
+              >
+                <span>🏛️ Tham Vấn Hội Đồng Mentor Panel (3 Personas)</span>
+              </button>
+
               <button
                 onClick={handleEvaluate}
                 disabled={isEvaluating || wordCount < 20}
@@ -809,6 +827,38 @@ export const WritingQuestionModule: React.FC = () => {
                 </div>
               )}
 
+              {/* Direct Link to Master Mentor Panel */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex flex-col sm:flex-row items-center justify-between gap-3 border border-indigo-700/60 shadow-md">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-xl shrink-0">
+                    🏛️
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-white flex items-center gap-1.5">
+                      IELTS Master Mentor Panel (3 Personas)
+                    </h4>
+                    <p className="text-xs text-indigo-200 mt-0.5">
+                      Dr. Vance (🔴 Critical Flaws) • Coach Mia (💡 PEEL Scaffolding) • Prof. Arthur (✨ C1/C2 Collocations)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setMentorInput({
+                      contentOrEssay: essayText,
+                      taskType: prompt.title || 'Writing Task 2',
+                      taskPrompt: prompt.promptStatement,
+                      targetBand: profile.targetBand || 7.5,
+                    });
+                    setMentorModalOpen(true);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shadow-md transition-all shrink-0"
+                >
+                  <span>Mở Bảng Cố Vấn 3 Chuyên Gia</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               {/* Direct Link to Band Upgrader */}
               <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-900 to-slate-900 text-white flex items-center justify-between gap-3 border border-indigo-700/60 shadow-md">
                 <div>
@@ -834,6 +884,13 @@ export const WritingQuestionModule: React.FC = () => {
       </div>
         </div>
       )}
+
+      {/* Master Mentor Panel Modal */}
+      <MasterMentorPanelModal
+        isOpen={mentorModalOpen}
+        onClose={() => setMentorModalOpen(false)}
+        initialInput={mentorInput}
+      />
     </div>
   );
 };
