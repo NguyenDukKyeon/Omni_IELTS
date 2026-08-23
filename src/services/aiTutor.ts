@@ -1,4 +1,4 @@
-import { AITutorMessage } from '../types';
+import { AITutorMessage, DiagnosticMultiSkillInput, DiagnosticPsychometricianReport } from '../types';
 
 export interface TutorResponse {
   reply: string;
@@ -526,5 +526,24 @@ export async function diagnoseGrammarApi(
       recommendedTopicIds: ["grm_conditionals", "grm_inversion", "grm_relative_clauses"]
     };
   }
+}
+
+export async function diagnoseMultiSkillAssessmentApi(
+  input: DiagnosticMultiSkillInput
+): Promise<DiagnosticPsychometricianReport> {
+  const res = await fetch('/api/gemini/diagnostic-psychometrician', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(
+      errorData.error || `Yêu cầu chẩn đoán Psychometrician thất bại (HTTP ${res.status}).`
+    );
+  }
+
+  return await res.json();
 }
 

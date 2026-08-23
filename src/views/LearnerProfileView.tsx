@@ -17,7 +17,7 @@ import { useApp } from '../context/AppContext';
 import { calculateLevel } from '../services/gamification';
 
 export const LearnerProfileView: React.FC = () => {
-  const { profile, updateProfile, setIsOnboardingOpen, mockResults } = useApp();
+  const { profile, updateProfile, setIsOnboardingOpen, setIsDiagnosticOpen, mockResults } = useApp();
 
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [name, setName] = useState(profile.name);
@@ -76,13 +76,20 @@ export const LearnerProfileView: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            onClick={() => setIsDiagnosticOpen(true)}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all"
+          >
+            <Compass className="w-4 h-4 text-sky-200" />
+            <span>Chẩn Đoán 8 Trục (gemini-3.1-pro)</span>
+          </button>
           <button
             onClick={() => setIsOnboardingOpen(true)}
             className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100"
           >
             <Compass className="w-4 h-4" />
-            <span>Test Chẩn Đoán Lại</span>
+            <span>Test Nhanh</span>
           </button>
           <button
             onClick={() => setIsEditing(!isEditing)}

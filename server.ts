@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 dotenv.config();
 
@@ -4339,6 +4339,258 @@ What I appreciate most is the dramatic enhancement in civil infrastructure—par
   } catch (error: any) {
     console.error("Forecast Grounding API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi tra cứu đề thi thật và dự đoán" });
+  }
+});
+
+// ==========================================
+// 8-Axis Multi-Skill Diagnostic Psychometrician Endpoint
+// ==========================================
+app.post("/api/gemini/diagnostic-psychometrician", async (req, res) => {
+  try {
+    const {
+      submittedSkills = [],
+      writingSample,
+      speakingAudioRef,
+      readingAnswers,
+      listeningAnswers,
+      targetBand = 7.5,
+    } = req.body;
+
+    // 1. Validate submitted skills
+    if (!Array.isArray(submittedSkills) || submittedSkills.length === 0) {
+      return res.status(400).json({
+        error: "Vui lòng chọn ít nhất một kỹ năng (writing, speaking, reading, listening) để chẩn đoán.",
+      });
+    }
+
+    const validSkills = ["writing", "speaking", "reading", "listening"];
+    const filteredSkills = submittedSkills.filter((s: string) => validSkills.includes(s));
+    if (filteredSkills.length === 0) {
+      return res.status(400).json({
+        error: "Danh sách kỹ năng gửi lên không hợp lệ.",
+      });
+    }
+
+    // 2. Strict Input validation per skill
+    const hasWriting =
+      filteredSkills.includes("writing") &&
+      typeof writingSample === "string" &&
+      writingSample.trim().length > 0;
+
+    // STRICT RULE: Only real audio accepted for Speaking, no text transcript
+    const hasSpeakingAudio =
+      filteredSkills.includes("speaking") &&
+      typeof speakingAudioRef === "string" &&
+      speakingAudioRef.trim().length > 0;
+
+    if (filteredSkills.includes("speaking") && !hasSpeakingAudio) {
+      return res.status(400).json({
+        error:
+          "Kỹ năng Speaking bắt buộc phải có file ghi âm giọng nói thực tế (audio recording/file), không chấp nhận bản gõ transcript văn bản.",
+      });
+    }
+
+    const hasReading =
+      filteredSkills.includes("reading") &&
+      Array.isArray(readingAnswers) &&
+      readingAnswers.length > 0;
+    const hasListening =
+      filteredSkills.includes("listening") &&
+      Array.isArray(listeningAnswers) &&
+      listeningAnswers.length > 0;
+
+    if (!hasWriting && !hasSpeakingAudio && !hasReading && !hasListening) {
+      return res.status(400).json({
+        error: "Không có dữ liệu bài làm thực tế cho các kỹ năng đã chọn. Vui lòng cung cấp dữ liệu hợp lệ.",
+      });
+    }
+
+    // 3. Verify AI Client (No fake numbers if offline/missing key)
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng điền API key vào file .env để chạy mô hình gemini-3.1-pro.",
+      });
+    }
+
+    // 4. Construct System Instruction and Multimodal Contents
+    const systemInstruction = `You are the Chief IELTS Assessment Psychometrician and Diagnostic Director.
+Analyze the learner's multi-skill input and generate an 8-axis competency radar, an estimated Band Range, and a 30-day roadmap.
+
+### 8 AXES (use these exact keys in both reasoning and output — do not rename)
+taskResponse, coherence, lexicalResource, grammaticalAccuracy,
+pronunciationAndFluency, readingDistractorFilter, listeningComprehension,
+criticalHedging
+
+### RULES:
+- Only score axes that have actual input. For any axis with no data, set its value to null and add its name to "insufficientDataAxes" — NEVER estimate a band for a skill you were not given evidence for.
+- If writing was submitted: evaluate taskResponse, coherence, lexicalResource, grammaticalAccuracy, and criticalHedging.
+- If speaking audio was submitted: evaluate pronunciationAndFluency, lexicalResource, grammaticalAccuracy, and coherence based on acoustic evidence.
+- If reading answers were submitted: evaluate readingDistractorFilter and criticalHedging.
+- If listening answers were submitted: evaluate listeningComprehension and readingDistractorFilter.
+- For any skill NOT submitted, all its exclusive axes MUST be null and listed in insufficientDataAxes.
+- Band scores must be realistic IELTS bands (0.0 to 9.0 in 0.5 increments, or precise decimals for psychometrics).
+- disclaimerVi MUST BE EXACTLY: "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức."`;
+
+    const promptText = `DIAGNOSTIC ASSESSMENT REQUEST:
+Learner Target Band: ${targetBand}
+Submitted Skills: ${JSON.stringify(filteredSkills)}
+
+EVIDENCE PROVIDED:
+${hasWriting ? `[WRITING SAMPLE]:\n"""${writingSample}"""\n` : "[WRITING]: No sample submitted.\n"}
+${hasReading ? `[READING ANSWERS]:\n${JSON.stringify(readingAnswers, null, 2)}\n` : "[READING]: No answers submitted.\n"}
+${hasListening ? `[LISTENING ANSWERS]:\n${JSON.stringify(listeningAnswers, null, 2)}\n` : "[LISTENING]: No answers submitted.\n"}
+${hasSpeakingAudio ? `[SPEAKING AUDIO]: Real candidate speech recording attached for acoustic, pronunciation, fluency, and spoken lexical analysis.` : "[SPEAKING]: No audio recording submitted (pronunciationAndFluency must be null)."}
+
+Please perform a rigorous psychometric analysis and output strict JSON according to the schema.`;
+
+    const contentsParts: any[] = [{ text: promptText }];
+
+    // Attach audio inline data if provided
+    if (hasSpeakingAudio && speakingAudioRef) {
+      let mimeType = "audio/webm";
+      let base64Data = speakingAudioRef;
+
+      if (speakingAudioRef.startsWith("data:")) {
+        const matches = speakingAudioRef.match(/^data:([^;]+);base64,(.+)$/);
+        if (matches) {
+          mimeType = matches[1];
+          base64Data = matches[2];
+        }
+      }
+
+      contentsParts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data,
+        },
+      });
+    }
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        overallEstimatedBand: { type: Type.NUMBER },
+        confidenceInterval: { type: Type.STRING },
+        disclaimerVi: { type: Type.STRING },
+        projectedBandIn60Days: { type: Type.NUMBER },
+        insufficientDataAxes: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+        competencyRadar: {
+          type: Type.OBJECT,
+          properties: {
+            taskResponse: { type: Type.NUMBER, nullable: true },
+            coherence: { type: Type.NUMBER, nullable: true },
+            lexicalResource: { type: Type.NUMBER, nullable: true },
+            grammaticalAccuracy: { type: Type.NUMBER, nullable: true },
+            pronunciationAndFluency: { type: Type.NUMBER, nullable: true },
+            readingDistractorFilter: { type: Type.NUMBER, nullable: true },
+            listeningComprehension: { type: Type.NUMBER, nullable: true },
+            criticalHedging: { type: Type.NUMBER, nullable: true },
+          },
+          required: [
+            "taskResponse",
+            "coherence",
+            "lexicalResource",
+            "grammaticalAccuracy",
+            "pronunciationAndFluency",
+            "readingDistractorFilter",
+            "listeningComprehension",
+            "criticalHedging",
+          ],
+        },
+        primaryBottlenecks: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+        personalized30DayRoadmap: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              week: { type: Type.NUMBER },
+              coreFocus: { type: Type.STRING },
+              dailyQuests: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+            },
+            required: ["week", "coreFocus", "dailyQuests"],
+          },
+        },
+      },
+      required: [
+        "overallEstimatedBand",
+        "confidenceInterval",
+        "disclaimerVi",
+        "projectedBandIn60Days",
+        "insufficientDataAxes",
+        "competencyRadar",
+        "primaryBottlenecks",
+        "personalized30DayRoadmap",
+      ],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: contentsParts,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Diagnostic Psychometrician] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+
+    // Ensure disclaimerVi is preserved
+    if (!parsed.disclaimerVi) {
+      parsed.disclaimerVi =
+        "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức.";
+    }
+
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Diagnostic Psychometrician API Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình chẩn đoán năng lực Psychometrician với gemini-3.1-pro.",
+    });
   }
 });
 

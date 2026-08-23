@@ -12,6 +12,7 @@ import { NextActionBanner } from './components/NextActionBanner';
 import { FloatingAITutor } from './components/FloatingAITutor';
 import { OnboardingModal } from './components/OnboardingModal';
 import { MistakeNotebookModal } from './components/MistakeNotebookModal';
+import { DiagnosticPsychometricianModal } from './components/diagnostic/DiagnosticPsychometricianModal';
 
 import { DashboardView } from './views/DashboardView';
 import { SourceIngestionView } from './views/SourceIngestionView';
@@ -97,6 +98,10 @@ const MainContent: React.FC = () => {
       {/* Modals */}
       <OnboardingModal />
       <MistakeNotebookModal />
+      <DiagnosticPsychometricianModal
+        isOpen={isDiagnosticOpen}
+        onClose={() => setIsDiagnosticOpen(false)}
+      />
     </div>
   );
 };
