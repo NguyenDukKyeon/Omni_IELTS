@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Volume2,
   Play,
@@ -21,19 +21,14 @@ import {
 } from 'lucide-react';
 import { MediaSession, MediaTranscriptSegment } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { playTextToSpeech } from '../../services/aiTutor';
 import { XP_REWARDS } from '../../services/gamification';
+import { diffWords, WordDiffToken } from '../../lib/wordDiff';
+import { OriginalMediaPlayer, OriginalMediaPlayerHandle } from './OriginalMediaPlayer';
 
 interface DictationStudioProps {
   session: MediaSession;
   activeSegmentIndex: number;
   onSelectSegmentIndex: (index: number) => void;
-}
-
-interface WordDiff {
-  expected: string;
-  user?: string;
-  status: 'correct' | 'incorrect' | 'missing';
 }
 
 export const DictationStudio: React.FC<DictationStudioProps> = ({
@@ -54,11 +49,12 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
   // Dictation input & state
   const [userInput, setUserInput] = useState<string>('');
   const [isSubmitted, setIsSubmitted] = useState<boolean>(false);
-  const [diffResults, setDiffResults] = useState<WordDiff[]>([]);
+  const [diffResults, setDiffResults] = useState<WordDiffToken[]>([]);
   const [accuracyScore, setAccuracyScore] = useState<number>(0);
   const [showHintFirstLetters, setShowHintFirstLetters] = useState<boolean>(false);
   const [showFullAnswer, setShowFullAnswer] = useState<boolean>(false);
   const [mistakeSaved, setMistakeSaved] = useState<boolean>(false);
+  const originalPlayerRef = useRef<OriginalMediaPlayerHandle | null>(null);
 
   // Reset state on segment change
   useEffect(() => {
@@ -76,21 +72,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
   const handlePlayAudio = () => {
     if (!segment) return;
     setIsPlayingAudio(true);
-
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(segment.text);
-      utterance.rate = playbackSpeed;
-      utterance.lang = 'en-US';
-
-      utterance.onend = () => setIsPlayingAudio(false);
-      utterance.onerror = () => setIsPlayingAudio(false);
-
-      window.speechSynthesis.speak(utterance);
-    } else {
-      playTextToSpeech(segment.text);
-      setTimeout(() => setIsPlayingAudio(false), 2500);
-    }
+    originalPlayerRef.current?.playSegment(segment.start, segment.end, playbackSpeed, loopCount);
   };
 
   // Compare user input against expected sentence
@@ -98,52 +80,10 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
     e.preventDefault();
     if (!userInput.trim() || !segment) return;
 
-    const cleanExpectedWords = segment.text.trim().split(/\s+/);
-    const cleanUserWords = userInput.trim().split(/\s+/);
-
-    const diff: WordDiff[] = [];
-    let correctCount = 0;
-
-    const normalizeWord = (w: string) =>
-      w.toLowerCase().replace(/[^a-z0-9']/g, '');
-
-    cleanExpectedWords.forEach((expWord, idx) => {
-      const uWord = cleanUserWords[idx];
-      if (!uWord) {
-        diff.push({
-          expected: expWord,
-          status: 'missing',
-        });
-      } else if (normalizeWord(expWord) === normalizeWord(uWord)) {
-        correctCount++;
-        diff.push({
-          expected: expWord,
-          user: uWord,
-          status: 'correct',
-        });
-      } else {
-        diff.push({
-          expected: expWord,
-          user: uWord,
-          status: 'incorrect',
-        });
-      }
-    });
-
-    // If user typed extra words
-    if (cleanUserWords.length > cleanExpectedWords.length) {
-      for (let i = cleanExpectedWords.length; i < cleanUserWords.length; i++) {
-        diff.push({
-          expected: '',
-          user: cleanUserWords[i],
-          status: 'incorrect',
-        });
-      }
-    }
-
-    const accuracy = Math.round((correctCount / cleanExpectedWords.length) * 100);
+    const comparison = diffWords(segment.text, userInput);
+    const accuracy = comparison.accuracy;
     setAccuracyScore(accuracy);
-    setDiffResults(diff);
+    setDiffResults(comparison.tokens);
     setIsSubmitted(true);
 
     if (accuracy >= 85) {
@@ -209,6 +149,11 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
 
   return (
     <div className="space-y-5">
+      <OriginalMediaPlayer
+        ref={originalPlayerRef}
+        session={session}
+        onPlaybackEnded={() => setIsPlayingAudio(false)}
+      />
       <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 shadow-sm space-y-6">
         {/* Top Header Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 dark:border-stone-700 pb-4">

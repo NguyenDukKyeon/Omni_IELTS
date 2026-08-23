@@ -39,23 +39,6 @@ interface AudioTranscribeModalProps {
   onSessionCreated?: (session: MediaSession) => void;
 }
 
-const PRESET_AUDIOS = [
-  {
-    title: 'TED-Ed: Urban Heat Island & Green Architecture',
-    topic: 'Environment & Climate Resilience',
-    audioUrl: 'https://example.com/audio/ted_urban_heat.mp3',
-    sampleTranscriptFallback:
-      'The urban heat island effect is significantly amplified by impervious concrete surfaces. Consequently, architects are implementing bioswales and reflective roofing to reduce ambient temperatures.',
-  },
-  {
-    title: 'IELTS Speaking Part 3: AI Copilots in Healthcare',
-    topic: 'Healthcare & Technology Ethics',
-    audioUrl: 'https://example.com/audio/ielts_ai_healthcare.mp3',
-    sampleTranscriptFallback:
-      'While artificial intelligence facilitates rapid diagnostic triage, bioethicists emphasize that algorithmic opacity could erode patient rapport. AI must serve as an augmentative copilot rather than an autonomous arbiter.',
-  },
-];
-
 export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
   isOpen,
   onClose,
@@ -63,9 +46,8 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 }) => {
   const { addVocabCard, awardXP } = useApp();
 
-  const [inputMode, setInputMode] = useState<'upload' | 'record' | 'preset'>('preset');
-  const [topicContext, setTopicContext] = useState<string>(PRESET_AUDIOS[0].topic);
-  const [selectedPresetIndex, setSelectedPresetIndex] = useState<number>(0);
+  const [inputMode, setInputMode] = useState<'upload' | 'record'>('upload');
+  const [topicContext, setTopicContext] = useState<string>('IELTS Academic Audio');
 
   // File Upload State
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -179,15 +161,11 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
       let mime = audioMimeType;
       let ctx = topicContext;
 
-      if (inputMode === 'preset' && !b64) {
-        // Use synthesized sample for preset demonstration
-        ctx = PRESET_AUDIOS[selectedPresetIndex].topic;
-      }
+      if (!b64) throw new Error('Hãy upload hoặc thu âm audio thật trước khi phiên âm.');
 
       const data = await transcribeAudioAndSegmentApi({
         audioBase64: b64 || undefined,
         mimeType: mime,
-        audioUrl: inputMode === 'preset' ? PRESET_AUDIOS[selectedPresetIndex].audioUrl : undefined,
         topicContext: ctx,
       });
 
@@ -260,7 +238,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
       id: `media_audio_${Date.now()}`,
       title: `Bài Luyện Audio: ${topicContext || 'Học Thuật IELTS'}`,
       mediaType: 'audio',
-      mediaUrl: audioBase64 || PRESET_AUDIOS[selectedPresetIndex]?.audioUrl || '',
+      mediaUrl: audioBase64 || '',
       topic: topicContext || 'Academic Listening',
       level: 'Band 7.0-8.0',
       durationSeconds: Math.ceil(result.segments[result.segments.length - 1]?.endSec || 60),
@@ -323,17 +301,6 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
         <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center gap-2 overflow-x-auto text-xs">
           <button
             type="button"
-            onClick={() => setInputMode('preset')}
-            className={`px-3.5 py-1.5 rounded-xl font-bold transition-all ${
-              inputMode === 'preset'
-                ? 'bg-violet-600 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
-            }`}
-          >
-            📻 Âm Thanh Mẫu Chuẩn IELTS
-          </button>
-          <button
-            type="button"
             onClick={() => setInputMode('upload')}
             className={`px-3.5 py-1.5 rounded-xl font-bold transition-all ${
               inputMode === 'upload'
@@ -359,37 +326,6 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 
         {/* Dynamic Input Body */}
         <div className="p-5 sm:p-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4">
-          {inputMode === 'preset' && (
-            <div className="space-y-3">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                Chọn audio học thuật mẫu:
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {PRESET_AUDIOS.map((p, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => {
-                      setSelectedPresetIndex(idx);
-                      setTopicContext(p.topic);
-                    }}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                      selectedPresetIndex === idx
-                        ? 'bg-violet-50 dark:bg-violet-950/50 border-violet-500 shadow-xs'
-                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-violet-300'
-                    }`}
-                  >
-                    <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                      {p.title}
-                    </span>
-                    <span className="text-[11px] text-slate-500 block mt-0.5">
-                      Chủ đề: {p.topic}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {inputMode === 'upload' && (
             <div className="p-6 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-center space-y-3 bg-slate-50 dark:bg-slate-950">
               <FileAudio className="w-10 h-10 mx-auto text-violet-600" />

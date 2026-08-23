@@ -3,28 +3,40 @@ import { AITutorMessage, DiagnosticMultiSkillInput, DiagnosticPsychometricianRep
 export interface TutorResponse {
   reply: string;
   suggestedFollowUps: string[];
+  citations?: Array<{ claimId: string; title: string; url: string; snippet?: string }>;
+  retrievedAt?: string;
+  researchMode?: boolean;
+}
+
+export function getGeminiRequestHeaders(): Record<string, string> {
+  const apiKey = typeof window !== 'undefined' ? sessionStorage.getItem('omni_gemini_api_key') : null;
+  return apiKey
+    ? { 'Content-Type': 'application/json', 'x-gemini-api-key': apiKey }
+    : { 'Content-Type': 'application/json' };
 }
 
 export async function askAITutor(
   messages: AITutorMessage[],
   screenContext: string,
   currentBand: number,
-  targetBand: number
+  targetBand: number,
+  researchMode = false,
 ): Promise<TutorResponse> {
-  try {
-    const res = await fetch('/api/gemini/tutor', {
+    const res = await fetch('/api/tutor/respond', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getGeminiRequestHeaders(),
       body: JSON.stringify({
         messages,
         screenContext,
         currentBand,
         targetBand,
+        researchMode,
       }),
     });
 
     if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
+      const error = await res.json().catch(() => ({}));
+      throw new Error(error.error || `HTTP error! status: ${res.status}`);
     }
 
     const data = await res.json();
@@ -35,22 +47,10 @@ export async function askAITutor(
         'Cho ví dụ áp dụng trong Writing Task 2',
         'Gợi ý từ đồng nghĩa band 7.5+'
       ],
+      citations: data.citations,
+      retrievedAt: data.retrievedAt,
+      researchMode: data.researchMode,
     };
-  } catch (err) {
-    console.warn('AI Tutor call fallback:', err);
-    return {
-      reply: `Chào bạn! Tôi đang theo dõi bạn ở màn hình **${screenContext}**.
-Để đạt mục tiêu từ Band ${currentBand} lên Band ${targetBand}:
-- Hãy chú ý mở rộng vốn từ học thuật (C1 Lexical Resource) thay vì dùng từ vựng đơn giản.
-- Với mỗi từ mới học, hãy lưu lại ít nhất 2 collocations thực tế.
-- Đừng quên kiểm tra Sổ tay lỗi sai để củng cố các điểm ngữ pháp vừa luyện tập nhé!`,
-      suggestedFollowUps: [
-        'Gợi ý 3 collocations hay cho chủ đề này',
-        'Làm sao tránh lặp từ trong câu?',
-        'Cách phân bổ thời gian hiệu quả'
-      ],
-    };
-  }
 }
 
 export async function fetchUrlContentApi(url: string): Promise<{ title: string; content: string; url: string }> {

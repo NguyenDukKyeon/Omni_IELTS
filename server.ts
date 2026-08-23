@@ -1,19 +1,57 @@
 import express from "express";
 import path from "path";
+import os from "os";
+import crypto from "crypto";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "fs/promises";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
+import { z } from "zod";
+import { AI_TASK_PROFILES, AiTaskTier } from "./src/lib/aiTaskProfiles";
+import { validateMockPackage, validateMockSkill, MockSkill } from "./src/lib/mockPackageValidator";
+import { normalizeRollingVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
+import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const execFileAsync = promisify(execFile);
+
+const TutorEnvelopeSchema = z.object({
+  reply: z.string().min(1),
+  suggestedFollowUps: z.array(z.string()).max(6),
+  citations: z.array(z.object({
+    claimId: z.string(),
+    title: z.string(),
+    url: z.string().url(),
+    snippet: z.string().optional(),
+  })).optional(),
+  searchQueries: z.array(z.string()).optional(),
+  retrievedAt: z.string().datetime().optional(),
+  researchMode: z.boolean(),
+  quotaNotice: z.string().optional(),
+});
+
+const aiLatencySamples = new Map<AiTaskTier, number[]>();
+function recordAiLatency(tier: AiTaskTier, durationMs: number) {
+  const samples = [...(aiLatencySamples.get(tier) || []), durationMs].slice(-200);
+  aiLatencySamples.set(tier, samples);
+}
+function percentile(values: number[], ratio: number) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
+}
 
 app.use(express.json({ limit: "15mb" }));
 
 // Initialize GoogleGenAI client lazily or safely with User-Agent telemetry
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getGeminiClient(request?: express.Request): GoogleGenAI | null {
+  const requestKey = request?.header("x-gemini-api-key")?.trim();
+  const apiKey = requestKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
@@ -33,14 +71,16 @@ async function callGeminiResiliently(
     config?: any;
     primaryModel?: string;
     fallbackModels?: string[];
+    taskTier?: AiTaskTier;
     maxRetriesPerModel?: number;
     retryDelayMs?: number;
   }
 ): Promise<{ text: string | null; error?: string }> {
   if (!ai) return { text: null, error: "NO_AI_CLIENT" };
 
-  const primary = options.primaryModel || "gemini-3.7-flash";
-  const fallbacks = options.fallbackModels || ["gemini-flash-latest", "gemini-3.1-flash-lite"];
+  const profile = AI_TASK_PROFILES[options.taskTier || "balanced"];
+  const primary = options.primaryModel || profile.model;
+  const fallbacks = options.fallbackModels || profile.fallbacks;
   const modelsToTry = [primary, ...fallbacks.filter((m) => m !== primary)];
   const maxRetries = options.maxRetriesPerModel ?? 2;
   const initialDelay = options.retryDelayMs ?? 800;
@@ -50,12 +90,28 @@ async function callGeminiResiliently(
   for (const model of modelsToTry) {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const response = await ai.models.generateContent({
+        const startedAt = Date.now();
+        const config = { ...(options.config || {}) };
+        if (model.startsWith("gemini-3.7")) {
+          delete config.temperature;
+          delete config.topP;
+          delete config.topK;
+        }
+        if (model.startsWith('gemini-3.7') && profile.thinkingLevel && !config.thinkingConfig) {
+          config.thinkingConfig = { thinkingLevel: profile.thinkingLevel.toUpperCase() };
+        }
+        const response = await Promise.race([
+          ai.models.generateContent({
           model,
           contents: options.contents,
-          config: options.config,
-        });
+          config,
+          }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`AI_TIMEOUT_${profile.timeoutMs}`)), profile.timeoutMs)),
+        ]);
         if (response && response.text) {
+          const durationMs = Date.now() - startedAt;
+          recordAiLatency(profile.tier, durationMs);
+          console.info(`[AI latency] tier=${options.taskTier || "balanced"} model=${model} ms=${durationMs}`);
           return { text: response.text };
         }
       } catch (err: any) {
@@ -100,11 +156,84 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// AI Tutor endpoint with screen context awareness
-app.post("/api/gemini/tutor", async (req, res) => {
+app.get('/api/ai/metrics', (_req, res) => {
+  const tiers = Object.fromEntries(Object.keys(AI_TASK_PROFILES).map((tier) => {
+    const samples = aiLatencySamples.get(tier as AiTaskTier) || [];
+    return [tier, { samples: samples.length, p50Ms: percentile(samples, 0.5), p95Ms: percentile(samples, 0.95) }];
+  }));
+  return res.json({ tiers, measuredAt: new Date().toISOString() });
+});
+
+const handleTutorRespond: express.RequestHandler = async (req, res) => {
+  try {
+    const { messages = [], screenContext, currentBand, targetBand, researchMode = false } = req.body;
+    const ai = getGeminiClient(req);
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình.", status: "unavailable" });
+    const lastMessage = messages.at(-1)?.content?.trim();
+    if (!lastMessage) return res.status(400).json({ error: "Câu hỏi không được để trống." });
+    const recentHistory = messages.slice(-8).map((message: any) => `${message.role}: ${message.content}`).join("\n");
+    const systemInstruction = `Bạn là Omni IELTS AI Tutor. Trả lời bằng tiếng Việt súc tích, chính xác và có ví dụ tiếng Anh khi hữu ích. Band hiện tại ${currentBand || 5.5}; mục tiêu ${targetBand || 7}; màn hình ${screenContext || "general"}. Không bịa số liệu, nguồn hoặc band score.`;
+
+    if (researchMode) {
+      const response = await ai.models.generateContent({
+        model: AI_TASK_PROFILES.grounded.model,
+        contents: `Research question: ${lastMessage}\nConversation context:\n${recentHistory}\nUse current, credible evidence. Put citation markers immediately after factual claims and warn the learner to verify evidence before using it in IELTS Writing.`,
+        config: { systemInstruction, tools: [{ googleSearch: {} }] },
+      });
+      const metadata = response.candidates?.[0]?.groundingMetadata as any;
+      const chunks = metadata?.groundingChunks || [];
+      const sources = (metadata?.groundingSupports || []).flatMap((support: any, supportIndex: number) =>
+        (support?.groundingChunkIndices || []).map((chunkIndex: number) => ({
+          claimId: `claim-${supportIndex + 1}`,
+          title: chunks[chunkIndex]?.web?.title || `Nguồn cho claim ${supportIndex + 1}`,
+          url: chunks[chunkIndex]?.web?.uri || '',
+          snippet: support?.segment?.text || undefined,
+        }))
+      ).filter((source: any) => source.url);
+      const envelope = TutorEnvelopeSchema.safeParse({
+        reply: response.text,
+        suggestedFollowUps: ["Lưu một dẫn chứng vào Idea Bank", "Tìm nguồn phản biện", "Biến dẫn chứng thành câu Topic Sentence"],
+        citations: sources,
+        searchQueries: metadata?.webSearchQueries || [],
+        retrievedAt: new Date().toISOString(),
+        researchMode: true,
+        quotaNotice: "Google Search Grounding có thể dùng quota của Gemini API key.",
+      });
+      if (!envelope.success) {
+        return res.status(502).json({ error: 'Research response không đạt structured-output contract.', status: 'unavailable' });
+      }
+      return res.json(envelope.data);
+    }
+
+    const result = await callGeminiResiliently(ai, {
+      taskTier: "balanced",
+      contents: recentHistory,
+      config: { systemInstruction },
+    });
+    if (!result.text) return res.status(503).json({ error: result.error || "AI Tutor unavailable", status: "unavailable" });
+    const envelope = TutorEnvelopeSchema.safeParse({
+      reply: result.text,
+      suggestedFollowUps: ["Cho ví dụ trong Writing Task 2", "Tạo một câu kiểm tra", "Giải thích lỗi thường gặp"],
+      researchMode: false,
+    });
+    if (!envelope.success) return res.status(502).json({ error: 'AI Tutor response không hợp lệ.', status: 'unavailable' });
+    return res.json(envelope.data);
+  } catch (error: any) {
+    console.error("Tutor respond error:", error);
+    return res.status(503).json({ error: error?.message || "AI Tutor unavailable", status: "unavailable" });
+  }
+};
+
+app.post("/api/tutor/respond", handleTutorRespond);
+app.post("/api/gemini/tutor", (req, res) => res.redirect(307, "/api/tutor/respond"));
+
+// Legacy implementation retained temporarily while callers migrate.
+app.post("/api/gemini/tutor-legacy", async (req, res) => {
+  return res.status(410).json({ error: "Endpoint tutor legacy đã ngừng hoạt động. Dùng /api/tutor/respond.", status: "unavailable" });
+  /* c8 ignore start -- temporary source retained only until callers have migrated */
   try {
     const { messages, screenContext, currentBand, targetBand } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
 
     if (!ai) {
       // Return helpful fallback response if API key is not configured
@@ -149,7 +278,6 @@ Câu hỏi của học viên: ${userLastMessage}`;
       contents: prompt,
       config: {
         systemInstruction,
-        temperature: 0.7,
       },
     });
 
@@ -266,7 +394,9 @@ app.post("/api/gemini/analyze-source", async (req, res) => {
   try {
     const { content, title, sourceType, targetBand, customInstruction } = req.body;
     const cleanBand = targetBand ? Number(targetBand) : 7.0;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
+
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo học liệu mô phỏng.", status: "unavailable" });
 
     if (!ai) {
       // Offline fallback with rich 4-skill lesson pack
@@ -598,7 +728,6 @@ Hãy trả về duy nhất 1 JSON hợp lệ theo đúng cấu trúc sau:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -610,6 +739,8 @@ Hãy trả về duy nhất 1 JSON hợp lệ theo đúng cấu trúc sau:
         console.warn("Analyze source parse failed, using structured fallback");
       }
     }
+
+    return res.status(503).json({ error: geminiErr || "Gemini không trả dữ liệu học liệu hợp lệ.", status: "unavailable" });
 
     // Fallback response for analyze-source
     res.json({
@@ -726,7 +857,9 @@ Hãy trả về duy nhất 1 JSON hợp lệ theo đúng cấu trúc sau:
 app.post("/api/gemini/evaluate-writing", async (req, res) => {
   try {
     const { promptTopic, essayContent, taskType, targetBand } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
+
+    if (!ai) return res.status(503).json({ error: "Gemini grader chưa được cấu hình; bài chưa được chấm.", status: "unavailable" });
 
     if (!ai) {
       return res.json({
@@ -804,7 +937,6 @@ Trả về kết quả dưới dạng JSON:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -816,6 +948,8 @@ Trả về kết quả dưới dạng JSON:
         console.warn("Evaluate writing parse failed");
       }
     }
+
+    return res.status(503).json({ error: "Gemini grader không trả kết quả hợp lệ; không tạo band fallback.", status: "unavailable" });
 
     res.json({
       estimatedBand: 6.5,
@@ -858,6 +992,8 @@ app.post("/api/gemini/generate-vocab-card", async (req, res) => {
 
     const cleanWord = word.trim();
     const ai = getGeminiClient();
+
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo thẻ từ vựng suy đoán.", status: "unavailable" });
 
     if (!ai) {
       // Smart offline fallback
@@ -942,7 +1078,6 @@ Hãy trả về định dạng JSON DUY NHẤT theo schema sau:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -977,6 +1112,11 @@ Hãy trả về định dạng JSON DUY NHẤT theo schema sau:
 
 // Evaluate Pronunciation / Speaking Drill
 app.post("/api/gemini/evaluate-pronunciation", async (req, res) => {
+  return res.status(410).json({
+    error: "Chấm pronunciation từ transcript đã ngừng hoạt động. Hãy ghi âm để hệ thống phân tích audio thật.",
+    acousticStatus: "unavailable",
+  });
+  /* c8 ignore start -- temporary source retained only until callers have migrated */
   try {
     const { targetWord, targetPhonetic, userTranscript } = req.body;
     const ai = getGeminiClient();
@@ -1014,7 +1154,6 @@ Hãy trả về JSON:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.2,
       },
     });
 
@@ -1041,34 +1180,45 @@ Hãy trả về JSON:
   }
 });
 
-// TTS audio generation proxy
-app.post("/api/gemini/tts", async (req, res) => {
+// Gemini TTS synthesis with deterministic quality gate. Browser voices remain the fallback.
+app.post("/api/tts/synthesize", async (req, res) => {
   try {
-    const { text, voice } = req.body;
-    const ai = getGeminiClient();
+    const { text, voiceId, voice, style, pace = 1, speakers } = req.body;
+    const ai = getGeminiClient(req);
+
+    if (!String(text || '').trim()) return res.status(400).json({ error: "Text không được để trống." });
 
     if (!ai) {
-      return res.json({ status: "fallback", message: "Client Web Speech API recommended for local preview." });
+      return res.status(503).json({ status: "unavailable", fallbackProvider: "browser" });
     }
 
+    const normalizedText = String(text).trim();
+    const prompt = `${style ? `Style: ${style}. ` : ''}${pace !== 1 ? `Pace: ${pace}. ` : ''}${normalizedText}`;
+    const speechConfig: any = Array.isArray(speakers) && speakers.length === 2
+      ? { multiSpeakerVoiceConfig: { speakerVoiceConfigs: speakers.map((speaker: any) => ({ speaker: speaker.name, voiceConfig: { prebuiltVoiceConfig: { voiceName: speaker.voiceId } } })) } }
+      : { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceId || voice || "Kore" } } };
+
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
-      contents: [{ parts: [{ text: text || "Hello, welcome to Omni IELTS" }] }],
+      model: AI_TASK_PROFILES.tts.model,
+      contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseModalities: ["AUDIO" as any],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice || "Kore" }
-          }
-        }
+        speechConfig,
       }
     });
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (base64Audio) {
-      res.json({ audioBase64: base64Audio, mimeType: "audio/pcm;rate=24000" });
+      const byteLength = Buffer.from(base64Audio, "base64").length;
+      const durationSeconds = byteLength / 48_000;
+      const wordCount = normalizedText.match(/[\p{L}\p{N}]+/gu)?.length || 1;
+      const minimumDuration = Math.max(0.35, wordCount / 4.5);
+      const warnings = durationSeconds < minimumDuration ? ["Audio có dấu hiệu bị cắt trước khi đọc hết nội dung."] : [];
+      if (warnings.length) return res.status(422).json({ error: warnings[0], validation: { valid: false, warnings } });
+      const contentHash = crypto.createHash("sha256").update(JSON.stringify({ text: normalizedText, voiceId: voiceId || voice || "Kore", style, pace, speakers })).digest("hex");
+      res.json({ provider: "gemini", contentHash, audioBase64: base64Audio, mimeType: "audio/pcm;rate=24000", durationSeconds, validation: { valid: true, warnings: [] } });
     } else {
-      res.json({ status: "fallback" });
+      res.status(503).json({ status: "unavailable", fallbackProvider: "browser" });
     }
   } catch (error: any) {
     console.error("TTS API Error:", error);
@@ -1081,6 +1231,8 @@ app.post("/api/gemini/generate-grammar-exercises", async (req, res) => {
   try {
     const { topicId, topicTitle, topicVi, count = 3, targetBand = 7.5, category } = req.body;
     const ai = getGeminiClient();
+
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo bài tập mô phỏng.", status: "unavailable" });
 
     if (!ai) {
       return res.json({
@@ -1151,11 +1303,10 @@ Trả về duy nhất 1 JSON hợp lệ theo format sau:
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.7-flash",
+      model: AI_TASK_PROFILES.balanced.model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.7,
       },
     });
 
@@ -1172,6 +1323,8 @@ app.post("/api/gemini/evaluate-grammar-exercise", async (req, res) => {
   try {
     const { exercise, userAnswer, topicTitle } = req.body;
     const ai = getGeminiClient();
+
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; câu trả lời chưa được AI đánh giá.", status: "unavailable" });
 
     const cleanUser = (userAnswer || "").trim().toLowerCase();
     const cleanCorrect = (exercise.correctAnswer || "").trim().toLowerCase();
@@ -1215,11 +1368,10 @@ Trả về duy nhất 1 JSON hợp lệ:
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.7-flash",
+      model: AI_TASK_PROFILES.deep.model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -1236,6 +1388,8 @@ app.post("/api/gemini/diagnose-grammar", async (req, res) => {
   try {
     const { text, targetBand = 7.5 } = req.body;
     const ai = getGeminiClient();
+
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo chẩn đoán hoặc band giả.", status: "unavailable" });
 
     if (!ai) {
       return res.json({
@@ -1304,11 +1458,10 @@ Trả về duy nhất 1 JSON hợp lệ theo cấu trúc:
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.7-flash",
+      model: AI_TASK_PROFILES.deep.model,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -1332,8 +1485,284 @@ function extractYouTubeId(url: string): string | null {
   return match && match[1] ? match[1] : null;
 }
 
-// Process YouTube URL: metadata, timed transcript, Vietnamese translations & extracted vocabulary
+const YT_DLP_RELEASE = "2026.08.19";
+const YT_DLP_ASSETS: Record<string, { name: string; sha256: string }> = {
+  win32: { name: "yt-dlp.exe", sha256: "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a" },
+  linux: { name: "yt-dlp_linux", sha256: "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a" },
+  darwin: { name: "yt-dlp_macos", sha256: "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202" },
+};
+
+async function ensureYtDlpBinary(): Promise<string> {
+  if (process.env.YT_DLP_PATH) {
+    await stat(process.env.YT_DLP_PATH);
+    return process.env.YT_DLP_PATH;
+  }
+  const asset = YT_DLP_ASSETS[process.platform];
+  if (!asset) throw new Error(`yt-dlp chưa hỗ trợ platform ${process.platform}.`);
+  const binaryPath = path.join(os.tmpdir(), `omni-yt-dlp-${YT_DLP_RELEASE}${process.platform === "win32" ? ".exe" : ""}`);
+  try {
+    const existing = await readFile(binaryPath);
+    if (crypto.createHash("sha256").update(existing).digest("hex") === asset.sha256) return binaryPath;
+  } catch {
+    // Download the pinned, checksummed release below.
+  }
+  const downloadUrl = `https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_RELEASE}/${asset.name}`;
+  const response = await fetch(downloadUrl);
+  if (!response.ok) throw new Error(`Không tải được yt-dlp ${YT_DLP_RELEASE} (HTTP ${response.status}).`);
+  const binary = Buffer.from(await response.arrayBuffer());
+  const checksum = crypto.createHash("sha256").update(binary).digest("hex");
+  if (checksum !== asset.sha256) throw new Error("Checksum yt-dlp không hợp lệ; đã từ chối thực thi.");
+  await writeFile(binaryPath, binary, { mode: 0o755 });
+  if (process.platform !== "win32") await chmod(binaryPath, 0o755);
+  return binaryPath;
+}
+
+function alignCaptionSentences(cues: NormalizedTranscriptSegment[]): NormalizedTranscriptSegment[] {
+  const result: NormalizedTranscriptSegment[] = [];
+  let pending: NormalizedTranscriptSegment | null = null;
+  for (const cue of cues) {
+    pending = pending
+      ? { start: pending.start, end: cue.end, text: `${pending.text} ${cue.text}`.replace(/\s+/g, " ").trim() }
+      : { ...cue };
+    const complete = /[.!?][\]"')]*$/.test(pending.text);
+    if (complete || pending.end - pending.start >= 18 || pending.text.length >= 260) {
+      result.push(pending);
+      pending = null;
+    }
+  }
+  if (pending) result.push(pending);
+  return result;
+}
+
+async function fetchYouTubeCaptionsWithYtDlp(url: string): Promise<{
+  title?: string;
+  channel?: string;
+  duration?: number;
+  segments: NormalizedTranscriptSegment[];
+}> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "omni-ytdlp-"));
+  try {
+    const binary = await ensureYtDlpBinary();
+    const outputTemplate = path.join(tempDir, "caption.%(ext)s");
+    const { stdout } = await execFileAsync(binary, [
+      "--skip-download",
+      "--write-subs",
+      "--write-auto-subs",
+      "--sub-langs", "en-orig,en",
+      "--sub-format", "vtt",
+      "--js-runtimes", "node",
+      "--no-playlist",
+      "--print-json",
+      "--output", outputTemplate,
+      url,
+    ], { timeout: 90_000, maxBuffer: 8 * 1024 * 1024 });
+    const metadataLine = stdout.trim().split(/\r?\n/).at(-1) || "{}";
+    const metadata = JSON.parse(metadataLine);
+    const files = (await readdir(tempDir)).filter((name) => name.toLowerCase().endsWith(".vtt"));
+    const preferred = files.find((name) => /\.en-orig\.vtt$/i.test(name))
+      || files.find((name) => /\.en\.vtt$/i.test(name))
+      || files[0];
+    if (!preferred) return { title: metadata.title, channel: metadata.channel, duration: metadata.duration, segments: [] };
+    const vtt = await readFile(path.join(tempDir, preferred), "utf8");
+    return {
+      title: metadata.title,
+      channel: metadata.channel || metadata.uploader,
+      duration: metadata.duration,
+      segments: alignCaptionSentences(normalizeRollingVtt(vtt)),
+    };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function transcribeYouTubeAudioWithYtDlp(
+  url: string,
+  durationSeconds: number,
+  ai: GoogleGenAI,
+): Promise<NormalizedTranscriptSegment[]> {
+  if (durationSeconds > 25 * 60) {
+    throw new Error('Video dài hơn 25 phút. Hãy chọn một đoạn ngắn hơn trước khi chép lời.');
+  }
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'omni-ytaudio-'));
+  try {
+    const binary = await ensureYtDlpBinary();
+    await execFileAsync(binary, [
+      '--no-playlist',
+      '--max-filesize', '14M',
+      '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+      '--output', path.join(tempDir, 'audio.%(ext)s'),
+      url,
+    ], { timeout: 180_000, maxBuffer: 4 * 1024 * 1024 });
+    const files = (await readdir(tempDir)).filter(name => !name.endsWith('.part') && name.startsWith('audio.'));
+    if (!files.length) throw new Error('Không tải được audio dưới giới hạn 14 MB.');
+    const audioPath = path.join(tempDir, files[0]);
+    const audio = await readFile(audioPath);
+    if (audio.byteLength > 14 * 1024 * 1024) throw new Error('Audio vượt quá giới hạn 14 MB.');
+    const extension = path.extname(files[0]).toLowerCase();
+    const mimeType = extension === '.m4a' || extension === '.mp4' ? 'audio/mp4'
+      : extension === '.mp3' ? 'audio/mpeg'
+      : extension === '.wav' ? 'audio/wav'
+      : 'audio/webm';
+    const result = await callGeminiResiliently(ai, {
+      taskTier: 'audio_eval',
+      contents: [
+        { inlineData: { mimeType, data: audio.toString('base64') } },
+        `Transcribe the entire English audio without summarizing or omitting content. Return JSON {"segments":[{"start":0.0,"end":2.4,"text":"..."}]}. Keep chronological timestamps in seconds and split at natural sentence boundaries.`,
+      ],
+      config: { responseMimeType: 'application/json' },
+      maxRetriesPerModel: 1,
+    });
+    if (!result.text) throw new Error(result.error || 'Gemini audio transcription unavailable.');
+    const parsed = JSON.parse(result.text);
+    if (!Array.isArray(parsed.segments)) throw new Error('Gemini không trả transcript segments hợp lệ.');
+    const segments = parsed.segments.map((segment: any) => ({
+      start: Number(segment.start),
+      end: Number(segment.end),
+      text: String(segment.text || '').replace(/\s+/g, ' ').trim(),
+    })).filter((segment: NormalizedTranscriptSegment) =>
+      Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end >= segment.start && segment.text
+    );
+    if (!segments.length) throw new Error('Audio transcription rỗng; hệ thống từ chối tạo transcript giả.');
+    return segments;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+// Import the complete timed transcript. Captions remain the source of truth; AI may only enrich them.
+app.post("/api/media/youtube/import", async (req, res) => {
+  try {
+    const { url, topic, level, targetBand } = req.body;
+    const videoId = extractYouTubeId(url);
+    if (!videoId) return res.status(400).json({ error: "URL YouTube không hợp lệ." });
+
+    let videoTitle = "YouTube lesson";
+    let channelTitle = "YouTube";
+    let durationSeconds = 0;
+    let captionSource: "yt-dlp" | "youtube-transcript" | "gemini-audio" = "yt-dlp";
+    let normalized: NormalizedTranscriptSegment[] = [];
+    let ytDlpWarning: string | undefined;
+
+    try {
+      const imported = await fetchYouTubeCaptionsWithYtDlp(url);
+      videoTitle = imported.title || videoTitle;
+      channelTitle = imported.channel || channelTitle;
+      durationSeconds = Number(imported.duration) || 0;
+      normalized = imported.segments;
+    } catch (error: any) {
+      ytDlpWarning = error?.message || String(error);
+      console.warn("[Media import] yt-dlp unavailable, trying caption facade:", ytDlpWarning);
+    }
+
+    if (!normalized.length) {
+      captionSource = "youtube-transcript";
+      try {
+        const { YoutubeTranscript } = await import("youtube-transcript");
+        const raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" })
+          .catch(() => YoutubeTranscript.fetchTranscript(videoId));
+        normalized = alignCaptionSentences(raw.map((cue) => ({
+          start: cue.offset / 1000,
+          end: (cue.offset + cue.duration) / 1000,
+          text: cue.text.replace(/\s+/g, " ").trim(),
+        })));
+        durationSeconds = normalized.at(-1)?.end || durationSeconds;
+      } catch {
+        normalized = [];
+      }
+    }
+
+    if (!normalized.length) {
+      const ai = getGeminiClient(req);
+      if (!ai) {
+        return res.status(422).json({
+          error: "Video không có caption tiếng Anh. Cần Gemini API key để chép lời audio hoặc hãy upload file dưới 14 MB; hệ thống sẽ không tự bịa transcript.",
+          code: "CAPTIONS_UNAVAILABLE",
+          detail: ytDlpWarning,
+        });
+      }
+      try {
+        normalized = await transcribeYouTubeAudioWithYtDlp(url, durationSeconds, ai);
+        captionSource = 'gemini-audio';
+      } catch (error: any) {
+        return res.status(422).json({
+          error: error?.message || "Không thể chép lời audio YouTube.",
+          code: "AUDIO_TRANSCRIPTION_UNAVAILABLE",
+          detail: ytDlpWarning,
+        });
+      }
+    }
+
+    const ai = getGeminiClient(req);
+    let translations: string[] = [];
+    let extractedVocab: any[] = [];
+    if (ai) {
+      const enrichment = await callGeminiResiliently(ai, {
+        taskTier: "balanced",
+        contents: `Translate each numbered English caption to natural Vietnamese without changing, merging, deleting or reordering captions. Also extract at most 8 useful B2-C2 expressions. Return JSON {"translations":[{"index":0,"translation":"..."}],"extractedVocab":[{"word":"...","pos":"...","definitionVi":"...","definitionEn":"...","exampleEn":"...","collocations":[],"cefrLevel":"C1"}]}.
+
+CAPTIONS:\n${normalized.map((segment, index) => `${index}: ${segment.text}`).join("\n")}`,
+        config: { responseMimeType: "application/json" },
+        maxRetriesPerModel: 1,
+      });
+      if (enrichment.text) {
+        try {
+          const parsed = JSON.parse(enrichment.text);
+          if (Array.isArray(parsed.translations)) {
+            translations = parsed.translations.reduce((all: string[], item: any) => {
+              if (Number.isInteger(item.index)) all[item.index] = String(item.translation || "");
+              return all;
+            }, []);
+          }
+          if (Array.isArray(parsed.extractedVocab)) extractedVocab = parsed.extractedVocab;
+        } catch (error) {
+          console.warn("[Media import] enrichment JSON rejected:", error);
+        }
+      }
+    }
+
+    const session = {
+      id: `media_yt_${videoId}_${Date.now()}`,
+      title: videoTitle,
+      mediaType: "youtube" as const,
+      mediaUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      youtubeId: videoId,
+      channelTitle,
+      thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+      topic: topic || "Academic English",
+      level: level || targetBand || "Band 7.0-8.0",
+      durationSeconds: durationSeconds || normalized.at(-1)?.end || 0,
+      currentTimestamp: 0,
+      transcriptSegments: normalized.map((segment, index) => ({
+        id: `seg_${index + 1}`,
+        start: segment.start,
+        end: segment.end,
+        text: segment.text,
+        translation: translations[index] || "",
+        speaker: "Original audio",
+      })),
+      mode: "shadowing" as const,
+      completed: false,
+      lastPracticedDate: new Date().toISOString(),
+      extractedVocab,
+      transcriptVersion: { rawSource: captionSource, normalizerVersion: "vtt-rolling-v1", importedAt: new Date().toISOString() },
+    };
+    return res.json({ session, warnings: ytDlpWarning && captionSource !== "yt-dlp" ? [ytDlpWarning] : [] });
+  } catch (error: any) {
+    console.error("YouTube import error:", error);
+    return res.status(500).json({ error: error?.message || "Không thể nhập video YouTube." });
+  }
+});
+
+app.post("/api/gemini/tts", (req, res) => res.redirect(307, "/api/tts/synthesize"));
+
 app.post("/api/media/process-youtube", async (req, res) => {
+  return res.redirect(307, "/api/media/youtube/import");
+});
+
+// Retained temporarily for rollback diagnostics; no frontend caller uses this route.
+app.post("/api/media/process-youtube-legacy", async (req, res) => {
+  return res.status(410).json({ error: "Endpoint cũ đã ngừng hoạt động để tránh transcript mô phỏng. Dùng /api/media/youtube/import." });
+  /* c8 ignore start -- temporary source retained only until callers have migrated */
   try {
     const { url, topic, level } = req.body;
     if (!url) {
@@ -1442,11 +1871,10 @@ Trả về duy nhất 1 JSON hợp lệ theo cấu trúc:
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+        model: AI_TASK_PROFILES.balanced.model,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
-          temperature: 0.3,
         },
       });
 
@@ -1590,28 +2018,24 @@ Trả về duy nhất 1 JSON hợp lệ theo cấu trúc:
     console.error("Process YouTube Error:", error);
     res.status(500).json({ error: error.message || "Lỗi xử lý video YouTube" });
   }
+  /* c8 ignore stop */
 });
 
 // Evaluate Shadowing Attempt with Gemini
 app.post("/api/media/evaluate-shadowing", async (req, res) => {
   try {
     const { targetSentence, userTranscript, userAudioBase64, topicTitle } = req.body;
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
+
+    if (!userAudioBase64) {
+      return res.status(422).json({
+        error: "Cần audio thật để chấm pronunciation, prosody và nhịp điệu.",
+        acousticStatus: "unavailable",
+      });
+    }
 
     if (!ai) {
-      return res.json({
-        overallScore: 89,
-        fluencyScore: 92,
-        intonationScore: 88,
-        accuracyScore: 87,
-        feedbackVi: "Phát âm khá trôi chảy và tự nhiên! Nhịp nói tương đồng 89% với người bản xứ.",
-        swallowedWords: ["to", "and"],
-        stressHighlights: [
-          { word: "sustainable", isCorrect: true, tip: "Trọng âm rơi vào âm tiết thứ 2 chuẩn xác" },
-          { word: "development", isCorrect: true, tip: "Phát âm rõ ràng" }
-        ],
-        actionableAdvice: "Hãy chú ý bật rõ âm đuôi /s/ và /t/ ở cuối các từ vựng học thuật để nâng điểm Tiêu chí Phát âm (Pronunciation)."
-      });
+      return res.status(503).json({ error: "Gemini audio evaluation chưa khả dụng.", acousticStatus: "unavailable" });
     }
 
     const prompt = `Bạn là Giám khảo IELTS Chuyên chấm thi kỹ năng Speaking & Ngữ âm (Pronunciation Specialist).
@@ -1644,16 +2068,18 @@ Trả về duy nhất 1 JSON hợp lệ:
   "actionableAdvice": "Gợi ý cụ thể..."
 }`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.7-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.3,
-      },
+    const cleanAudio = String(userAudioBase64).replace(/^data:audio\/[^;]+;base64,/, "");
+    const result = await callGeminiResiliently(ai, {
+      taskTier: "audio_eval",
+      contents: [
+        { inlineData: { data: cleanAudio, mimeType: "audio/webm" } },
+        prompt,
+      ],
+      config: { responseMimeType: "application/json" },
     });
-
-    const parsed = JSON.parse(response.text || "{}");
+    if (!result.text) return res.status(503).json({ error: result.error || "Audio evaluation unavailable", acousticStatus: "unavailable" });
+    const parsed = JSON.parse(result.text);
+    parsed.acousticStatus = "measured";
     res.json(parsed);
   } catch (error: any) {
     console.error("Evaluate Shadowing Error:", error);
@@ -1666,6 +2092,8 @@ app.post("/api/media/extract-vocab", async (req, res) => {
   try {
     const { transcriptText, topic } = req.body;
     const ai = getGeminiClient();
+
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo từ vựng suy đoán.", status: "unavailable" });
 
     if (!ai) {
       return res.json({
@@ -1719,7 +2147,6 @@ Trả về duy nhất 1 JSON hợp lệ theo định dạng:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -1835,9 +2262,7 @@ app.post("/api/practice/generate-reading", async (req, res) => {
       }
     };
 
-    if (!ai) {
-      return res.json(defaultReadingFallback);
-    }
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo đề Reading mô phỏng.", status: "unavailable" });
 
     const prompt = `Bạn là Chuyên gia Khảo thí Ngôn ngữ Cambridge IELTS hàng đầu.
 Nhiệm vụ: Sinh 01 bài luyện tập IELTS READING chuyên sâu theo ĐÚNG DẠNG CÂU HỎI được yêu cầu.
@@ -1900,7 +2325,6 @@ Yêu cầu chi tiết theo từng dạng:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -1915,9 +2339,11 @@ Yêu cầu chi tiết theo từng dạng:
       }
     }
 
-    res.json(defaultReadingFallback);
+    return res.status(503).json({ error: "Gemini không trả đề Reading hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Generate Reading Error:", error);
+    return res.status(503).json({ error: error.message || "Gemini không tạo được đề Reading.", status: "unavailable" });
+    /* c8 ignore start -- legacy fallback retained temporarily while callers migrate */
     res.json({
       exercise: {
         id: `read_${Date.now()}`,
@@ -2009,9 +2435,7 @@ Officer: Great. The preliminary orientation session will be held on the 14th of 
       }
     };
 
-    if (!ai) {
-      return res.json(defaultListeningFallback);
-    }
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo đề Listening mô phỏng.", status: "unavailable" });
 
     const prompt = `Bạn là Chuyên gia Soạn đề IELTS Listening của Cambridge.
 Nhiệm vụ: Sinh 01 bài luyện tập IELTS LISTENING chuyên sâu cho ĐÚNG DẠNG CÂU HỎI được yêu cầu.
@@ -2081,7 +2505,6 @@ Thông số:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -2096,9 +2519,11 @@ Thông số:
       }
     }
 
-    res.json(defaultListeningFallback);
+    return res.status(503).json({ error: "Gemini không trả đề Listening hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Generate Listening Error:", error);
+    return res.status(503).json({ error: error.message || "Gemini không tạo được đề Listening.", status: "unavailable" });
+    /* c8 ignore start -- legacy fallback retained temporarily while callers migrate */
     res.json({
       exercise: {
         id: `listen_${Date.now()}`,
@@ -2161,9 +2586,7 @@ app.post("/api/practice/generate-writing-prompt", async (req, res) => {
       }
     };
 
-    if (!ai) {
-      return res.json(defaultWritingFallback);
-    }
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo đề Writing mô phỏng.", status: "unavailable" });
 
     const prompt = `Bạn là Giám khảo IELTS Writing Cambridge Senior Examiner.
 Nhiệm vụ: Thiết kế 01 đề bài IELTS Writing chuyên sâu theo yêu cầu.
@@ -2215,7 +2638,6 @@ Trả về duy nhất 1 JSON:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -2230,7 +2652,7 @@ Trả về duy nhất 1 JSON:
       }
     }
 
-    res.json(defaultWritingFallback);
+    return res.status(503).json({ error: "Gemini không trả đề Writing hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Generate Writing Prompt Error:", error);
     res.status(500).json({ error: error.message || "Lỗi sinh đề Writing" });
@@ -2288,9 +2710,7 @@ app.post("/api/practice/generate-speaking-prompt", async (req, res) => {
       }
     };
 
-    if (!ai) {
-      return res.json(defaultSpeakingFallback);
-    }
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo đề Speaking mô phỏng.", status: "unavailable" });
 
     const prompt = `Bạn là Giám khảo Trưởng IELTS Speaking của Đại học Cambridge.
 Nhiệm vụ: Tạo 01 bộ đề IELTS Speaking chuẩn khảo thí cho phần: "${targetPart}" ('part1_qa', 'part2_cue_card', 'part3_deep_discussion').
@@ -2334,7 +2754,6 @@ Trả về JSON:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -2349,7 +2768,7 @@ Trả về JSON:
       }
     }
 
-    res.json(defaultSpeakingFallback);
+    return res.status(503).json({ error: "Gemini không trả đề Speaking hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Generate Speaking Prompt Error:", error);
     res.status(500).json({ error: error.message || "Lỗi sinh đề Speaking" });
@@ -2361,6 +2780,8 @@ app.post("/api/practice/evaluate-writing", async (req, res) => {
   try {
     const { promptStatement, essayContent, taskType, targetBand } = req.body;
     const ai = getGeminiClient();
+
+    if (!ai) return res.status(503).json({ error: "Gemini grader chưa được cấu hình; bài chưa được chấm.", status: "unavailable" });
 
     if (!essayContent || essayContent.trim().length < 10) {
       return res.status(400).json({ error: "Nội dung bài viết quá ngắn để đánh giá." });
@@ -2498,7 +2919,6 @@ Trả về duy nhất 1 JSON hợp lệ:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.2,
       },
     });
 
@@ -2512,6 +2932,8 @@ Trả về duy nhất 1 JSON hợp lệ:
         console.warn("Parse evaluate writing error");
       }
     }
+
+    return res.status(503).json({ error: "Gemini grader không trả kết quả Writing hợp lệ; không tạo band fallback.", status: "unavailable" });
 
     const fallbackWordCount = essayContent.trim().split(/\s+/).length;
     res.json({
@@ -2741,9 +3163,7 @@ In conclusion, resolving this multi-faceted imperative demands a synergistic sym
       ]
     };
 
-    if (!ai) {
-      return res.json(defaultFallbackResult);
-    }
+    if (!ai) return res.status(503).json({ error: "Gemini chưa được cấu hình; không tạo bản nâng cấp hoặc band giả.", status: "unavailable" });
 
     const systemInstruction = `Bạn là Giám khảo IELTS Writing Senior Examiner kiêm Chuyên gia Ngôn ngữ học thuật Đại học Cambridge (IELTS Essay Band Upgrader Engine).
 
@@ -2865,15 +3285,12 @@ Hãy trả về DUY NHẤT 1 JSON object hợp lệ đúng 100% theo schema sau:
   ]
 }`;
 
-    // Use gemini-3.5-flash as primary model per user requirement, with resilient fallbacks
     const { text: geminiUpgradeText, error: geminiUpgradeErr } = await callGeminiResiliently(ai, {
       contents: prompt,
-      primaryModel: "gemini-3.5-flash",
-      fallbackModels: ["gemini-3.7-flash", "gemini-flash-latest"],
+      taskTier: "balanced",
       config: {
         systemInstruction,
         responseMimeType: "application/json",
-        temperature: 0.25,
       },
     });
 
@@ -2888,8 +3305,8 @@ Hãy trả về DUY NHẤT 1 JSON object hợp lệ đúng 100% theo schema sau:
       }
     }
 
-    console.warn("Using default fallback result for Essay Upgrader due to AI response format:", geminiUpgradeErr);
-    res.json(defaultFallbackResult);
+    console.warn("Essay Upgrader unavailable due to AI response format:", geminiUpgradeErr);
+    return res.status(503).json({ error: geminiUpgradeErr || "Gemini không trả bản nâng cấp hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Essay Upgrader API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi nâng cấp bài viết IELTS" });
@@ -2900,12 +3317,21 @@ Hãy trả về DUY NHẤT 1 JSON object hợp lệ đúng 100% theo schema sau:
 // 6. Evaluate Speaking Submission against Official 4 IELTS Speaking Descriptors
 app.post("/api/practice/evaluate-speaking", async (req, res) => {
   try {
-    const { questionPrompt, userTranscript, part, targetBand } = req.body;
+    const { questionPrompt, userTranscript, part, targetBand, userAudioBase64, audioMimeType } = req.body;
     const ai = getGeminiClient();
 
     if (!userTranscript || userTranscript.trim().length < 5) {
       return res.status(400).json({ error: "Transcript bài nói quá ngắn để đánh giá." });
     }
+
+    if (!userAudioBase64) {
+      return res.status(422).json({
+        error: "Cần audio thật để chấm Speaking, đặc biệt là Pronunciation và Fluency.",
+        acousticStatus: "unavailable",
+      });
+    }
+
+    if (!ai) return res.status(503).json({ error: "Gemini audio grader chưa được cấu hình.", status: "unavailable" });
 
     const defaultSpeakingEvalFallback = {
       evaluation: {
@@ -2954,9 +3380,7 @@ app.post("/api/practice/evaluate-speaking", async (req, res) => {
       }
     };
 
-    if (!ai) {
-      return res.json(defaultSpeakingEvalFallback);
-    }
+    if (!ai) return res.status(503).json({ error: "Gemini audio grader chưa được cấu hình.", status: "unavailable" });
 
     const prompt = `Bạn là Giám khảo Khảo thí IELTS Speaking Quốc tế.
 Nhiệm vụ: Đánh giá bài nói của thí sinh theo đúng 4 tiêu chí Speaking chính thức:
@@ -3029,10 +3453,13 @@ Trả về duy nhất JSON:
 }`;
 
     const { text: geminiSpkEvalText } = await callGeminiResiliently(ai, {
-      contents: prompt,
+      taskTier: "audio_eval",
+      contents: [
+        { inlineData: { data: String(userAudioBase64).replace(/^data:[^;]+;base64,/, ""), mimeType: audioMimeType || "audio/webm" } },
+        prompt,
+      ],
       config: {
         responseMimeType: "application/json",
-        temperature: 0.2,
       },
     });
 
@@ -3047,7 +3474,7 @@ Trả về duy nhất JSON:
       }
     }
 
-    res.json(defaultSpeakingEvalFallback);
+    return res.status(503).json({ error: "Gemini audio grader không trả kết quả Speaking hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Evaluate Speaking Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm bài Speaking" });
@@ -3178,12 +3605,21 @@ app.post("/api/mock/evaluate-full-test", async (req, res) => {
     const readingBand = rawToReadingBand(scaledReadingRaw);
 
     // 3. AI Evaluation for Writing and Speaking
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
     const task1Text = userAnswers.writing?.task1 || "";
     const task2Text = userAnswers.writing?.task2 || "";
     const spkP1 = (userAnswers.speaking?.part1Answers || []).map((a: any) => `Q: ${a.question}\nA: ${a.transcript}`).join("\n\n");
     const spkP2 = userAnswers.speaking?.part2Transcript || "";
     const spkP3 = (userAnswers.speaking?.part3Answers || []).map((a: any) => `Q: ${a.question}\nA: ${a.transcript}`).join("\n\n");
+    const speakingAudioParts = Array.isArray(userAnswers.speaking?.audioParts)
+      ? userAnswers.speaking.audioParts
+      : userAnswers.speaking?.audioBase64
+      ? [{ dataUrl: userAnswers.speaking.audioBase64, mimeType: userAnswers.speaking.audioMimeType || "audio/webm" }]
+      : [];
+
+    if (!ai) return res.status(503).json({ error: "Gemini grading unavailable; bài làm chưa được chấm." });
+    if (task1Text.trim().length < 50 || task2Text.trim().length < 100) return res.status(422).json({ error: "Writing Task 1/2 chưa đủ dữ liệu để chấm đáng tin cậy." });
+    if (!speakingAudioParts.length) return res.status(422).json({ error: "Speaking thiếu audio thật; pronunciation và overall band không thể được tạo." });
 
     let writingBand = 6.0;
     let writingEval: any = null;
@@ -3257,22 +3693,27 @@ Yêu cầu đầu ra JSON CHÍNH XÁC:
 }`;
 
         const { text: geminiResText } = await callGeminiResiliently(ai, {
-          contents: evalPrompt,
+          taskTier: "audio_eval",
+          contents: [
+            ...speakingAudioParts.map((part: any) => ({ inlineData: { data: String(part.dataUrl).replace(/^data:[^;]+;base64,/, ""), mimeType: part.mimeType || "audio/webm" } })),
+            evalPrompt,
+          ],
           config: {
             responseMimeType: "application/json",
-            temperature: 0.2
           }
         });
 
         if (geminiResText) {
           const parsedAi = JSON.parse(geminiResText);
-          if (parsedAi.writing) {
+          const parsedWritingBand = Number(parsedAi.writing?.overallWritingBand);
+          const parsedSpeakingBand = Number(parsedAi.speaking?.overallSpeakingBand);
+          if (parsedAi.writing && Number.isFinite(parsedWritingBand)) {
             writingEval = parsedAi.writing;
-            writingBand = Number(parsedAi.writing.overallWritingBand) || 6.5;
+            writingBand = parsedWritingBand;
           }
-          if (parsedAi.speaking) {
+          if (parsedAi.speaking && Number.isFinite(parsedSpeakingBand)) {
             speakingEval = parsedAi.speaking;
-            speakingBand = Number(parsedAi.speaking.overallSpeakingBand) || 6.5;
+            speakingBand = parsedSpeakingBand;
           }
           if (Array.isArray(parsedAi.strengths)) strengths = parsedAi.strengths;
           if (Array.isArray(parsedAi.weaknesses)) weaknesses = parsedAi.weaknesses;
@@ -3280,6 +3721,10 @@ Yêu cầu đầu ra JSON CHÍNH XÁC:
       } catch (aiErr) {
         console.warn("Full Mock AI Eval fallback:", aiErr);
       }
+    }
+
+    if (!writingEval || !speakingEval) {
+      return res.status(503).json({ error: "AI grader không trả đủ Writing/Speaking; không tạo band fallback." });
     }
 
     // Default Fallback scoring if AI was offline or short submission
@@ -3484,6 +3929,8 @@ app.post("/api/gemini/speaking-examiner", async (req, res) => {
 
     const ai = getGeminiClient();
 
+    if (!ai) return res.status(503).json({ error: "Gemini examiner chưa được cấu hình.", status: "unavailable" });
+
     if (!ai) {
       // Intelligent offline simulation
       let examinerReply = "Thank you.";
@@ -3579,7 +4026,6 @@ Generate Dr. Jonathan Vance's immediate spoken response and next question accord
       config: {
         systemInstruction,
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -3594,14 +4040,7 @@ Generate Dr. Jonathan Vance's immediate spoken response and next question accord
       }
     }
 
-    res.json({
-      examinerReply: "Thank you.",
-      nextQuestion: "Why do you suppose that is?",
-      isPartFinished: false,
-      suggestedPart: currentPart,
-      timeGuidanceSeconds: 30,
-      quickTips: ["Duy trì luồng nói tự nhiên", "Mở rộng góc nhìn với các luận điểm học thuật"]
-    });
+    return res.status(503).json({ error: "Gemini examiner không trả lượt hội thoại hợp lệ.", status: "unavailable" });
   } catch (error: any) {
     console.error("Speaking Examiner API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi giao tiếp Giám khảo Speaking AI" });
@@ -3619,6 +4058,7 @@ app.post("/api/gemini/speaking-live-audio-evaluation", async (req, res) => {
       conversationHistory = [],
       targetBand = 7.5,
       totalDurationSeconds = 300,
+      speechSegments = null,
     } = req.body;
 
     // 1. Mandatory Audio Verification
@@ -3630,7 +4070,7 @@ app.post("/api/gemini/speaking-live-audio-evaluation", async (req, res) => {
     }
 
     // 2. AI Client Verification
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
     if (!ai) {
       return res.status(503).json({
         error:
@@ -3753,22 +4193,9 @@ Please listen carefully to the attached full audio recording and generate the au
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
-
-    let responseText: string | null = null;
-    let lastGeminiErr: any = null;
-
-    for (const model of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: [
+    const result = await callGeminiResiliently(ai, {
+      taskTier: "audio_eval",
+      contents: [
             {
               inlineData: {
                 mimeType: detectedMimeType,
@@ -3777,37 +4204,26 @@ Please listen carefully to the attached full audio recording and generate the au
             },
             promptText,
           ],
-          config: {
+      config: {
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
-          },
-        });
+      },
+    });
 
-        if (response && response.text) {
-          responseText = response.text;
-          break;
-        }
-      } catch (err: any) {
-        lastGeminiErr = err;
-        console.warn(`[Speaking Live Audio Scoring] Model ${model} failed:`, err?.message || err);
-      }
-    }
-
-    if (!responseText) {
+    if (!result.text) {
       return res.status(500).json({
-        error:
-          lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi phân tích audio.",
+        error: result.error || "Không nhận được phản hồi từ audio-capable model.",
       });
     }
 
-    const parsed = JSON.parse(responseText);
+    const parsed = JSON.parse(result.text);
     if (!parsed.disclaimerVi) {
       parsed.disclaimerVi =
         "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức.";
     }
+    const transcript = (conversationHistory || []).map((turn: any) => turn.userTranscript || "").join(" ");
+    parsed.telemetry = calculateSpeakingTelemetry({ transcript, durationSeconds: totalDurationSeconds, speechSegments, vadVersion: speechSegments ? "silero-vad-web-0.0.30" : undefined });
 
     return res.json(parsed);
   } catch (error: any) {
@@ -3815,13 +4231,24 @@ Please listen carefully to the attached full audio recording and generate the au
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình chấm điểm audio Speaking với gemini-3.1-pro.",
+        "Lỗi trong quá trình chấm điểm audio Speaking với Gemini.",
     });
   }
 });
 
-// Comprehensive IELTS Speaking Band Evaluation & Analytical Telemetry
-app.post("/api/gemini/speaking-evaluation", async (req, res) => {
+// Transcript-only grading cannot assess pronunciation or pauses; keep the old route unavailable.
+app.post('/api/gemini/speaking-evaluation', (_req, res) => res.status(410).json({
+  error: 'Endpoint transcript-only đã ngừng hoạt động. Hãy dùng /api/speaking/analyze với audio thật.',
+  status: 'unavailable',
+}));
+
+// Retained temporarily for rollback diagnostics; it is not reachable from public clients.
+app.post("/api/gemini/speaking-evaluation-legacy", async (req, res) => {
+  return res.status(410).json({
+    error: "Endpoint legacy đã ngừng hoạt động vì không có audio thật để chấm phát âm và khoảng dừng.",
+    status: "unavailable",
+  });
+  /* c8 ignore start -- temporary source retained only until callers have migrated */
   try {
     const { conversationHistory, totalDurationSeconds = 600, targetBand = 7.5 } = req.body;
     const ai = getGeminiClient();
@@ -4030,7 +4457,6 @@ Trả về DUY NHẤT 1 JSON hợp lệ theo đúng cấu trúc sau:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3,
       },
     });
 
@@ -4097,7 +4523,7 @@ app.post("/api/gemini/forecast-grounding", async (req, res) => {
       timeframe = "latest",
     } = req.body;
 
-    const ai = getGeminiClient();
+    const ai = getGeminiClient(req);
 
     let searchTopicQuery = customQuery.trim();
     if (!searchTopicQuery) {
@@ -4169,6 +4595,9 @@ Sau khi tìm kiếm bằng Google Search, hãy tổng hợp từ 3 đến 5 đ�
       "band8ModelAnswer": "Toàn bộ bài mẫu Band 8.0+ hoàn chỉnh bằng tiếng Anh (Writing essay 260-350 từ hoặc Speaking answer 150-250 từ)",
       "modelAnswerWordCount": 280,
       "examinerTipsVi": "Lời khuyên chiến lược của Giám khảo chấm thi để đạt điểm cao"
+      "evidenceType": "verified_report" | "reported_recall" | "forecast",
+      "sourceTitle": "Tiêu đề trang trực tiếp báo cáo claim này",
+      "sourceUrl": "URL trực tiếp của trang hỗ trợ claim này"
     }
   ]
 }
@@ -4178,7 +4607,7 @@ LƯU Ý CỰC KỲ QUAN TRỌNG:
 2. Bài mẫu Band 8.0+ phải mạch lạc, giàu từ vựng C1/C2 tự nhiên, cấu trúc câu đa dạng.`;
 
         const geminiResponse = await ai.models.generateContent({
-          model: "gemini-3.7-flash",
+          model: AI_TASK_PROFILES.grounded.model,
           contents: prompt,
           config: {
             tools: [{ googleSearch: {} }],
@@ -4207,13 +4636,25 @@ LƯU Ý CỰC KỲ QUAN TRỌNG:
           try {
             const parsed = JSON.parse(jsonStr);
             if (parsed && Array.isArray(parsed.forecastItems) && parsed.forecastItems.length > 0) {
+              const groundedItems = parsed.forecastItems.map((item: any) => {
+                const supportingSource = sources.find((source: any) => source.url === item.sourceUrl);
+                const verified = Boolean(supportingSource) && item.evidenceType === "verified_report";
+                return {
+                  ...item,
+                  evidenceType: verified ? "verified_report" : item.evidenceType === "reported_recall" && supportingSource ? "reported_recall" : "forecast",
+                  trendStatus: verified ? item.trendStatus : "quarter_forecast",
+                  trendBadge: verified ? item.trendBadge : "Dự báo luyện tập có nguồn tham khảo",
+                  examDate: verified ? item.examDate : `Dự báo · cập nhật ${new Date().toLocaleDateString("vi-VN")}`,
+                  frequencyScore: verified && Number.isFinite(item.frequencyScore) ? item.frequencyScore : undefined,
+                  groundingSourceTitle: supportingSource?.title,
+                  groundingSourceUrl: supportingSource?.url,
+                  citations: supportingSource ? [{ claimId: item.id, title: supportingSource.title, url: supportingSource.url }] : [],
+                };
+              });
               return res.json({
-                forecastItems: parsed.forecastItems,
+                forecastItems: groundedItems,
                 searchQueries: webSearchQueries,
-                groundingSources: sources.length > 0 ? sources : [
-                  { title: "IDP IELTS Vietnam Real Test Database", url: "https://ielts.idp.com/vietnam" },
-                  { title: "British Council Real Exam Pool", url: "https://takeielts.britishcouncil.org" }
-                ],
+                groundingSources: sources,
                 lastUpdated: new Date().toISOString(),
                 summaryOverviewVi: parsed.summaryOverviewVi || "Tổng hợp xu hướng đề thi thật IELTS và dự đoán quý được tìm kiếm tự động qua Google Search Grounding.",
                 detectedTrends: parsed.detectedTrends || ["Công nghệ AI & Việc làm", "Môi trường & Năng lượng xanh", "Đô thị hóa & Giáo dục số"],
@@ -4226,12 +4667,18 @@ LƯU Ý CỰC KỲ QUAN TRỌNG:
       } catch (geminiErr: any) {
         const isQuota = geminiErr?.status === "RESOURCE_EXHAUSTED" || geminiErr?.message?.includes("429") || geminiErr?.message?.includes("quota");
         if (isQuota) {
-          console.warn("[Google Search Grounding] Quota rate-limit reached. Seamlessly serving curated Real Exam Bank dataset.");
+          console.warn("[Google Search Grounding] Quota exhausted; returning unavailable without synthetic live data.");
         } else {
-          console.warn("[Google Search Grounding Notice]", geminiErr?.message?.slice(0, 120) || "Fallback to verified real exam bank");
+          console.warn("[Google Search Grounding Notice]", geminiErr?.message?.slice(0, 120) || "Search unavailable");
         }
       }
     }
+
+    return res.status(503).json({
+      error: "Google Search Grounding hiện không khả dụng. Không có dữ liệu live nào được tạo.",
+      stale: true,
+      lastUpdated: new Date().toISOString(),
+    });
 
     // Dynamic intelligent curated dataset covering all skills & councils
     const ALL_CURATED_FORECAST_BANK = [
@@ -4618,7 +5065,7 @@ app.post("/api/gemini/diagnostic-psychometrician", async (req, res) => {
     if (!ai) {
       return res.status(503).json({
         error:
-          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng điền API key vào file .env để chạy mô hình gemini-3.1-pro.",
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key trong Profile hoặc file .env.",
       });
     }
 
@@ -4742,13 +5189,7 @@ Please perform a rigorous psychometric analysis and output strict JSON according
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.deep.model, ...AI_TASK_PROFILES.deep.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -4762,7 +5203,6 @@ Please perform a rigorous psychometric analysis and output strict JSON according
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -4779,7 +5219,7 @@ Please perform a rigorous psychometric analysis and output strict JSON according
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro.",
+          "Không nhận được phản hồi hợp lệ từ Gemini.",
       });
     }
 
@@ -4797,7 +5237,7 @@ Please perform a rigorous psychometric analysis and output strict JSON according
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình chẩn đoán năng lực Psychometrician với gemini-3.1-pro.",
+        "Lỗi trong quá trình chẩn đoán năng lực Psychometrician với Gemini.",
     });
   }
 });
@@ -4922,13 +5362,7 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.balanced.model, ...AI_TASK_PROFILES.balanced.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -4942,7 +5376,6 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -4959,7 +5392,7 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro.",
+          "Không nhận được phản hồi hợp lệ từ Gemini.",
       });
     }
 
@@ -4970,7 +5403,7 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình nâng cấp câu văn với gemini-3.1-pro.",
+        "Lỗi trong quá trình nâng cấp câu văn với Gemini.",
     });
   }
 });
@@ -5072,13 +5505,7 @@ Please classify the distractor trap and output JSON matching the strict response
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.balanced.model, ...AI_TASK_PROFILES.balanced.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -5092,7 +5519,6 @@ Please classify the distractor trap and output JSON matching the strict response
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -5109,7 +5535,7 @@ Please classify the distractor trap and output JSON matching the strict response
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi phân tích bẫy câu hỏi.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi phân tích bẫy câu hỏi.",
       });
     }
 
@@ -5120,7 +5546,7 @@ Please classify the distractor trap and output JSON matching the strict response
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình phân tích bẫy câu hỏi với gemini-3.1-pro.",
+        "Lỗi trong quá trình phân tích bẫy câu hỏi với Gemini.",
     });
   }
 });
@@ -5264,13 +5690,7 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.deep.model, ...AI_TASK_PROFILES.deep.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -5284,7 +5704,6 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -5301,7 +5720,7 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi tham vấn Master Mentor Panel.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi tham vấn Master Mentor Panel.",
       });
     }
 
@@ -5317,7 +5736,7 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình tham vấn Hội đồng Cố vấn với gemini-3.1-pro.",
+        "Lỗi trong quá trình tham vấn Hội đồng Cố vấn với Gemini.",
     });
   }
 });
@@ -5421,13 +5840,7 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
       required: ["extractedErrors"],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.deep.model, ...AI_TASK_PROFILES.deep.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -5441,7 +5854,6 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -5458,7 +5870,7 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi bóc tách lỗi sai.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi bóc tách lỗi sai.",
       });
     }
 
@@ -5474,7 +5886,7 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình bóc tách lỗi sai & tạo Flashcard với gemini-3.1-pro.",
+        "Lỗi trong quá trình bóc tách lỗi sai và tạo Flashcard với Gemini.",
     });
   }
 });
@@ -5610,13 +6022,7 @@ Provide 4-5 high-yield IELTS collocation pairs with correct partner and 2 distra
 
     const promptText = `Generate 01 ${challengeType} speed drill on topic "${topic}" for target Band ${targetBand}. Output strictly according to responseSchema with timeLimitSeconds = 60.`;
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.instant.model, ...AI_TASK_PROFILES.instant.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -5630,7 +6036,6 @@ Provide 4-5 high-yield IELTS collocation pairs with correct partner and 2 distra
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.3,
           },
         });
         if (response && response.text) {
@@ -5647,7 +6052,7 @@ Provide 4-5 high-yield IELTS collocation pairs with correct partner and 2 distra
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi tạo Speed Drill.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi tạo Speed Drill.",
       });
     }
 
@@ -5730,13 +6135,7 @@ Evaluate accurately and return JSON matching responseSchema.`;
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.balanced.model, ...AI_TASK_PROFILES.balanced.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -5750,7 +6149,6 @@ Evaluate accurately and return JSON matching responseSchema.`;
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -5767,7 +6165,7 @@ Evaluate accurately and return JSON matching responseSchema.`;
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi chấm Speed Drill.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi chấm Speed Drill.",
       });
     }
 
@@ -5946,13 +6344,7 @@ Hãy thiết kế gói bài học 4 kỹ năng IELTS hoàn chỉnh và xuất JS
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.balanced.model, ...AI_TASK_PROFILES.balanced.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -5966,7 +6358,6 @@ Hãy thiết kế gói bài học 4 kỹ năng IELTS hoàn chỉnh và xuất JS
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.3,
           },
         });
         if (response && response.text) {
@@ -5983,7 +6374,7 @@ Hãy thiết kế gói bài học 4 kỹ năng IELTS hoàn chỉnh và xuất JS
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi thiết kế bài học 4 kỹ năng.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi thiết kế bài học 4 kỹ năng.",
       });
     }
 
@@ -6086,13 +6477,7 @@ Generate the complete flashcard content conforming strictly to responseSchema wi
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.instant.model, ...AI_TASK_PROFILES.instant.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -6106,7 +6491,6 @@ Generate the complete flashcard content conforming strictly to responseSchema wi
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -6123,7 +6507,7 @@ Generate the complete flashcard content conforming strictly to responseSchema wi
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi làm giàu thẻ từ vựng.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi làm giàu thẻ từ vựng.",
       });
     }
 
@@ -6135,7 +6519,7 @@ Generate the complete flashcard content conforming strictly to responseSchema wi
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình làm giàu thẻ từ vựng với gemini-3.1-pro.",
+        "Lỗi trong quá trình làm giàu thẻ từ vựng với Gemini.",
     });
   }
 });
@@ -6223,13 +6607,7 @@ Generate the complete lesson and ${count} exercises conforming strictly to respo
       ],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.balanced.model, ...AI_TASK_PROFILES.balanced.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -6243,7 +6621,6 @@ Generate the complete lesson and ${count} exercises conforming strictly to respo
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -6260,7 +6637,7 @@ Generate the complete lesson and ${count} exercises conforming strictly to respo
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi thiết kế bài học ngữ pháp.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi thiết kế bài học ngữ pháp.",
       });
     }
 
@@ -6272,7 +6649,7 @@ Generate the complete lesson and ${count} exercises conforming strictly to respo
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình thiết kế bài học ngữ pháp với gemini-3.1-pro.",
+        "Lỗi trong quá trình thiết kế bài học ngữ pháp với Gemini.",
     });
   }
 });
@@ -6284,13 +6661,16 @@ app.post("/api/media/transcribe-and-segment", async (req, res) => {
   try {
     const { audioBase64, mimeType = "audio/mp3", audioUrl, topicContext = "" } = req.body;
 
-    if (!audioBase64 && !audioUrl) {
+    if (!audioBase64) {
       return res.status(400).json({
-        error: "Vui lòng cung cấp file audio (audioBase64) hoặc đường dẫn audio (audioUrl) để phiên âm và phân đoạn câu.",
+        error: "Cần upload hoặc thu âm audio thật; URL metadata không được dùng để tự bịa transcript.",
       });
     }
 
-    const ai = getGeminiClient();
+    const estimatedBytes = Math.ceil(String(audioBase64).replace(/^data:[^;]+;base64,/, "").length * 0.75);
+    if (estimatedBytes > 14 * 1024 * 1024) return res.status(413).json({ error: "Audio vượt quá 14 MB. Hãy chọn đoạn tối đa 25 phút hoặc upload file nhỏ hơn." });
+
+    const ai = getGeminiClient(req);
     if (!ai) {
       return res.status(503).json({
         error: "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env.",
@@ -6358,13 +6738,7 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
       required: ["promptVersion", "segments", "detectedVocabulary"],
     };
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.audio_eval.model, ...AI_TASK_PROFILES.audio_eval.fallbacks];
 
     const contents: any[] = [];
     if (audioBase64) {
@@ -6390,7 +6764,6 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
-            temperature: 0.1,
           },
         });
         if (response && response.text) {
@@ -6407,7 +6780,7 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi phiên âm audio.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi phiên âm audio.",
       });
     }
 
@@ -6419,7 +6792,7 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
     return res.status(500).json({
       error:
         error.message ||
-        "Lỗi trong quá trình phiên âm và phân đoạn audio với gemini-3.1-pro.",
+        "Lỗi trong quá trình phiên âm và phân đoạn audio với Gemini.",
     });
   }
 });
@@ -6474,15 +6847,9 @@ Topic Domain: ${topicDomain}
 Difficulty Band: ${difficultyBand}
 </user_submission>
 
-Generate a complete, high-quality Cambridge-standard IELTS practice item with promptVersion = "practice-generator-v1".`;
+Generate a complete, high-quality IELTS-style practice item with promptVersion = "practice-generator-v1". Do not imply official endorsement or licensed Cambridge content.`;
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.balanced.model, ...AI_TASK_PROFILES.balanced.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -6495,7 +6862,6 @@ Generate a complete, high-quality Cambridge-standard IELTS practice item with pr
           config: {
             systemInstruction,
             responseMimeType: "application/json",
-            temperature: 0.2,
           },
         });
         if (response && response.text) {
@@ -6512,7 +6878,7 @@ Generate a complete, high-quality Cambridge-standard IELTS practice item with pr
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi sinh đề luyện tập.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi sinh đề luyện tập.",
       });
     }
 
@@ -6638,13 +7004,7 @@ ${submission}
 
 Evaluate the submission rigorously across the 4 independent criteria and output strictly structured JSON.`;
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+    const modelsToTry = [AI_TASK_PROFILES.deep.model, ...AI_TASK_PROFILES.deep.fallbacks];
 
     let responseText: string | null = null;
     let lastGeminiErr: any = null;
@@ -6657,7 +7017,6 @@ Evaluate the submission rigorously across the 4 independent criteria and output 
           config: {
             systemInstruction,
             responseMimeType: "application/json",
-            temperature: 0.1,
           },
         });
         if (response && response.text) {
@@ -6674,7 +7033,7 @@ Evaluate the submission rigorously across the 4 independent criteria and output 
       return res.status(500).json({
         error:
           lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi chấm bài thi.",
+          "Không nhận được phản hồi hợp lệ từ Gemini khi chấm bài thi.",
       });
     }
 
@@ -6740,11 +7099,11 @@ Evaluate the submission rigorously across the 4 independent criteria and output 
 // Mock Test Orchestrator & Assembler (mock-assembler-v1)
 // =========================================================================
 
-// 1. Assemble Full 4-Skill Mock Test Package
-app.post("/api/mock/assemble-full-package", async (req, res) => {
+// 1. Assemble a validated 4-skill package. The legacy route remains a facade.
+const handleCreateMockBuild: express.RequestHandler = async (req, res) => {
   try {
-    const { targetBand = 7.0, recentPromptIds = [], learnerProfile } = req.body;
-    const ai = getGeminiClient();
+    const { targetBand = 7.0, recentPromptIds = [], learnerProfile, sourceItem } = req.body;
+    const ai = getGeminiClient(req);
 
     if (!ai) {
       return res.status(503).json({
@@ -6753,65 +7112,106 @@ app.post("/api/mock/assemble-full-package", async (req, res) => {
     }
 
     const systemInstruction = `### SYSTEM ROLE
-Bạn là Mock Test Orchestrator — không tự chấm trực tiếp mà ĐIỀU PHỐI: lắp ráp 1 bộ đề thi đầy đủ 4 kỹ năng chuẩn Cambridge IELTS.
+Bạn là Mock Test Orchestrator. Hãy tạo một bộ đề AI-generated IELTS-style hoàn chỉnh để ứng dụng có thể mở trực tiếp trong phòng thi.
 
 ### QUY TẮC LẮP ĐỀ
-- Reading: 3 passage học thuật (độ khó tăng dần), tổng 40 câu, trộn tối thiểu 4 dạng câu hỏi khác nhau (Matching Headings, True/False/Not Given, Multiple Choice, Summary Completion, Matching Info).
-- Listening: 4 section độ khó tăng dần (Section 1 social dialogue, Section 2 monolog guide, Section 3 academic tutorial, Section 4 lecture), tổng 40 câu.
+- Reading: 3 passages có paragraphs và questions, tổng CHÍNH XÁC 40 câu đánh số 1-40.
+- Listening: 4 sections có audioScriptExcerpt và questions, tổng CHÍNH XÁC 40 câu đánh số 1-40. audioTranscript phải chứa toàn bộ script của 4 sections.
 - Writing: 1 Task 1 (Academic Chart/Graph/Process) + 1 Task 2 (Discussion/Opinion Essay), đảm bảo đề mới, không trùng lặp các đề gần đây: [${recentPromptIds.join(", ")}].
-- Speaking: 3 phần phỏng vấn trực tiếp chuẩn Giám khảo Dr. Jonathan Vance (Part 1 Daily/Study, Part 2 Cue Card 4 bullet points, Part 3 Abstract Discussion).
+- Speaking: đủ part1.questions, part2.cueCard và part3.questions.
 - Lệch trọng số bẫy từ vựng/ngữ pháp theo điểm yếu trong learnerProfile nếu có.
-- promptVersion phải luôn là "mock-assembler-v1".`;
+- Không dùng nhãn official/Cambridge Official; difficulty phải là "Diagnostic Standard" hoặc "Hard (Band 7.5 - 8.5+)".
+- Mỗi question phải có id, number, sectionIndex, type, prompt, correctAnswer và explanationVi.
+- Chỉ trả JSON object FullMockTestPackage, không markdown.`;
 
     const promptText = `LEARNER PROFILE:
 ${JSON.stringify(learnerProfile || { targetBand, weakestAxes: [], recentMistakeTags: [] }, null, 2)}
 
-Assemble a complete 4-skill Cambridge IELTS Mock Exam package conforming strictly to promptVersion = "mock-assembler-v1". Output valid JSON.`;
+SOURCE ITEM TO PRESERVE AND ADAPT (may be absent):
+${sourceItem ? JSON.stringify({ title: sourceItem.title, skill: sourceItem.skill, promptStatement: sourceItem.promptStatement, sourceUrl: sourceItem.groundingSourceUrl, evidenceType: sourceItem.evidenceType }, null, 2) : "None"}
+When a source item is present, preserve its prompt verbatim in the matching skill section, attach its URL in the package description, and generate only the missing exam structure around it.
 
-    const modelsToTry = [
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro",
-      "gemini-3.7-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-flash-latest",
-    ];
+Create the complete package now. Required root keys: id, code, title, subtitle, difficulty, description, estimatedMinutes, listening, reading, writing, speaking.`;
 
-    let responseText: string | null = null;
-    let lastGeminiErr: any = null;
+    const mockBuildId = `mock_build_${Date.now()}`;
+    let repairContext = "";
+    let fullPackage: any = null;
+    let validation = validateMockPackage(null);
+    let lastError = "";
 
-    for (const model of modelsToTry) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await callGeminiResiliently(ai, {
+        taskTier: "deep",
+        contents: `${promptText}${repairContext}`,
+        config: { systemInstruction, responseMimeType: "application/json" },
+        maxRetriesPerModel: 2,
+      });
+      if (!result.text) {
+        lastError = result.error || "ALL_MODELS_FAILED";
+        continue;
+      }
       try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: promptText,
-          config: {
-            systemInstruction,
-            responseMimeType: "application/json",
-            temperature: 0.2,
-          },
-        });
-        if (response && response.text) {
-          responseText = response.text;
-          break;
-        }
-      } catch (err: any) {
-        lastGeminiErr = err;
-        console.warn(`[Mock Assembler Engine] Model ${model} failed:`, err?.message || err);
+        fullPackage = JSON.parse(result.text);
+        fullPackage.id ||= mockBuildId;
+        fullPackage.code ||= `OMNI-AI-${Date.now().toString().slice(-6)}`;
+        fullPackage.title ||= "AI-generated IELTS-style mock";
+        fullPackage.subtitle ||= `Target Band ${targetBand}`;
+        validation = validateMockPackage(fullPackage);
+        if (validation.ready) break;
+        repairContext = `\n\nPrevious output failed validation: ${validation.errors.join(" ")} Return a fully repaired package, not a patch.`;
+      } catch (parseError: any) {
+        lastError = parseError?.message || "INVALID_JSON";
+        repairContext = "\n\nPrevious output was invalid JSON. Return one valid JSON object only.";
       }
     }
 
-    if (!responseText) {
-      return res.status(500).json({
-        error:
-          lastGeminiErr?.message ||
-          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi lắp ráp bộ đề thi thử.",
+    if (!fullPackage || !validation.ready) {
+      return res.status(422).json({
+        error: "Bộ đề chưa đạt quality gate nên không thể mở phòng thi.",
+        mockBuildId,
+        validation: { ...validation, repairAttempts: 2 },
+        detail: lastError || validation.errors.join(" "),
       });
     }
 
-    const parsed = JSON.parse(responseText);
-    parsed.promptVersion = "mock-assembler-v1";
-    parsed.testId = parsed.testId || `mock_ai_${Date.now()}`;
-    return res.json(parsed);
+    const assembled = {
+      promptVersion: "mock-assembler-v2",
+      testId: fullPackage.id,
+      testTitle: fullPackage.title,
+      mockBuildId,
+      validation: { ready: true, errors: [], repairAttempts: 0 },
+      fullPackage,
+      readingPackage: {
+        passages: fullPackage.reading.passages.map((passage: any, index: number) => ({
+          passageIndex: passage.passageNumber || index + 1,
+          title: passage.title,
+          text: passage.paragraphs.map((paragraph: any) => paragraph.text).join("\n\n"),
+          questionTypesIncluded: [...new Set(passage.questions.map((question: any) => question.type))],
+          questionCount: passage.questions.length,
+        })),
+        totalQuestions: 40,
+      },
+      listeningPackage: {
+        sections: fullPackage.listening.sections.map((section: any, index: number) => ({
+          sectionIndex: section.sectionNumber || index + 1,
+          scenario: section.context,
+          difficultyLevel: `Section ${index + 1}`,
+          questionCount: section.questions.length,
+        })),
+        totalQuestions: 40,
+      },
+      writingPackage: {
+        task1: { type: fullPackage.writing.task1.category, prompt: fullPackage.writing.task1.prompt, chartDescription: fullPackage.writing.task1.chartData?.description || "" },
+        task2: { category: fullPackage.writing.task2.category, prompt: fullPackage.writing.task2.prompt },
+      },
+      speakingPackage: {
+        examinerName: fullPackage.speaking.examinerName,
+        part1Topics: [fullPackage.speaking.part1.topic],
+        part2CueCard: { topic: fullPackage.speaking.part2.cueCard.topic, bulletPoints: fullPackage.speaking.part2.cueCard.bulletPoints },
+        part3AbstractThemes: [fullPackage.speaking.part3.topic],
+      },
+    };
+    return res.json(assembled);
   } catch (error: any) {
     console.error("Mock Assembler Error:", error);
     return res.status(500).json({
@@ -6820,6 +7220,256 @@ Assemble a complete 4-skill Cambridge IELTS Mock Exam package conforming strictl
         "Lỗi trong quá trình điều phối và lắp ráp bộ đề thi 4 kỹ năng.",
     });
   }
+};
+
+type ServerMockBuild = {
+  id: string;
+  createdAt: string;
+  input: any;
+  skills: Partial<Record<MockSkill, any>>;
+  status: 'draft' | 'building' | 'ready' | 'failed';
+  errors: Partial<Record<MockSkill, string[]>>;
+};
+
+const mockBuilds = new Map<string, ServerMockBuild>();
+
+const MOCK_SKILLS: MockSkill[] = ['listening', 'reading', 'writing', 'speaking'];
+
+function mockSkillInstructions(skill: MockSkill, build: ServerMockBuild): string {
+  const sourceItem = build.input.sourceItem;
+  const provenance = sourceItem
+    ? `Preserve this source prompt in the matching skill when relevant: ${JSON.stringify({
+        title: sourceItem.title,
+        skill: sourceItem.skill,
+        prompt: sourceItem.promptStatement,
+        sourceUrl: sourceItem.groundingSourceUrl,
+        evidenceType: sourceItem.evidenceType,
+      })}`
+    : 'There is no imported source item.';
+  const questionContract = `Every objective question must include id, number, sectionIndex, type, prompt, correctAnswer and explanationVi. Number questions continuously.`;
+
+  const contracts: Record<MockSkill, string> = {
+    listening: `Return only a Listening object with title, a complete audioTranscript, and exactly 4 sections. Across sections there must be exactly 40 questions numbered 1-40. Each section needs sectionNumber, title, context, audioScriptExcerpt, instructionsVi and questions. ${questionContract}`,
+    reading: `Return only a Reading object with title and exactly 3 passages. Across passages there must be exactly 40 questions numbered 1-40. Each passage needs passageNumber, title, subtitle, wordCount, paragraphs [{label,text}] and questions. ${questionContract}`,
+    writing: `Return only a Writing object with title, task1 and task2. task1 needs category, prompt, chartData when applicable, minWords=150 and suggestedMinutes=20. task2 needs category, prompt, minWords=250 and suggestedMinutes=40. Do not copy a copyrighted official test.` ,
+    speaking: `Return only a Speaking object with examinerName, examinerAvatar, part1, part2 and part3. part1 and part3 need topics and question arrays. part2.cueCard needs topic, prompt, bulletPoints, prepTimeSeconds=60 and speakTimeSeconds=120.`,
+  };
+
+  return `You create one section of an AI-generated IELTS-style mock for target band ${build.input.targetBand || 7}. ${contracts[skill]} ${provenance} Return one JSON object only, without markdown. Never label the content official or Cambridge official.`;
+}
+
+async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill: MockSkill) {
+  let repair = '';
+  let lastErrors: string[] = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const result = await callGeminiResiliently(ai, {
+      taskTier: 'deep',
+      contents: `${mockSkillInstructions(skill, build)}${repair}`,
+      config: { responseMimeType: 'application/json' },
+      maxRetriesPerModel: 2,
+    });
+    if (!result.text) {
+      lastErrors = [result.error || 'AI_UNAVAILABLE'];
+      continue;
+    }
+    try {
+      const section = JSON.parse(result.text);
+      const validation = validateMockSkill(skill, section);
+      if (validation.ready) return { section, validation, attempts: attempt + 1 };
+      lastErrors = validation.errors;
+      repair = ` Previous output failed validation: ${validation.errors.join(' ')} Return the entire corrected ${skill} object.`;
+    } catch (error: any) {
+      lastErrors = [error?.message || 'INVALID_JSON'];
+      repair = ' Previous output was invalid JSON. Return one complete valid JSON object.';
+    }
+  }
+  return { section: null, validation: { ready: false, errors: lastErrors, count: 0 }, attempts: 3 };
+}
+
+function assembleMockBuild(build: ServerMockBuild) {
+  const fullPackage: any = {
+    id: build.id,
+    code: `OMNI-AI-${build.id.slice(-6).toUpperCase()}`,
+    title: 'AI-generated IELTS-style mock',
+    subtitle: `Target Band ${build.input.targetBand || 7}`,
+    difficulty: Number(build.input.targetBand || 7) >= 7.5 ? 'Hard (Band 7.5 - 8.5+)' : 'Diagnostic Standard',
+    description: build.input.sourceItem?.groundingSourceUrl
+      ? `Derived practice with provenance: ${build.input.sourceItem.groundingSourceUrl}`
+      : 'Original AI-generated practice content. Not an official IELTS test.',
+    estimatedMinutes: 165,
+    ...build.skills,
+  };
+  const validation = validateMockPackage(fullPackage);
+  return { fullPackage, validation };
+}
+
+app.post('/api/mock/builds', (req, res) => {
+  const id = `mock_build_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+  const build: ServerMockBuild = {
+    id,
+    createdAt: new Date().toISOString(),
+    input: req.body || {},
+    skills: {},
+    status: 'draft',
+    errors: {},
+  };
+  mockBuilds.set(id, build);
+  return res.status(201).json({
+    id,
+    status: build.status,
+    skillStates: Object.fromEntries(MOCK_SKILLS.map(skill => [skill, 'pending'])),
+    createdAt: build.createdAt,
+  });
+});
+
+app.post('/api/mock/builds/:id/skills/:skill/generate', async (req, res) => {
+  const skill = req.params.skill as MockSkill;
+  const build = mockBuilds.get(req.params.id);
+  if (!build) return res.status(404).json({ error: 'Mock build không tồn tại hoặc đã hết phiên.' });
+  if (!MOCK_SKILLS.includes(skill)) return res.status(400).json({ error: 'Kỹ năng không hợp lệ.' });
+  const ai = getGeminiClient(req);
+  if (!ai) return res.status(503).json({ error: 'Chưa cấu hình Gemini API key.' });
+
+  build.status = 'building';
+  const generated = await generateMockSkill(ai, build, skill);
+  if (!generated.section) {
+    build.status = 'failed';
+    build.errors[skill] = generated.validation.errors;
+    return res.status(422).json({
+      error: `Không thể tạo phần ${skill} đạt quality gate.`,
+      skill,
+      validation: generated.validation,
+    });
+  }
+  build.skills[skill] = generated.section;
+  delete build.errors[skill];
+  return res.json({
+    mockBuildId: build.id,
+    skill,
+    state: 'ready',
+    data: generated.section,
+    validation: generated.validation,
+    attempts: generated.attempts,
+  });
+});
+
+app.post('/api/mock/builds/:id/finalize', (req, res) => {
+  const build = mockBuilds.get(req.params.id);
+  if (!build) return res.status(404).json({ error: 'Mock build không tồn tại hoặc đã hết phiên.' });
+  const { fullPackage, validation } = assembleMockBuild(build);
+  if (!validation.ready) {
+    build.status = 'failed';
+    return res.status(422).json({ error: 'Bộ đề chưa đạt quality gate.', validation });
+  }
+  build.status = 'ready';
+  return res.json({
+    promptVersion: 'mock-assembler-v3-staged',
+    testId: fullPackage.id,
+    testTitle: fullPackage.title,
+    mockBuildId: build.id,
+    validation: { ...validation, repairAttempts: 0 },
+    fullPackage,
+    readingPackage: {
+      passages: fullPackage.reading.passages.map((passage: any, index: number) => ({
+        passageIndex: passage.passageNumber || index + 1,
+        title: passage.title,
+        text: passage.paragraphs.map((paragraph: any) => paragraph.text).join('\n\n'),
+        questionTypesIncluded: [...new Set(passage.questions.map((question: any) => question.type))],
+        questionCount: passage.questions.length,
+      })),
+      totalQuestions: 40,
+    },
+    listeningPackage: {
+      sections: fullPackage.listening.sections.map((section: any, index: number) => ({
+        sectionIndex: section.sectionNumber || index + 1,
+        scenario: section.context,
+        difficultyLevel: `Section ${index + 1}`,
+        questionCount: section.questions.length,
+      })),
+      totalQuestions: 40,
+    },
+    writingPackage: {
+      task1: { type: fullPackage.writing.task1.category, prompt: fullPackage.writing.task1.prompt, chartDescription: fullPackage.writing.task1.chartData?.description || '' },
+      task2: { category: fullPackage.writing.task2.category, prompt: fullPackage.writing.task2.prompt },
+    },
+    speakingPackage: {
+      examinerName: fullPackage.speaking.examinerName,
+      part1Topics: [fullPackage.speaking.part1.topic],
+      part2CueCard: { topic: fullPackage.speaking.part2.cueCard.topic, bulletPoints: fullPackage.speaking.part2.cueCard.bulletPoints },
+      part3AbstractThemes: [fullPackage.speaking.part3.topic],
+    },
+  });
+});
+
+app.post("/api/mock/assemble-full-package", handleCreateMockBuild);
+
+// Public-beta canonical endpoint facades and persistence contracts.
+app.post('/api/forecast/refresh', (_req, res) => res.redirect(307, '/api/gemini/forecast-grounding'));
+app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/speaking-live-audio-evaluation'));
+
+app.post('/api/live-hub/items/:id/practice', (req, res) => {
+  const item = req.body?.item;
+  if (!item || String(item.id || req.params.id) !== req.params.id) {
+    return res.status(400).json({ error: 'Thiếu Live Hub item hợp lệ.' });
+  }
+  return res.status(201).json({
+    id: `practice_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+    kind: 'derived_practice',
+    skill: item.skill,
+    prompt: item.promptStatement,
+    provenance: {
+      sourceItemId: req.params.id,
+      evidenceType: item.evidenceType || 'forecast',
+      sourceUrl: item.groundingSourceUrl || null,
+      retrievedAt: item.retrievedAt || null,
+    },
+  });
+});
+
+app.post('/api/live-hub/items/:id/mock-section', (req, res) => {
+  const item = req.body?.item;
+  if (!item || String(item.id || req.params.id) !== req.params.id) {
+    return res.status(400).json({ error: 'Thiếu Live Hub item hợp lệ.' });
+  }
+  return res.status(201).json({
+    id: `mock_section_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+    kind: 'derived_mock_section',
+    skill: item.skill,
+    sourceItem: item,
+    requiresPreview: !['verified_report', 'reported_recall'].includes(item.evidenceType),
+    provenance: { sourceItemId: req.params.id, sourceUrl: item.groundingSourceUrl || null },
+  });
+});
+
+app.patch('/api/media/transcripts/:id', (req, res) => {
+  const segments = req.body?.segments;
+  if (!Array.isArray(segments) || segments.some((segment: any) =>
+    typeof segment?.text !== 'string' || !Number.isFinite(segment?.start) || !Number.isFinite(segment?.end) || segment.end < segment.start
+  )) {
+    return res.status(400).json({ error: 'Transcript segments hoặc timestamps không hợp lệ.' });
+  }
+  return res.json({
+    id: req.params.id,
+    version: req.body?.version || `user_${Date.now()}`,
+    normalizerVersion: req.body?.normalizerVersion || 'user-edited-v1',
+    segments,
+    updatedAt: new Date().toISOString(),
+  });
+});
+
+app.patch('/api/mock-attempts/:id/annotations', (req, res) => {
+  const annotations = req.body?.annotations;
+  const invalid = !Array.isArray(annotations) || annotations.some((annotation: any) =>
+    annotation?.attemptId !== req.params.id
+    || typeof annotation?.passageId !== 'string'
+    || typeof annotation?.paragraphId !== 'string'
+    || !Number.isInteger(annotation?.startOffset)
+    || !Number.isInteger(annotation?.endOffset)
+    || annotation.startOffset < 0
+    || annotation.endOffset <= annotation.startOffset
+  );
+  if (invalid) return res.status(400).json({ error: 'Annotation range không hợp lệ.' });
+  return res.json({ attemptId: req.params.id, annotations, updatedAt: new Date().toISOString() });
 });
 
 // 2. Synthesize Final Mock Exam Report
@@ -6871,11 +7521,10 @@ app.post("/api/mock/synthesize-final-report", async (req, res) => {
 Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] }`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro",
+          model: AI_TASK_PROFILES.deep.model,
           contents: synthPrompt,
           config: {
             responseMimeType: "application/json",
-            temperature: 0.2,
           },
         });
 

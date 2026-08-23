@@ -23,9 +23,9 @@ import {
 } from 'lucide-react';
 import { MediaSession, MediaTranscriptSegment, MediaShadowingEvaluation } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { playTextToSpeech } from '../../services/aiTutor';
 import { evaluateShadowingAttempt } from '../../services/mediaService';
 import { XP_REWARDS } from '../../services/gamification';
+import { OriginalMediaPlayer, OriginalMediaPlayerHandle } from './OriginalMediaPlayer';
 
 interface ShadowingStudioProps {
   session: MediaSession;
@@ -69,6 +69,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
   const userAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const speechRecognitionRef = useRef<any>(null);
   const recognizedTextRef = useRef<string>('');
+  const originalPlayerRef = useRef<OriginalMediaPlayerHandle | null>(null);
 
   // Clean up on unmount or segment change
   useEffect(() => {
@@ -87,46 +88,11 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
     if (!segment) return;
     setIsPlayingNative(true);
     setCurrentLoop(1);
-
-    const playOnce = (remainingLoops: number) => {
-      // Use Web Speech API or our TTS service
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(segment.text);
-        utterance.rate = playbackSpeed;
-        utterance.lang = 'en-US';
-
-        utterance.onend = () => {
-          if (remainingLoops > 1) {
-            setTimeout(() => {
-              setCurrentLoop((prev) => prev + 1);
-              playOnce(remainingLoops - 1);
-            }, 600);
-          } else {
-            setIsPlayingNative(false);
-            setCurrentLoop(0);
-          }
-        };
-
-        utterance.onerror = () => {
-          setIsPlayingNative(false);
-          setCurrentLoop(0);
-        };
-
-        window.speechSynthesis.speak(utterance);
-      } else {
-        playTextToSpeech(segment.text);
-        setTimeout(() => setIsPlayingNative(false), 2500);
-      }
-    };
-
-    playOnce(loopCount);
+    originalPlayerRef.current?.playSegment(segment.start, segment.end, playbackSpeed, loopCount);
   };
 
   const handleStopNativeAudio = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    originalPlayerRef.current?.stop();
     setIsPlayingNative(false);
     setCurrentLoop(0);
   };
@@ -195,22 +161,9 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
       }, 1000);
     } catch (err: any) {
       console.warn('Microphone permission denied or not supported:', err);
-      // Fallback simulation if mic is blocked in some iframe sandbox
-      simulateRecording();
+      setEvaluationError('Không truy cập được microphone. Điểm phát âm và ngữ điệu đang unavailable; hãy cấp quyền mic rồi thử lại.');
+      setIsRecording(false);
     }
-  };
-
-  // Fallback simulation when mic permission is blocked
-  const simulateRecording = () => {
-    setIsRecording(true);
-    setRecordingSeconds(0);
-    recordTimerRef.current = setInterval(() => {
-      setRecordingSeconds((prev) => prev + 1);
-    }, 1000);
-
-    setTimeout(() => {
-      stopRecording();
-    }, 3500);
   };
 
   const stopRecording = () => {
@@ -222,10 +175,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
-    } else {
-      // Fallback evaluation
-      handleEvaluateRecording(null, recognizedTextRef.current || segment?.text || '');
-    }
+    } else setEvaluationError('Không có audio thật để chấm.');
 
     setIsRecording(false);
     clearInterval(recordTimerRef.current);
@@ -329,6 +279,14 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
   return (
     <div className="space-y-5">
+      <OriginalMediaPlayer
+        ref={originalPlayerRef}
+        session={session}
+        onPlaybackEnded={() => {
+          setIsPlayingNative(false);
+          setCurrentLoop(0);
+        }}
+      />
       {/* Active Segment Studio Card */}
       <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 shadow-sm space-y-6">
         {/* Top Control Bar */}

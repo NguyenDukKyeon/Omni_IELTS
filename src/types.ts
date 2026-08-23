@@ -552,6 +552,10 @@ export interface MistakeEntry {
   tags: string[];
   suggestedGrammarTopicId?: string;
   difficulty?: string;
+  acceptedAnswers?: string[];
+  lifecycle?: 'active' | 'due' | 'mastered' | 'archived' | 'relapsed';
+  taxonomyKey?: string;
+  relapseCount?: number;
 }
 
 export interface MediaShadowingEvaluation {
@@ -645,6 +649,11 @@ export interface ExamPassageNote {
   noteText: string;
   color?: string;
   createdAt: string;
+  mockAttemptId?: string;
+  passageId?: string;
+  paragraphId?: string;
+  startOffset?: number;
+  endOffset?: number;
 }
 
 export interface MockQuestionReview {
@@ -749,7 +758,7 @@ export interface FullMockTestPackage {
   code: string; // e.g. "CAM-19-ACAD-01"
   title: string;
   subtitle: string;
-  difficulty: 'Cambridge Official Standard' | 'Hard (Band 7.5 - 8.5+)' | 'Diagnostic Standard';
+  difficulty: 'IELTS-style Standard' | 'Hard (Band 7.5 - 8.5+)' | 'Diagnostic Standard';
   description: string;
   estimatedMinutes: number; // ~170 mins
   // 1. Listening
@@ -1007,6 +1016,9 @@ export interface AITutorMessage {
   timestamp: string;
   screenContext?: string;
   suggestedFollowUps?: string[];
+  citations?: ClaimCitation[];
+  retrievedAt?: string;
+  researchMode?: boolean;
 }
 
 // ==========================================
@@ -1160,7 +1172,7 @@ export interface RealExamForecastItem {
   cueCardPoints?: string[]; // For Speaking Part 2
   trendStatus: 'recent_real_exam' | 'quarter_forecast' | 'hot_trend' | 'high_frequency';
   trendBadge: string; // e.g. "🔥 Đề Thi Thật Vừa Ra", "⭐ Trọng Tâm Quý", "📈 Tần Suất Cao"
-  frequencyScore: number; // 0 - 100
+  frequencyScore?: number; // only present when a cited source supports frequency
   outlinePEEL: RealExamPEELOutline;
   topicVocabularyC1C2: RealExamVocabularyItem[];
   band8ModelAnswer: string;
@@ -1169,6 +1181,8 @@ export interface RealExamForecastItem {
   groundingSourceTitle?: string;
   groundingSourceUrl?: string;
   isCustomGenerated?: boolean;
+  evidenceType?: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice';
+  citations?: ClaimCitation[];
 }
 
 export interface ForecastGroundingResponse {
@@ -1178,6 +1192,8 @@ export interface ForecastGroundingResponse {
   lastUpdated: string;
   summaryOverviewVi: string;
   detectedTrends?: string[];
+  stale?: boolean;
+  error?: string;
 }
 
 // ==========================================
@@ -1322,6 +1338,7 @@ export interface SpeakingLiveEvaluationReport {
   detectedErrors: StandardErrorObject[];
   overallSpeakingBand: number;
   examinerSummaryVi: string;
+  telemetry?: SpeakingTelemetry;
 }
 
 export interface SpeakingLiveAudioScoringInput {
@@ -1337,6 +1354,7 @@ export interface SpeakingLiveAudioScoringInput {
   }>;
   targetBand?: number;
   totalDurationSeconds?: number;
+  speechSegments?: Array<{ start: number; end: number }> | null;
 }
 
 // ==========================================
@@ -1754,6 +1772,7 @@ export interface MockAssemblerInput {
   targetBand?: number;
   recentPromptIds?: string[];
   learnerProfile?: LearnerProfileWeighting;
+  sourceItem?: RealExamForecastItem;
 }
 
 export interface MockAssemblerPackage {
@@ -1799,6 +1818,107 @@ export interface MockAssemblerPackage {
     };
     part3AbstractThemes: string[];
   };
+  fullPackage?: FullMockTestPackage;
+  validation?: MockValidationReport;
+  mockBuildId?: string;
+}
+
+export interface AiTaskProfile {
+  tier: 'instant' | 'balanced' | 'deep' | 'grounded' | 'audio_eval' | 'tts';
+  model: string;
+  thinkingLevel?: 'low' | 'high';
+  tools: Array<'googleSearch'>;
+  timeoutMs: number;
+  fallbackModels: string[];
+  validator?: string;
+}
+
+export interface ClaimCitation {
+  claimId: string;
+  title: string;
+  url: string;
+  snippet?: string;
+}
+
+export interface GroundedResponse<T> {
+  data: T;
+  citations: ClaimCitation[];
+  searchQueries: string[];
+  retrievedAt: string;
+  confidence: 'high' | 'medium' | 'low';
+  stale?: boolean;
+}
+
+export interface VoiceDescriptor {
+  provider: 'browser' | 'gemini';
+  id: string;
+  name: string;
+  locale: string;
+  accent?: 'British' | 'Australian' | 'American' | 'International';
+  style?: string;
+  gender?: 'female' | 'male' | 'neutral';
+  previewSupported: boolean;
+  localService?: boolean;
+}
+
+export interface TtsRequest {
+  text: string;
+  voiceId: string;
+  style?: string;
+  pace?: number;
+  speakers?: Array<{ name: string; voiceId: string }>;
+}
+
+export interface TtsArtifact {
+  provider: 'gemini';
+  contentHash: string;
+  mimeType: string;
+  audioBase64: string;
+  durationSeconds?: number;
+  validation: { valid: boolean; warnings: string[] };
+}
+
+export interface MockValidationReport {
+  ready: boolean;
+  errors: string[];
+  repairAttempts: number;
+}
+
+export interface MockBuild {
+  id: string;
+  status: 'draft' | 'generating' | 'validating' | 'ready' | 'failed';
+  skills: Record<'listening' | 'reading' | 'writing' | 'speaking', {
+    status: 'pending' | 'generating' | 'ready' | 'failed';
+    error?: string;
+  }>;
+  validation: MockValidationReport;
+  package?: FullMockTestPackage;
+  createdAt: string;
+}
+
+export interface ReadingAnnotation {
+  id: string;
+  mockAttemptId: string;
+  passageId: string;
+  paragraphId: string;
+  startOffset: number;
+  endOffset: number;
+  color: 'yellow' | 'green' | 'blue';
+  note?: string;
+  createdAt: string;
+}
+
+export interface SpeakingTelemetry {
+  rawWpm: number;
+  articulationRate: number | null;
+  fillerCount: number;
+  fillerRatePer100Words: number;
+  silentPauses: Array<{ start: number; end: number; duration: number }> | null;
+  averagePauseDuration: number | null;
+  longPauses: number | null;
+  speechRatio: number | null;
+  acousticStatus: 'measured' | 'unavailable';
+  vadVersion: string | null;
 }
 
 export interface MockSynthesizerInput {

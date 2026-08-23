@@ -21,6 +21,8 @@ import {
   BookOpen
 } from 'lucide-react';
 import { FullMockTestPackage, ExamColorScheme } from '../../types';
+import { GEMINI_VOICES, playVoiceText } from '../../services/voiceService';
+import { diffWords } from '../../lib/wordDiff';
 
 interface ListeningExamViewProps {
   testPackage: FullMockTestPackage;
@@ -53,6 +55,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [audioDurationSeconds, setAudioDurationSeconds] = useState(180); // ~3 mins per section
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const audioStopRef = useRef<(() => void) | null>(null);
 
   // Dictation Mode State & A-B Loop
   const [dictationSegmentIndex, setDictationSegmentIndex] = useState(0);
@@ -96,9 +99,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
           setAudioProgress(progress);
           if (progress >= 100) {
             setIsPlayingAudio(false);
-            if ('speechSynthesis' in window) {
-              window.speechSynthesis.cancel();
-            }
+            audioStopRef.current?.();
           }
           return next;
         });
@@ -107,28 +108,21 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
     return () => clearInterval(interval);
   }, [isPlayingAudio, audioDurationSeconds, playbackSpeed]);
 
-  // Handle SpeechSynthesis audio playback
+  // Generated mocks prefer cached Gemini TTS and fall back to a browser voice.
   const playSpeechAudio = (textToPlay: string, onEndCallback?: () => void) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(textToPlay);
-    utter.lang = 'en-GB'; // British English for authentic IELTS
-    utter.rate = playbackSpeed * 0.95;
-    utter.onend = () => {
-      if (onEndCallback) {
-        onEndCallback();
-      } else if (!isAbLooping) {
-        setIsPlayingAudio(false);
-      }
-    };
-    window.speechSynthesis.speak(utter);
+    audioStopRef.current?.();
+    void playVoiceText(textToPlay, {
+      descriptor: GEMINI_VOICES.find((voice) => voice.id === 'Kore'),
+      useCase: 'narrator',
+      rate: playbackSpeed * 0.95,
+      style: 'Clear British IELTS listening narrator; preserve every word exactly',
+      onEnd: () => onEndCallback ? onEndCallback() : !isAbLooping && setIsPlayingAudio(false),
+    }).then((stop) => { audioStopRef.current = stop; });
   };
 
   const toggleAudio = () => {
     if (isPlayingAudio) {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
+      audioStopRef.current?.();
       setIsPlayingAudio(false);
     } else {
       setIsPlayingAudio(true);
@@ -173,26 +167,14 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
   };
 
   const stopAllAudio = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    audioStopRef.current?.();
     setIsPlayingAudio(false);
   };
 
   // Check Dictation Words Accuracy
   const handleCheckDictation = () => {
     if (!dictationInput.trim()) return;
-    const targetWords = currentDictationTarget.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
-    const userWords = dictationInput.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
-
-    let matchCount = 0;
-    targetWords.forEach((tw, idx) => {
-      if (userWords[idx] === tw) {
-        matchCount++;
-      }
-    });
-
-    const acc = Math.round((matchCount / targetWords.length) * 100);
+    const acc = diffWords(currentDictationTarget, dictationInput).accuracy;
     setDictationAccuracy(acc);
     setDictationChecked(true);
   };

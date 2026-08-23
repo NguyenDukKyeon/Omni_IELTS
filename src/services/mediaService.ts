@@ -27,10 +27,10 @@ export async function processYouTubeUrl(
   url: string,
   targetBand: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.0+' = 'Band 7.0-8.0'
 ): Promise<MediaSession> {
-  const response = await fetch('/api/media/process-youtube', {
+  const response = await fetch('/api/media/youtube/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, targetBand }),
+    body: JSON.stringify({ url, level: targetBand }),
   });
 
   if (!response.ok) {

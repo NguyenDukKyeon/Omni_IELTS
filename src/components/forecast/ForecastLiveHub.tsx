@@ -35,32 +35,23 @@ import {
   ForecastGroundingResponse,
   VocabCard,
 } from '../../types';
-import { INITIAL_REAL_EXAM_FORECAST_DATA } from '../../data/forecastExamData';
 import { fetchRealExamForecastApi, playTextToSpeech } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
 
 interface ForecastLiveHubProps {
   onSelectPromptForPractice?: (item: RealExamForecastItem) => void;
+  usageContext?: 'practice' | 'mock';
 }
 
-export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPromptForPractice }) => {
+export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPromptForPractice, usageContext = 'practice' }) => {
   const { awardXP, addVocabCard, openAITutorWithPrompt, setActiveModule } = useApp();
 
-  const [forecastItems, setForecastItems] = useState<RealExamForecastItem[]>(
-    INITIAL_REAL_EXAM_FORECAST_DATA
-  );
+  const [forecastItems, setForecastItems] = useState<RealExamForecastItem[]>([]);
   const [isGroundingLoading, setIsGroundingLoading] = useState<boolean>(false);
-  const [groundingSources, setGroundingSources] = useState<Array<{ title: string; url: string }>>([
-    { title: 'IDP Vietnam Real Exam August 2026 Archive', url: 'https://ielts.idp.com/vietnam' },
-    { title: 'British Council TakeIELTS Real Exam Pool', url: 'https://takeielts.britishcouncil.org' },
-    { title: 'Cambridge Assessment English Real Test Updates', url: 'https://www.cambridgeenglish.org' },
-  ]);
-  const [activeSearchQueries, setActiveSearchQueries] = useState<string[]>([
-    'IELTS real exam Speaking Writing August 2026 IDP British Council Vietnam',
-  ]);
-  const [summaryOverview, setSummaryOverview] = useState<string>(
-    'Xu hướng đề thi thật tháng 8/2026 và dự đoán Quý 3 tập trung cao vào các chủ đề Công nghệ AI & Thay đổi thị trường lao động, Thuế phát thải Carbon, Năng lượng tái tạo và Quyền riêng tư số.'
-  );
+  const [groundingSources, setGroundingSources] = useState<Array<{ title: string; url: string }>>([]);
+  const [activeSearchQueries, setActiveSearchQueries] = useState<string[]>([]);
+  const [summaryOverview, setSummaryOverview] = useState<string>('Chưa có snapshot đã xác minh. Bấm “Cập nhật” để dùng Google Search Grounding.');
+  const [hubError, setHubError] = useState<string | null>(null);
 
   // Filters
   const [selectedSkill, setSelectedSkill] = useState<string>('all');
@@ -70,12 +61,10 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   const [customSearchQuery, setCustomSearchQuery] = useState<string>('');
 
   // UI state
-  const [expandedItemId, setExpandedItemId] = useState<string>(INITIAL_REAL_EXAM_FORECAST_DATA[0].id);
+  const [expandedItemId, setExpandedItemId] = useState<string>('');
   const [activeTabPerItem, setActiveTabPerItem] = useState<{
     [itemId: string]: 'peel' | 'vocab' | 'model' | 'tips';
-  }>({
-    [INITIAL_REAL_EXAM_FORECAST_DATA[0].id]: 'peel',
-  });
+  }>({});
   const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const [addedVocabPhrases, setAddedVocabPhrases] = useState<{ [key: string]: boolean }>({});
   const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null);
@@ -93,6 +82,7 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   const handleTriggerGroundingSearch = async (overrideQuery?: string) => {
     const queryToUse = overrideQuery !== undefined ? overrideQuery : customSearchQuery;
     setIsGroundingLoading(true);
+    setHubError(null);
     try {
       const response: ForecastGroundingResponse = await fetchRealExamForecastApi({
         skill: selectedSkill,
@@ -120,8 +110,9 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
         setSummaryOverview(response.summaryOverviewVi);
       }
       awardXP(25, 'Tra cứu đề thi thật qua Google Search Grounding');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Grounding fetch error:', err);
+      setHubError(err?.message || 'Search Grounding không khả dụng; snapshot hiện tại được giữ nguyên.');
     } finally {
       setIsGroundingLoading(false);
     }
@@ -290,7 +281,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
               </span>
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2.5 py-0.5 rounded-full">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                IDP & British Council Real Exam Bank
+                Evidence-aware source hub
               </span>
             </div>
 
@@ -309,9 +300,15 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
               IELTS Real Exam & Forecast Live Hub
             </h1>
             <p className="text-xs md:text-sm text-slate-300 max-w-3xl mt-1 leading-relaxed">
-              Hệ thống kết nối trực tiếp với <strong>Google Search Grounding</strong> để tự động tổng hợp các đề thi thật vừa xuất hiện tại các hội đồng IDP và British Council (Việt Nam & Quốc tế). Tích hợp sẵn <strong>Dàn ý PEEL</strong>, <strong>Từ vựng C1/C2</strong> và <strong>Bài mẫu Band 8.0+</strong> chuẩn khảo thí.
+              Google Search Grounding tổng hợp các bản báo cáo, recall và forecast; từng item chỉ được gắn nhãn “verified” khi có URL trực tiếp hỗ trợ claim. Nội dung luyện tập phái sinh luôn được ghi nguồn.
             </p>
           </div>
+
+          {hubError && (
+            <div role="alert" className="rounded-xl border border-amber-400/40 bg-amber-950/40 px-4 py-3 text-xs text-amber-100">
+              {hubError} Dữ liệu live không được thay bằng đề mô phỏng.
+            </div>
+          )}
 
           {/* AI Grounding Summary Overview */}
           <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/10 text-xs text-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
@@ -542,13 +539,13 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                         Độ phổ biến:
                       </span>
                       <div className="w-16 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div
+                        {typeof item.frequencyScore === 'number' && <div
                           className="h-full bg-gradient-to-r from-amber-500 to-rose-500 rounded-full"
                           style={{ width: `${item.frequencyScore}%` }}
-                        />
+                        />}
                       </div>
                       <span className="text-[11px] font-black text-slate-800 dark:text-slate-200">
-                        {item.frequencyScore}%
+                        {typeof item.frequencyScore === 'number' ? `${item.frequencyScore}%` : 'Chưa có số liệu tần suất'}
                       </span>
                     </div>
                   </div>
@@ -608,7 +605,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                         className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 active:scale-95 transition-all"
                       >
                         <Zap className="w-3.5 h-3.5 text-amber-300" />
-                        <span>Luyện tập đề này ngay</span>
+                        <span>{usageContext === 'mock' ? 'Dùng làm section trong Mock' : 'Luyện tập đề này ngay'}</span>
                         <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
                       </button>
 

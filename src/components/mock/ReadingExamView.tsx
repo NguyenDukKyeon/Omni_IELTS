@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, MouseEvent as ReactMouseEvent } from 'react';
+import { splitTextByAnnotations } from '../../lib/readingAnnotations';
 import {
   BookOpen,
   Highlighter,
@@ -21,6 +22,7 @@ import {
 import { FullMockTestPackage, ExamColorScheme, ExamPassageNote } from '../../types';
 
 interface ReadingExamViewProps {
+  mockAttemptId: string;
   testPackage: FullMockTestPackage;
   currentQuestionNumber: number;
   userAnswers: Record<number, string>;
@@ -32,6 +34,7 @@ interface ReadingExamViewProps {
 }
 
 export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
+  mockAttemptId,
   testPackage,
   currentQuestionNumber,
   userAnswers,
@@ -47,11 +50,11 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Highlighting state: Array of objects { text: string, color: 'yellow' | 'green' }
-  const [highlights, setHighlights] = useState<Array<{ id: string; text: string; color: 'yellow' | 'green'; passageIndex: number }>>([]);
+  const [highlights, setHighlights] = useState<Array<{ id: string; color: 'yellow' | 'green'; passageIndex: number; passageId: string; paragraphId: string; startOffset: number; endOffset: number }>>([]);
   
   // Sticky Notes state
   const [notes, setNotes] = useState<ExamPassageNote[]>([]);
-  const [activeNoteModal, setActiveNoteModal] = useState<{ show: boolean; selectedText: string; paragraphLabel?: string } | null>(null);
+  const [activeNoteModal, setActiveNoteModal] = useState<{ show: boolean; selectedText: string; paragraphLabel?: string; startOffset: number; endOffset: number } | null>(null);
   const [newNoteInput, setNewNoteInput] = useState<string>('');
   const [showNotesDrawer, setShowNotesDrawer] = useState<boolean>(false);
 
@@ -62,10 +65,31 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
     y: number;
     selectedText: string;
     paragraphLabel?: string;
+    startOffset: number;
+    endOffset: number;
   } | null>(null);
 
   const passages = testPackage.reading.passages;
   const currentPassage = passages[activePassageIndex] || passages[0];
+  const annotationStorageKey = `omni_reading_annotations_${mockAttemptId}`;
+  const [annotationLoadedKey, setAnnotationLoadedKey] = useState<string>('');
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(annotationStorageKey) || '{}');
+      setHighlights(Array.isArray(saved.highlights) ? saved.highlights : []);
+      setNotes(Array.isArray(saved.notes) ? saved.notes : []);
+    } catch {
+      setHighlights([]);
+      setNotes([]);
+    }
+    setAnnotationLoadedKey(annotationStorageKey);
+  }, [annotationStorageKey]);
+
+  useEffect(() => {
+    if (annotationLoadedKey !== annotationStorageKey) return;
+    localStorage.setItem(annotationStorageKey, JSON.stringify({ highlights, notes }));
+  }, [annotationLoadedKey, annotationStorageKey, highlights, notes]);
 
   // Font typography scale
   const fontClass =
@@ -103,13 +127,22 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
   const handlePassageMouseUp = (e: ReactMouseEvent<HTMLDivElement>, paragraphLabel?: string) => {
     const selection = window.getSelection();
     const text = selection?.toString().trim();
-    if (text && text.length > 2) {
+    const paragraph = e.currentTarget.querySelector<HTMLElement>('[data-passage-paragraph]');
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (text && text.length > 2 && paragraph && range && paragraph.contains(range.commonAncestorContainer)) {
+      const beforeStart = document.createRange();
+      beforeStart.selectNodeContents(paragraph);
+      beforeStart.setEnd(range.startContainer, range.startOffset);
+      const startOffset = beforeStart.toString().length;
+      const selectedLength = range.toString().length;
       setSelectionPopup({
         show: true,
         x: Math.min(e.clientX, window.innerWidth - 240),
         y: Math.max(e.clientY - 45, 60),
         selectedText: text,
         paragraphLabel,
+        startOffset,
+        endOffset: startOffset + selectedLength,
       });
     } else {
       // Delay clear slightly to allow button click
@@ -126,11 +159,14 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
     if (!selectionPopup?.selectedText) return;
     const newHighlight = {
       id: `hl_${Date.now()}`,
-      text: selectionPopup.selectedText,
       color,
       passageIndex: activePassageIndex,
+      passageId: `${testPackage.id}:passage:${currentPassage.passageNumber}`,
+      paragraphId: selectionPopup.paragraphLabel || '',
+      startOffset: selectionPopup.startOffset,
+      endOffset: selectionPopup.endOffset,
     };
-    setHighlights((prev) => [...prev.filter((h) => h.text !== selectionPopup.selectedText), newHighlight]);
+    setHighlights((prev) => [...prev, newHighlight]);
     setSelectionPopup(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -138,7 +174,12 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
   // Remove Highlight
   const handleRemoveHighlight = () => {
     if (!selectionPopup?.selectedText) return;
-    setHighlights((prev) => prev.filter((h) => !h.text.includes(selectionPopup.selectedText)));
+    setHighlights((prev) => prev.filter((highlight) => !(
+      highlight.passageIndex === activePassageIndex
+      && highlight.paragraphId === selectionPopup.paragraphLabel
+      && highlight.startOffset < selectionPopup.endOffset
+      && highlight.endOffset > selectionPopup.startOffset
+    )));
     setSelectionPopup(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -150,6 +191,8 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
       show: true,
       selectedText: selectionPopup.selectedText,
       paragraphLabel: selectionPopup.paragraphLabel,
+      startOffset: selectionPopup.startOffset,
+      endOffset: selectionPopup.endOffset,
     });
     setNewNoteInput('');
     setSelectionPopup(null);
@@ -166,6 +209,11 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
       noteText: newNoteInput.trim(),
       color: '#fef08a',
       createdAt: new Date().toLocaleTimeString(),
+      mockAttemptId,
+      passageId: `${testPackage.id}:passage:${currentPassage.passageNumber}`,
+      paragraphId: activeNoteModal.paragraphLabel,
+      startOffset: activeNoteModal.startOffset,
+      endOffset: activeNoteModal.endOffset,
     };
     setNotes((prev) => [...prev, newNote]);
     setActiveNoteModal(null);
@@ -202,38 +250,15 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
 
   // Helper to render paragraph with highlighted substrings
   const renderParagraphWithHighlights = (paraText: string, paraLabel: string) => {
-    const currentPassageHighlights = highlights.filter((h) => h.passageIndex === activePassageIndex);
+    const currentPassageHighlights = highlights.filter((h) => h.passageIndex === activePassageIndex && h.paragraphId === paraLabel);
     if (currentPassageHighlights.length === 0) {
       return paraText;
     }
 
-    let parts: Array<{ text: string; isHighlighted: boolean; color?: string }> = [{ text: paraText, isHighlighted: false }];
-
-    currentPassageHighlights.forEach((hl) => {
-      const nextParts: typeof parts = [];
-      parts.forEach((part) => {
-        if (part.isHighlighted) {
-          nextParts.push(part);
-          return;
-        }
-        const index = part.text.indexOf(hl.text);
-        if (index === -1) {
-          nextParts.push(part);
-        } else {
-          if (index > 0) {
-            nextParts.push({ text: part.text.substring(0, index), isHighlighted: false });
-          }
-          nextParts.push({ text: hl.text, isHighlighted: true, color: hl.color });
-          if (index + hl.text.length < part.text.length) {
-            nextParts.push({ text: part.text.substring(index + hl.text.length), isHighlighted: false });
-          }
-        }
-      });
-      parts = nextParts;
-    });
+    const parts = splitTextByAnnotations(paraText, currentPassageHighlights);
 
     return parts.map((part, pIdx) => {
-      if (part.isHighlighted) {
+      if (part.highlightIds.length > 0) {
         return (
           <mark
             key={pIdx}
@@ -400,7 +425,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className={`text-justify tracking-normal font-sans ${fontClassPassage}`}>
+                      <p data-passage-paragraph={para.label} className={`text-justify tracking-normal font-sans ${fontClassPassage}`}>
                         {renderParagraphWithHighlights(para.text, para.label)}
                       </p>
                     </div>

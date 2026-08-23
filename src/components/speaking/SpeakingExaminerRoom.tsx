@@ -38,12 +38,12 @@ import {
 } from '../../types';
 import {
   callSpeakingExaminerTurnApi,
-  evaluateFullSpeakingSessionApi,
   evaluateSpeakingLiveAudioApi,
   speakExaminerText,
   ExaminerTurnResponse
 } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
+import { VoicePicker } from '../voice/VoicePicker';
 
 // Preset Cue Cards for Part 2
 const CUE_CARD_TOPICS = [
@@ -148,6 +148,10 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
   const [liveAudioReport, setLiveAudioReport] = useState<SpeakingLiveEvaluationReport | null>(null);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [manualAudioFile, setManualAudioFile] = useState<File | null>(null);
+  const vadRef = useRef<{ pause: () => void; destroy: () => void } | null>(null);
+  const vadSessionStartedAtRef = useRef<number>(0);
+  const speechStartedAtRef = useRef<number | null>(null);
+  const speechSegmentsRef = useRef<Array<{ start: number; end: number }>>([]);
 
   // Final evaluation result
   const [evaluationResult, setEvaluationResult] = useState<SpeakingRoomEvaluation | null>(null);
@@ -310,6 +314,8 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
     setEvaluationError(null);
     setRecordedAudioBase64(null);
     audioChunksRef.current = [];
+    speechSegmentsRef.current = [];
+    vadSessionStartedAtRef.current = performance.now();
     setTestStage('part1');
 
     // Initialize MediaRecorder for full live audio track capture
@@ -324,6 +330,27 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
         };
         mediaRecorderRef.current = mediaRecorder;
         mediaRecorder.start(1000);
+
+        try {
+          const { MicVAD } = await import('@ricky0123/vad-web');
+          const vad = await MicVAD.new({
+            onSpeechStart: () => {
+              speechStartedAtRef.current = (performance.now() - vadSessionStartedAtRef.current) / 1000;
+            },
+            onSpeechEnd: () => {
+              if (speechStartedAtRef.current === null) return;
+              speechSegmentsRef.current.push({
+                start: speechStartedAtRef.current,
+                end: (performance.now() - vadSessionStartedAtRef.current) / 1000,
+              });
+              speechStartedAtRef.current = null;
+            },
+          });
+          vadRef.current = vad;
+          vad.start();
+        } catch (vadError) {
+          console.warn('Silero VAD unavailable; pause metrics will be unavailable:', vadError);
+        }
       }
     } catch (err) {
       console.warn('Microphone access for live track capture:', err);
@@ -513,6 +540,13 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
         mediaRecorderRef.current.stop();
       } catch (e) {}
     }
+    if (speechStartedAtRef.current !== null) {
+      speechSegmentsRef.current.push({ start: speechStartedAtRef.current, end: totalSessionSeconds });
+      speechStartedAtRef.current = null;
+    }
+    vadRef.current?.pause();
+    vadRef.current?.destroy();
+    vadRef.current = null;
 
     try {
       let audioBase64ToSend = recordedAudioBase64;
@@ -535,10 +569,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
         });
       }
 
-      if (!audioBase64ToSend) {
-        // Fallback minimal valid webm audio header if user spoke without microphone storage
-        audioBase64ToSend = 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAAAA';
-      }
+      if (!audioBase64ToSend) throw new Error('Không có audio thật. Pronunciation và pause analytics đang unavailable.');
 
       const liveReport = await evaluateSpeakingLiveAudioApi({
         fullAudioBase64: audioBase64ToSend,
@@ -551,6 +582,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
           durationSeconds: t.durationSeconds,
         })),
         totalDurationSeconds: totalSessionSeconds || 450,
+        speechSegments: speechSegmentsRef.current.length ? speechSegmentsRef.current : null,
         targetBand: profile.targetBand || 7.5,
       });
 
@@ -600,6 +632,9 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
       {/* Top Breadcrumb & Status Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-sm">
         <div className="flex items-center gap-3">
+          <div className="hidden lg:block w-72">
+            <VoicePicker useCase="examiner" compact />
+          </div>
           <button
             onClick={onBackToPractice}
             className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1 transition-all"
@@ -1187,7 +1222,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
                 {liveAudioReport?.examinerSummaryVi ||
                   evaluationResult?.examinerOverallSummaryVi ||
-                  'Giám khảo đã hoàn thành phân tích luồng âm thanh và phản xạ ngôn ngữ 3 phần thi.'}
+                  'Phân tích audio hiện không khả dụng.'}
               </p>
 
               {/* Disclaimer Vi directly adjacent to Band Score */}
@@ -1209,9 +1244,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   Overall Band
                 </span>
                 <span className="text-5xl font-black text-amber-300 tracking-tight">
-                  {liveAudioReport?.overallSpeakingBand?.toFixed(1) ||
-                    evaluationResult?.overallBand?.toFixed(1) ||
-                    '7.0'}
+                  {liveAudioReport?.overallSpeakingBand?.toFixed(1) ?? 'unavailable'}
                 </span>
               </div>
               <div className="h-12 w-px bg-slate-700" />
@@ -1237,9 +1270,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   </span>
                   <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">
                     Band{' '}
-                    {liveAudioReport?.fluencyAndCoherence?.band?.toFixed(1) ||
-                      evaluationResult?.criteriaScores?.fluencyCoherence?.band?.toFixed(1) ||
-                      '7.0'}
+                    {liveAudioReport?.fluencyAndCoherence?.band?.toFixed(1) ?? 'unavailable'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -1250,10 +1281,10 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
                 <div>
-                  ⚡ Tốc độ: <strong>{liveAudioReport?.fluencyAndCoherence?.wpmEstimated || 135} WPM</strong>
+                  ⚡ Raw WPM: <strong>{liveAudioReport?.telemetry?.rawWpm ?? 'unavailable'}</strong>
                 </div>
                 <div>
-                  ⚠️ Từ đệm: <strong>{liveAudioReport?.fluencyAndCoherence?.fillerWordCount || 4} lần</strong>
+                  ⚠️ Từ đệm: <strong>{liveAudioReport?.telemetry?.fillerCount ?? 'unavailable'} lần</strong>
                 </div>
               </div>
             </div>
@@ -1267,9 +1298,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   </span>
                   <span className="text-lg font-black text-sky-600 dark:text-sky-400">
                     Band{' '}
-                    {liveAudioReport?.lexicalResource?.band?.toFixed(1) ||
-                      evaluationResult?.criteriaScores?.lexicalResource?.band?.toFixed(1) ||
-                      '7.0'}
+                    {liveAudioReport?.lexicalResource?.band?.toFixed(1) ?? 'unavailable'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -1307,9 +1336,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   </span>
                   <span className="text-lg font-black text-amber-600 dark:text-amber-400">
                     Band{' '}
-                    {liveAudioReport?.grammaticalRange?.band?.toFixed(1) ||
-                      evaluationResult?.criteriaScores?.grammaticalRangeAccuracy?.band?.toFixed(1) ||
-                      '6.5'}
+                    {liveAudioReport?.grammaticalRange?.band?.toFixed(1) ?? 'unavailable'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -1319,7 +1346,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               </div>
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-600 dark:text-slate-400">
-                💎 Cấu trúc phức: <strong>{liveAudioReport?.grammaticalRange?.complexStructuresUsed || 4} lần</strong>
+                💎 Cấu trúc phức: <strong>{liveAudioReport?.grammaticalRange?.complexStructuresUsed ?? 'unavailable'} lần</strong>
               </div>
             </div>
 
@@ -1332,9 +1359,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   </span>
                   <span className="text-lg font-black text-rose-600 dark:text-rose-400">
                     Band{' '}
-                    {liveAudioReport?.pronunciation?.band?.toFixed(1) ||
-                      evaluationResult?.criteriaScores?.pronunciation?.band?.toFixed(1) ||
-                      '7.0'}
+                    {liveAudioReport?.pronunciation?.band?.toFixed(1) ?? 'unavailable'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -1360,6 +1385,35 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                 )}
             </div>
           </div>
+
+          {liveAudioReport?.telemetry && (
+            <div className="p-5 rounded-3xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h3 className="font-bold text-sm text-indigo-950 dark:text-indigo-100">Voice Analytics coaching</h3>
+                <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-300">
+                  {liveAudioReport.telemetry.acousticStatus === 'measured' ? 'Silero VAD measured' : 'Acoustic metrics unavailable'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
+                {[
+                  ['Raw WPM', liveAudioReport.telemetry.rawWpm],
+                  ['Articulation rate', liveAudioReport.telemetry.articulationRate],
+                  ['Filler / 100 words', liveAudioReport.telemetry.fillerRatePer100Words],
+                  ['Average pause', liveAudioReport.telemetry.averagePauseDuration == null ? null : `${liveAudioReport.telemetry.averagePauseDuration}s`],
+                  ['Long pauses', liveAudioReport.telemetry.longPauses],
+                  ['Speech ratio', liveAudioReport.telemetry.speechRatio == null ? null : `${Math.round(liveAudioReport.telemetry.speechRatio * 100)}%`],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl bg-white/80 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900 p-2.5">
+                    <span className="block text-[10px] text-slate-500 dark:text-slate-400">{label}</span>
+                    <strong className="text-slate-900 dark:text-slate-100">{value ?? 'unavailable'}</strong>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11px] text-slate-600 dark:text-slate-400">
+                Đây là chỉ số coaching theo dữ liệu audio, không phải ngưỡng band IELTS chính thức.
+              </p>
+            </div>
+          )}
 
           {/* DETECTED ERRORS TAXONOMY */}
           {liveAudioReport?.detectedErrors && liveAudioReport.detectedErrors.length > 0 && (
@@ -1441,7 +1495,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               onClick={() =>
                 openAITutorWithPrompt(
                   `Tôi vừa hoàn thành buổi thi Speaking 1:1 Giám khảo Dr. Jonathan Vance với điểm Overall Band ${
-                    liveAudioReport?.overallSpeakingBand || evaluationResult?.overallBand || 7.0
+                    liveAudioReport?.overallSpeakingBand ?? evaluationResult?.overallBand ?? 'unavailable'
                   }. Hãy đóng vai Chuyên gia Luyện thi IELTS và phân tích chuyên sâu các điểm ngữ điệu Pronunciation và Fluency cho tôi.`
                 )
               }

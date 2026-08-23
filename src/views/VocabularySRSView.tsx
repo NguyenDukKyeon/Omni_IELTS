@@ -40,7 +40,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { VocabCard, VocabExample, VocabSynonym } from '../types';
 import { ReviewRating, getDueVocabCards, isDueForReview } from '../services/srsScheduler';
-import { playTextToSpeech, generateVocabCardApi, evaluatePronunciationApi } from '../services/aiTutor';
+import { playTextToSpeech, generateVocabCardApi } from '../services/aiTutor';
 import { curatedIELTSDecks, CuratedDeckMeta } from '../data/curatedDecks';
 import { VocabEnricherModal } from '../components/vocab/VocabEnricherModal';
 
@@ -100,6 +100,7 @@ export const VocabularySRSView: React.FC = () => {
   const [pronIndex, setPronIndex] = useState<number>(0);
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTranscript, setRecordingTranscript] = useState<string>('');
+  const [pronunciationError, setPronunciationError] = useState<string | null>(null);
   const [pronEvaluation, setPronEvaluation] = useState<{
     accuracy: number;
     feedback: string;
@@ -369,7 +370,7 @@ export const VocabularySRSView: React.FC = () => {
     setContextIndex((prev) => (prev + 1) % activeStudyQueue.length);
   };
 
-  // Pronunciation Speaking Practice (Web Speech API or simulation)
+  // Pronunciation recognition drill. Never fabricate a successful microphone result.
   const pronCard = activeStudyQueue[pronIndex % Math.max(1, activeStudyQueue.length)];
 
   const startVoiceRecording = () => {
@@ -377,6 +378,7 @@ export const VocabularySRSView: React.FC = () => {
     setIsRecording(true);
     setRecordingTranscript('');
     setPronEvaluation(null);
+    setPronunciationError(null);
 
     // Check if Web Speech Recognition is supported
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -396,44 +398,37 @@ export const VocabularySRSView: React.FC = () => {
 
         recognition.onerror = () => {
           setIsRecording(false);
-          // Fallback simulation
-          simulateSpeakingEval();
+          setPronunciationError('Không thể nhận giọng nói. Hãy kiểm tra quyền microphone và thử lại.');
         };
 
         recognition.start();
       } catch (err) {
         console.warn('SpeechRecognition error:', err);
         setIsRecording(false);
-        simulateSpeakingEval();
+        setPronunciationError('Trình duyệt không thể khởi động nhận diện giọng nói.');
       }
     } else {
-      // Browser doesn't support Web Speech API -> graceful simulation
-      setTimeout(() => {
-        setIsRecording(false);
-        simulateSpeakingEval();
-      }, 1800);
+      setIsRecording(false);
+      setPronunciationError('Nhận diện giọng nói không khả dụng trên trình duyệt này; không có điểm mô phỏng được tạo.');
     }
-  };
-
-  const simulateSpeakingEval = async () => {
-    if (!pronCard) return;
-    const simulatedTranscript = pronCard.word;
-    setRecordingTranscript(simulatedTranscript);
-    await evaluateSpeaking(simulatedTranscript);
   };
 
   const evaluateSpeaking = async (transcript: string) => {
     if (!pronCard) return;
     setIsEvaluatingPron(true);
     try {
-      const evalResult = await evaluatePronunciationApi(
-        pronCard.word,
-        pronCard.phonetic,
-        transcript
-      );
+      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9'\s-]/g, '').replace(/\s+/g, ' ').trim();
+      const matched = normalize(transcript) === normalize(pronCard.word);
+      const evalResult = {
+        accuracy: matched ? 100 : 0,
+        feedback: matched
+          ? `Trình duyệt đã nhận diện đúng từ “${pronCard.word}”. Đây là kiểm tra nhận diện từ, không phải điểm âm học.`
+          : `Trình duyệt nhận diện thành “${transcript}”. Hãy nghe mẫu, kiểm tra trọng âm ${pronCard.phonetic || ''} và thử lại.`,
+        phoneticMatch: matched,
+      };
       setPronEvaluation(evalResult);
-      if (evalResult.accuracy >= 75) {
-        awardXP(20, `Phát âm chuẩn từ "${pronCard.word}" (${evalResult.accuracy}%)!`);
+      if (matched) {
+        awardXP(20, `Nhận diện đúng từ "${pronCard.word}"!`);
         reviewVocabCard(pronCard.id, 'good');
       } else {
         reviewVocabCard(pronCard.id, 'hard');
@@ -448,6 +443,7 @@ export const VocabularySRSView: React.FC = () => {
   const handleNextPron = () => {
     setRecordingTranscript('');
     setPronEvaluation(null);
+    setPronunciationError(null);
     setPronIndex((prev) => (prev + 1) % activeStudyQueue.length);
   };
 
@@ -1308,9 +1304,12 @@ export const VocabularySRSView: React.FC = () => {
                   {isRecording
                     ? 'Đang lắng nghe giọng bạn nói...'
                     : isEvaluatingPron
-                    ? 'AI đang phân tích khẩu hình & âm vị...'
+                    ? 'Đang đối chiếu từ được nhận diện...'
                     : 'Chạm mic và đọc to từ trên'}
                 </div>
+                {pronunciationError && (
+                  <p className="text-xs text-rose-600 dark:text-rose-400">{pronunciationError}</p>
+                )}
               </div>
 
               {/* Pronunciation Feedback */}
@@ -1327,7 +1326,7 @@ export const VocabularySRSView: React.FC = () => {
                           : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
                       }`}
                     >
-                      Độ chuẩn xác: {pronEvaluation.accuracy}%
+                      Độ nhận diện từ: {pronEvaluation.accuracy}%
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">

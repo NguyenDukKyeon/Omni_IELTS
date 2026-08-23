@@ -107,8 +107,13 @@ export const SpeakingQuestionModule: React.FC = () => {
   const [liveTranscript, setLiveTranscript] = useState<string>('');
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number>(0);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [recordedAudio, setRecordedAudio] = useState<{ base64: string; mimeType: string } | null>(null);
+  const [recordingError, setRecordingError] = useState<string>('');
 
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
 
   // Initialize Web Speech API Recognition
   useEffect(() => {
@@ -174,6 +179,8 @@ export const SpeakingQuestionModule: React.FC = () => {
       });
       setEvaluation(null);
       setLiveTranscript('');
+      setRecordedAudio(null);
+      setRecordingError('');
       setPrepNotes('');
       setPrepSeconds(60);
       setSpeakingSeconds(120);
@@ -228,6 +235,8 @@ export const SpeakingQuestionModule: React.FC = () => {
     setIsGenerating(true);
     setEvaluation(null);
     setLiveTranscript('');
+    setRecordedAudio(null);
+    setRecordingError('');
     setPrepNotes('');
     setPrepSeconds(60);
     setSpeakingSeconds(120);
@@ -263,9 +272,42 @@ export const SpeakingQuestionModule: React.FC = () => {
     setIsPrepping(true);
   };
 
-  const handleStartRecording = () => {
-    setIsRecording(true);
-    setIsSpeakingTimerActive(true);
+  const handleStartRecording = async () => {
+    setRecordedAudio(null);
+    setRecordingError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const recorder = new MediaRecorder(stream, { mimeType: preferredMimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || preferredMimeType });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = String(reader.result || '');
+          setRecordedAudio({
+            base64: dataUrl.replace(/^data:[^;]+;base64,/, ''),
+            mimeType: blob.type || 'audio/webm',
+          });
+        };
+        reader.readAsDataURL(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start(500);
+      setIsRecording(true);
+      setIsSpeakingTimerActive(true);
+    } catch {
+      setRecordingError('Không truy cập được microphone. Phần pronunciation sẽ không được chấm khi thiếu audio thật.');
+      setIsRecording(false);
+      setIsSpeakingTimerActive(false);
+      return;
+    }
     try {
       if (recognitionRef.current) {
         recognitionRef.current.start();
@@ -285,11 +327,14 @@ export const SpeakingQuestionModule: React.FC = () => {
     } catch {
       // already stopped
     }
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+    mediaStreamRef.current = null;
   };
 
   const handleEvaluateSpeaking = async () => {
     const textToEval = liveTranscript.trim();
-    if (!textToEval || textToEval.length < 10 || isEvaluating) return;
+    if (!textToEval || textToEval.length < 10 || !recordedAudio || isEvaluating) return;
 
     setIsEvaluating(true);
     setEvaluation(null);
@@ -304,7 +349,8 @@ export const SpeakingQuestionModule: React.FC = () => {
         questionContext,
         textToEval,
         prompt.part,
-        profile.targetBand || 7.0
+        profile.targetBand || 7.0,
+        recordedAudio
       );
 
       setEvaluation(result);
@@ -379,7 +425,7 @@ export const SpeakingQuestionModule: React.FC = () => {
 
         <div className="text-[11px] text-slate-500 dark:text-slate-400 px-3 flex items-center gap-1.5 font-medium">
           <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <span>Web Speech API + Chấm 4 Tiêu Chí Chuẩn Cambridge</span>
+          <span>Nhận dạng transcript + phân tích audio thật theo 4 tiêu chí IELTS</span>
         </div>
       </div>
 
@@ -632,7 +678,7 @@ export const SpeakingQuestionModule: React.FC = () => {
 
               <button
                 onClick={handleEvaluateSpeaking}
-                disabled={isEvaluating || !liveTranscript.trim() || liveTranscript.length < 10}
+                disabled={isEvaluating || !liveTranscript.trim() || liveTranscript.length < 10 || !recordedAudio}
                 className="px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
               >
                 {isEvaluating ? (
@@ -643,6 +689,9 @@ export const SpeakingQuestionModule: React.FC = () => {
                 {isEvaluating ? 'Đang chấm...' : 'Chấm 4 tiêu chí Speaking'}
               </button>
             </div>
+            {recordingError && (
+              <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">{recordingError}</p>
+            )}
           </div>
 
           {/* 3. Official 4-Criteria Speaking Evaluation Dashboard */}

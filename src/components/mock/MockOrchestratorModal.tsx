@@ -50,6 +50,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
 
   // Assemble State
   const [isAssembling, setIsAssembling] = useState<boolean>(false);
+  const [buildProgress, setBuildProgress] = useState<string>('');
   const [assembleError, setAssembleError] = useState<string | null>(null);
   const [assembledPackage, setAssembledPackage] = useState<MockAssemblerPackage | null>(null);
 
@@ -85,6 +86,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
     setAssembledPackage(null);
 
     try {
+      const pendingSource = sessionStorage.getItem('omni_pending_mock_source');
       const data = await assembleFullMockPackageApi({
         targetBand,
         recentPromptIds,
@@ -93,8 +95,13 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
           weakestAxes: weakestAxes.length > 0 ? weakestAxes : undefined,
           recentMistakeTags: recentMistakeTags.length > 0 ? recentMistakeTags : undefined,
         },
+        sourceItem: pendingSource ? JSON.parse(pendingSource) : undefined,
+      }, (skill, state) => {
+        const labels = { listening: 'Listening', reading: 'Reading', writing: 'Writing', speaking: 'Speaking', finalize: 'kiểm định toàn bộ đề' };
+        setBuildProgress(state === 'building' ? `Đang tạo ${labels[skill]}…` : `${labels[skill]} đã đạt quality gate`);
       });
 
+      if (pendingSource) sessionStorage.removeItem('omni_pending_mock_source');
       setAssembledPackage(data);
       awardXP(XP_REWARDS.EXERCISE_COMPLETED, 'Lắp ráp bộ đề thi 4 kỹ năng với Mock Test Orchestrator');
     } catch (err: any) {
@@ -102,6 +109,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
       setAssembleError(err?.message || 'Không thể lắp ráp đề thi từ gemini-3.1-pro.');
     } finally {
       setIsAssembling(false);
+      setBuildProgress('');
     }
   };
 
@@ -267,7 +275,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                       <span>Speaking (3 Parts)</span>
                     </div>
                     <p className="text-[11px] text-slate-500">
-                      Phỏng vấn trực tiếp Giám khảo Dr. Jonathan Vance kèm chấm phát âm Live Audio.
+                      Phỏng vấn với giám khảo AI, chỉ chấm phát âm khi có audio thật.
                     </p>
                   </div>
                 </div>
@@ -284,7 +292,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                     ) : (
                       <Sparkles className="w-4 h-4" />
                     )}
-                    <span>{isAssembling ? 'AI đang điều phối & lắp đề...' : 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)'}</span>
+                    <span>{isAssembling ? (buildProgress || 'Đang khởi tạo Mock Build…') : 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)'}</span>
                   </button>
                 </div>
               </div>
@@ -317,6 +325,15 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
+                        if (!assembledPackage.fullPackage || !assembledPackage.validation?.ready) {
+                          setAssembleError('Bộ đề chưa vượt qua validator nên chưa thể mở phòng thi.');
+                          return;
+                        }
+                        if (!onStartExam) {
+                          setAssembleError('Phòng thi chưa được kết nối với Orchestrator.');
+                          return;
+                        }
+                        onStartExam(assembledPackage.fullPackage);
                         onClose();
                       }}
                       className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer whitespace-nowrap"

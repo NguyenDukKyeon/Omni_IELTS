@@ -38,6 +38,9 @@ import {
   MockSynthesizerInput,
   MockSynthesizerResult,
 } from '../types';
+import { validateMockPackage } from '../lib/mockPackageValidator';
+import { playVoiceText } from './voiceService';
+import { getGeminiRequestHeaders } from './aiTutor';
 
 export async function generateReadingPracticeApi(
   type: ReadingQuestionType,
@@ -155,12 +158,20 @@ export async function evaluateSpeakingPracticeApi(
   questionPrompt: string,
   userTranscript: string,
   part: string,
-  targetBand: number = 7.0
+  targetBand: number = 7.0,
+  audio?: { base64: string; mimeType: string }
 ): Promise<SpeakingEvaluationResult> {
   const res = await fetch('/api/practice/evaluate-speaking', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ questionPrompt, userTranscript, part, targetBand }),
+    body: JSON.stringify({
+      questionPrompt,
+      userTranscript,
+      part,
+      targetBand,
+      userAudioBase64: audio?.base64,
+      audioMimeType: audio?.mimeType,
+    }),
   });
   if (!res.ok) throw new Error('Lỗi chấm bài Speaking.');
   const data = await res.json();
@@ -197,31 +208,12 @@ export async function callSpeakingExaminerTurnApi(params: {
   return await res.json();
 }
 
-export async function evaluateFullSpeakingSessionApi(params: {
-  conversationHistory: Array<{
-    part: string;
-    question: string;
-    userTranscript: string;
-    durationSeconds: number;
-  }>;
-  totalDurationSeconds: number;
-  targetBand?: number;
-}): Promise<any> {
-  const res = await fetch('/api/gemini/speaking-evaluation', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) throw new Error('Không thể tạo bảng điểm Speaking.');
-  return await res.json();
-}
-
 export async function evaluateSpeakingLiveAudioApi(
   params: SpeakingLiveAudioScoringInput
 ): Promise<SpeakingLiveEvaluationReport> {
-  const res = await fetch('/api/gemini/speaking-live-audio-evaluation', {
+  const res = await fetch('/api/speaking/analyze', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getGeminiRequestHeaders(),
     body: JSON.stringify(params),
   });
   if (!res.ok) {
@@ -392,18 +384,54 @@ export async function evaluateFullGraderApi(
  * Assemble Custom 4-Skill Cambridge Mock Exam Package (mock-assembler-v1)
  */
 export async function assembleFullMockPackageApi(
-  params: MockAssemblerInput
+  params: MockAssemblerInput,
+  onProgress?: (skill: 'listening' | 'reading' | 'writing' | 'speaking' | 'finalize', state: 'building' | 'ready') => void,
 ): Promise<MockAssemblerPackage> {
-  const res = await fetch('/api/mock/assemble-full-package', {
+  const createResponse = await fetch('/api/mock/builds', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getGeminiRequestHeaders(),
     body: JSON.stringify(params),
   });
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.error || `Lỗi lắp ráp bộ đề thi thử (HTTP ${res.status}).`);
+  if (!createResponse.ok) {
+    const errData = await createResponse.json().catch(() => ({}));
+    throw new Error(errData.error || `Không thể khởi tạo Mock Build (HTTP ${createResponse.status}).`);
   }
-  return await res.json();
+  const build = await createResponse.json() as { id: string };
+  localStorage.setItem('omni_pending_mock_build', JSON.stringify({ id: build.id, createdAt: new Date().toISOString() }));
+
+  for (const skill of ['listening', 'reading', 'writing', 'speaking'] as const) {
+    onProgress?.(skill, 'building');
+    const skillResponse = await fetch(`/api/mock/builds/${encodeURIComponent(build.id)}/skills/${skill}/generate`, {
+      method: 'POST',
+      headers: getGeminiRequestHeaders(),
+      body: JSON.stringify({}),
+    });
+    if (!skillResponse.ok) {
+      const error = await skillResponse.json().catch(() => ({}));
+      const detail = Array.isArray(error.validation?.errors) ? ` ${error.validation.errors.join(' ')}` : '';
+      throw new Error(`${error.error || `Không thể tạo phần ${skill}.`}${detail}`);
+    }
+    onProgress?.(skill, 'ready');
+  }
+
+  onProgress?.('finalize', 'building');
+  const finalizeResponse = await fetch(`/api/mock/builds/${encodeURIComponent(build.id)}/finalize`, {
+    method: 'POST',
+    headers: getGeminiRequestHeaders(),
+    body: JSON.stringify({}),
+  });
+  if (!finalizeResponse.ok) {
+    const error = await finalizeResponse.json().catch(() => ({}));
+    throw new Error(error.error || `Không thể hoàn tất Mock Build (HTTP ${finalizeResponse.status}).`);
+  }
+  const data = await finalizeResponse.json() as MockAssemblerPackage;
+  const validation = validateMockPackage(data.fullPackage);
+  if (!validation.ready) {
+    throw new Error(`Bộ đề chưa sẵn sàng: ${validation.errors.join(' ')}`);
+  }
+  onProgress?.('finalize', 'ready');
+  localStorage.removeItem('omni_pending_mock_build');
+  return data;
 }
 
 /**
@@ -431,15 +459,6 @@ export function speakExaminerText(
   accentOrOnEnd: 'British' | 'Australian' | 'Standard' | (() => void) = 'British',
   onEndCallback?: () => void
 ): () => void {
-  if (typeof window === 'undefined' || !window.speechSynthesis) {
-    if (typeof accentOrOnEnd === 'function') {
-      accentOrOnEnd();
-    } else {
-      onEndCallback?.();
-    }
-    return () => {};
-  }
-
   let accent: 'British' | 'Australian' | 'Standard' = 'British';
   let onEnd: (() => void) | undefined = onEndCallback;
 
@@ -450,42 +469,19 @@ export function speakExaminerText(
     accent = accentOrOnEnd;
   }
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = rate;
-  utterance.pitch = 1.0;
-
-  const voices = window.speechSynthesis.getVoices();
-  let selectedVoice = null;
-
-  if (accent === 'British') {
-    utterance.lang = 'en-GB';
-    selectedVoice = voices.find((v) => v.lang === 'en-GB' || v.name.toLowerCase().includes('british') || v.name.toLowerCase().includes('uk'));
-  } else if (accent === 'Australian') {
-    utterance.lang = 'en-AU';
-    selectedVoice = voices.find((v) => v.lang === 'en-AU' || v.name.toLowerCase().includes('australia'));
-  }
-
-  if (!selectedVoice) {
-    selectedVoice =
-      voices.find((v) => v.lang.includes('en-GB') || v.lang.includes('en-US')) ||
-      voices.find((v) => v.lang.startsWith('en'));
-  }
-
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
-  }
-
-  if (onEnd) {
-    utterance.onend = () => onEnd?.();
-    utterance.onerror = () => onEnd?.();
-  }
-
-  window.speechSynthesis.speak(utterance);
-
-  return () => {
-    window.speechSynthesis.cancel();
-  };
+  let cancelled = false;
+  let stop = () => window.speechSynthesis?.cancel();
+  void playVoiceText(text, {
+    useCase: 'examiner',
+    rate,
+    locale: accent === 'Australian' ? 'en-AU' : accent === 'British' ? 'en-GB' : 'en-US',
+    style: `${accent} IELTS examiner, clear and mature`,
+    onEnd: () => { if (!cancelled) onEnd?.(); },
+  }).then((cancel) => {
+    stop = cancel;
+    if (cancelled) stop();
+  });
+  return () => { cancelled = true; stop(); };
 }
 
 export const playTextToSpeech = speakExaminerText;
@@ -496,9 +492,9 @@ export async function fetchRealExamForecastApi(params: {
   customQuery?: string;
   timeframe?: string;
 }): Promise<import('../types').ForecastGroundingResponse> {
-  const res = await fetch('/api/gemini/forecast-grounding', {
+  const res = await fetch('/api/forecast/refresh', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getGeminiRequestHeaders(),
     body: JSON.stringify({
       skill: params.skill || 'all',
       council: params.council || 'all',
@@ -508,7 +504,8 @@ export async function fetchRealExamForecastApi(params: {
   });
 
   if (!res.ok) {
-    throw new Error('Lỗi tra cứu dữ liệu đề thi thật và dự đoán.');
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || 'Lỗi tra cứu dữ liệu đề thi thật và dự đoán.');
   }
 
   const data = await res.json();
