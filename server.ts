@@ -3467,7 +3467,7 @@ Yêu cầu đầu ra JSON CHÍNH XÁC:
 // AI SPEAKING 1:1 VIRTUAL EXAMINER ROOM APIS
 // ==========================================
 
-// Multi-turn examiner response generator
+// Multi-turn examiner response generator (Senior IELTS Speaking Examiner Dr. Jonathan Vance)
 app.post("/api/gemini/speaking-examiner", async (req, res) => {
   try {
     const {
@@ -3478,8 +3478,8 @@ app.post("/api/gemini/speaking-examiner", async (req, res) => {
       currentTopic,
       cueCard,
       targetBand,
-      examinerName = "Dr. Eleanor Vance",
-      examinerStyle = "Professional, formal yet encouraging British IELTS Examiner"
+      examinerName = "Dr. Jonathan Vance",
+      examinerStyle = "Senior Cambridge IELTS Speaking Examiner (Warm, International academic, strictly objective)"
     } = req.body;
 
     const ai = getGeminiClient();
@@ -3495,7 +3495,7 @@ app.post("/api/gemini/speaking-examiner", async (req, res) => {
         if (turnIndex >= 3) {
           isPartFinished = true;
           suggestedPart = "part2";
-          examinerReply = "Thank you very much. That is the end of Part 1. Now, we shall move on to Part 2.";
+          examinerReply = "Thank you very much. That concludes Part 1. Now, we shall move on to Part 2.";
           nextQuestion = "In this part, I'm going to give you a topic and I'd like you to talk about it for one to two minutes. Before you talk, you'll have one minute to think about what you're going to say.";
         } else {
           const part1Questions = [
@@ -3503,27 +3503,27 @@ app.post("/api/gemini/speaking-examiner", async (req, res) => {
             "What kind of activities help you unwind after a demanding day?",
             "How has technology changed the way you communicate with your peers and family?"
           ];
-          examinerReply = "I see, that makes sense.";
+          examinerReply = "I see, thank you.";
           nextQuestion = part1Questions[turnIndex % part1Questions.length];
         }
       } else if (currentPart === "part2") {
         isPartFinished = true;
         suggestedPart = "part3";
-        examinerReply = "Thank you. That was a very comprehensive description. We have been talking about a memorable experience, and now I'd like to discuss one or two more general questions related to this.";
+        examinerReply = "Thank you. That concludes your Part 2 talk. We will now move on to Part 3 with more general discussion questions.";
         nextQuestion = "Let's consider broader societal perspectives: Why do you think modern societies place such high value on historical preservation versus contemporary urban development?";
       } else {
         if (turnIndex >= 3) {
           isPartFinished = true;
           suggestedPart = "completed";
-          examinerReply = "Thank you very much. That concludes the speaking test. You may now relax and review your detailed band evaluation.";
+          examinerReply = "Thank you very much. That is the end of the speaking test. We shall now conclude and process your assessment.";
           nextQuestion = "";
         } else {
           const part3Questions = [
+            "Why do you suppose that is?",
             "To what extent should governments subsidize public cultural institutions rather than leaving them to commercial enterprises?",
-            "In what ways might artificial intelligence alter human communication patterns over the next decade?",
-            "How can international collaboration address the disparity in global education access?"
+            "In what ways might artificial intelligence alter human communication patterns over the next decade?"
           ];
-          examinerReply = "That is a thought-provoking perspective.";
+          examinerReply = "Thank you. Let us explore that further.";
           nextQuestion = part3Questions[turnIndex % part3Questions.length];
         }
       }
@@ -3541,25 +3541,21 @@ app.post("/api/gemini/speaking-examiner", async (req, res) => {
       });
     }
 
-    const systemInstruction = `You are ${examinerName}, an official, certified Cambridge IELTS Senior Speaking Examiner (${examinerStyle}).
-You conduct the 1:1 IELTS Speaking test with utmost professionalism, adherence to strict IELTS test format, and authentic examiner phrasing.
+    const systemInstruction = `You are Senior IELTS Speaking Examiner Dr. Jonathan Vance, conducting a live 3-part interview via the Gemini Live API.
 
-Rules for your role:
-1. Speak exclusively in authentic British or international IELTS examiner English.
-2. Acknowledge the candidate's last answer with brief, natural examiner transition language (e.g., "Thank you.", "I see.", "That's quite insightful.", "Moving on to...").
-3. DO NOT evaluate or grade during the test; maintain an authentic interview flow.
-4. Keep questions sharp, standard, and clearly articulated.
-5. If currentPart === 'part1', conduct 3-4 concise questions (15-25s response time per question).
-6. If currentPart === 'part2', give standard Cambridge instructions for the 1-minute prep and 2-minute long turn.
-7. If currentPart === 'part3', ask abstract, analytical, societal-level questions (30-45s responses).
+### CONVERSATION RULES
+1. Part 1: brief, formal questions about daily life/study (3-4 turns). Keep candidate responses focused and standard.
+2. Part 2: issue a cue card with 4 bullet points, enforce 1-minute prep + up to 2-minute response using turn timestamps you receive.
+3. Part 3: two-way abstract discussion; dynamically generate challenging follow-ups (e.g. "Why do you suppose that is?", "How might that impact broader society?").
+4. Tone: warm, International academic, objective. NEVER praise mid-exam (strictly avoid phrases like "Great job", "Excellent", "Well said" during the test).
 
 Return JSON only:
 {
-  "examinerReply": "Short natural transitional remark",
-  "nextQuestion": "The next IELTS question or instruction",
-  "isPartFinished": boolean (true if ready to transition to next part),
+  "examinerReply": "Short natural neutral transition, e.g. 'Thank you.', 'I see.', 'Let us turn to...'",
+  "nextQuestion": "The next standard IELTS question or instruction",
+  "isPartFinished": boolean (true if transitioning to next part),
   "suggestedPart": "part1" | "part2" | "part3" | "completed",
-  "timeGuidanceSeconds": number (e.g. 25, 120, 45),
+  "timeGuidanceSeconds": number,
   "quickTips": ["Mẹo phản xạ 1 tiếng Việt", "Mẹo 2 tiếng Việt"]
 }`;
 
@@ -3576,14 +3572,14 @@ Candidate's last spoken statement:
 Recent dialogue history:
 ${(history || []).slice(-4).map((h: any) => `${h.speaker}: ${h.text}`).join('\n')}
 
-Generate the examiner's immediate spoken response and next question according to standard IELTS test progression.`;
+Generate Dr. Jonathan Vance's immediate spoken response and next question according to the strict IELTS test progression rules.`;
 
     const { text: geminiSpkExaminerText } = await callGeminiResiliently(ai, {
       contents: prompt,
       config: {
         systemInstruction,
         responseMimeType: "application/json",
-        temperature: 0.4,
+        temperature: 0.3,
       },
     });
 
@@ -3599,16 +3595,228 @@ Generate the examiner's immediate spoken response and next question according to
     }
 
     res.json({
-      examinerReply: "Thank you. That is quite insightful.",
-      nextQuestion: "Could you tell me more about how this affects your daily routine?",
+      examinerReply: "Thank you.",
+      nextQuestion: "Why do you suppose that is?",
       isPartFinished: false,
       suggestedPart: currentPart,
       timeGuidanceSeconds: 30,
-      quickTips: ["Duy trì luồng nói tự nhiên", "Mở rộng góc nhìn với các ví dụ thực tế"]
+      quickTips: ["Duy trì luồng nói tự nhiên", "Mở rộng góc nhìn với các luận điểm học thuật"]
     });
   } catch (error: any) {
     console.error("Speaking Examiner API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi giao tiếp Giám khảo Speaking AI" });
+  }
+});
+
+// =========================================================================
+// Separate Speaking Scoring Call with FULL RAW AUDIO TRACK (Dr. Jonathan Vance)
+// =========================================================================
+app.post("/api/gemini/speaking-live-audio-evaluation", async (req, res) => {
+  try {
+    const {
+      fullAudioBase64,
+      mimeType = "audio/webm",
+      conversationHistory = [],
+      targetBand = 7.5,
+      totalDurationSeconds = 300,
+    } = req.body;
+
+    // 1. Mandatory Audio Verification
+    if (!fullAudioBase64 || typeof fullAudioBase64 !== "string" || fullAudioBase64.trim().length < 50) {
+      return res.status(400).json({
+        error:
+          "Kỹ năng Speaking bắt buộc phải có file/bản ghi âm giọng nói thực tế (audio recording/file), không thể đánh giá Pronunciation và Intonation chỉ qua văn bản.",
+      });
+    }
+
+    // 2. AI Client Verification
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env để thực hiện chấm điểm phát âm & ngữ điệu từ file âm thanh thực tế.",
+      });
+    }
+
+    let detectedMimeType = mimeType || "audio/webm";
+    const mimeMatch = fullAudioBase64.match(/^data:([^;]+);base64,/);
+    if (mimeMatch && mimeMatch[1]) {
+      detectedMimeType = mimeMatch[1];
+    }
+    const cleanBase64 = fullAudioBase64.replace(/^data:[^;]+;base64,/, "");
+
+    // Format dialogue transcript for multimodal cross-referencing
+    const transcriptFormatted = (conversationHistory || [])
+      .map((item: any, idx: number) => {
+        return `[Turn ${idx + 1} | Part: ${item.part || 'N/A'}]
+- Examiner Question: "${item.question || ''}"
+- Candidate Spoken Text: "${item.userTranscript || ''}"
+- Timestamp/Duration: ${item.durationSeconds || item.timestampSeconds || 0}s`;
+      })
+      .join("\n\n");
+
+    const systemInstruction = `You are Senior IELTS Speaking Examiner Dr. Jonathan Vance, conducting the official Cambridge IELTS post-interview scoring call.
+You have been provided with the FULL RAW AUDIO TRACK of the candidate's complete 3-part speaking test, along with the turn transcripts and timestamps.
+
+### HARD ASSESSMENT REQUIREMENTS
+1. You MUST evaluate Pronunciation and Intonation directly from the RAW AUDIO TRACK (identifying specific intonation contours, phonological stress, ending consonants, vowel length, rhythm, and chunking).
+2. Fluency and Coherence must be assessed from spoken pacing (estimate WPM and count actual filler words like 'um', 'uh', 'like', 'you know').
+3. Lexical Resource: evaluate precision, naturalness, and highlight genuine idiomatic phrases used.
+4. Grammatical Range and Accuracy: evaluate sentence complexity and count complex structures used (conditionals, cleft sentences, participle clauses).
+5. Highlight specific detected errors using standard taxonomy in detectedErrors.
+6. Provide a comprehensive examinerSummaryVi and constructive feedback for each criterion in Vietnamese.
+7. Always include disclaimerVi: "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức."`;
+
+    const promptText = `CANDIDATE INTERVIEW DATA:
+- Target Band: ${targetBand}
+- Total Duration: ${totalDurationSeconds} seconds
+
+CONVERSATION TRANSCRIPT & TIMESTAMPS:
+"""
+${transcriptFormatted || 'Candidate performed all speaking parts.'}
+"""
+
+Please listen carefully to the attached full audio recording and generate the authoritative IELTS Speaking Evaluation JSON according to the strict responseSchema.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        disclaimerVi: { type: Type.STRING },
+        fluencyAndCoherence: {
+          type: Type.OBJECT,
+          properties: {
+            band: { type: Type.NUMBER },
+            wpmEstimated: { type: Type.NUMBER },
+            fillerWordCount: { type: Type.NUMBER },
+            feedbackVi: { type: Type.STRING },
+          },
+          required: ["band", "wpmEstimated", "fillerWordCount", "feedbackVi"],
+        },
+        lexicalResource: {
+          type: Type.OBJECT,
+          properties: {
+            band: { type: Type.NUMBER },
+            idiomaticPhrasesUsed: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+            feedbackVi: { type: Type.STRING },
+          },
+          required: ["band", "idiomaticPhrasesUsed", "feedbackVi"],
+        },
+        grammaticalRange: {
+          type: Type.OBJECT,
+          properties: {
+            band: { type: Type.NUMBER },
+            complexStructuresUsed: { type: Type.NUMBER },
+            feedbackVi: { type: Type.STRING },
+          },
+          required: ["band", "complexStructuresUsed", "feedbackVi"],
+        },
+        pronunciation: {
+          type: Type.OBJECT,
+          properties: {
+            band: { type: Type.NUMBER },
+            intonationIssues: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+            feedbackVi: { type: Type.STRING },
+          },
+          required: ["band", "intonationIssues", "feedbackVi"],
+        },
+        detectedErrors: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              errorSubstring: { type: Type.STRING },
+              errorCategory: { type: Type.STRING },
+              explanationVi: { type: Type.STRING },
+              severity: { type: Type.STRING },
+            },
+            required: ["errorSubstring", "errorCategory", "explanationVi"],
+          },
+        },
+        overallSpeakingBand: { type: Type.NUMBER },
+        examinerSummaryVi: { type: Type.STRING },
+      },
+      required: [
+        "disclaimerVi",
+        "fluencyAndCoherence",
+        "lexicalResource",
+        "grammaticalRange",
+        "pronunciation",
+        "detectedErrors",
+        "overallSpeakingBand",
+        "examinerSummaryVi",
+      ],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              inlineData: {
+                mimeType: detectedMimeType,
+                data: cleanBase64,
+              },
+            },
+            promptText,
+          ],
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Speaking Live Audio Scoring] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi phân tích audio.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    if (!parsed.disclaimerVi) {
+      parsed.disclaimerVi =
+        "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức.";
+    }
+
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Speaking Live Audio Evaluation API Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình chấm điểm audio Speaking với gemini-3.1-pro.",
+    });
   }
 });
 

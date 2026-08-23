@@ -1287,4 +1287,56 @@ export interface SentenceAcademicStylistInput {
   targetBand?: number;
 }
 
+// ==========================================
+// IELTS Speaking Live Audio Assessment Types
+// ==========================================
+
+export interface SpeakingCriterionScore {
+  band: number;
+  feedbackVi: string;
+}
+
+export interface SpeakingFluencyEvaluation extends SpeakingCriterionScore {
+  wpmEstimated: number;
+  fillerWordCount: number;
+}
+
+export interface SpeakingLexicalEvaluation extends SpeakingCriterionScore {
+  idiomaticPhrasesUsed: string[];
+}
+
+export interface SpeakingGrammarEvaluation extends SpeakingCriterionScore {
+  complexStructuresUsed: number;
+}
+
+export interface SpeakingPronunciationEvaluation extends SpeakingCriterionScore {
+  intonationIssues: string[];
+}
+
+export interface SpeakingLiveEvaluationReport {
+  disclaimerVi: string;
+  fluencyAndCoherence: SpeakingFluencyEvaluation;
+  lexicalResource: SpeakingLexicalEvaluation;
+  grammaticalRange: SpeakingGrammarEvaluation;
+  pronunciation: SpeakingPronunciationEvaluation;
+  detectedErrors: StandardErrorObject[];
+  overallSpeakingBand: number;
+  examinerSummaryVi: string;
+}
+
+export interface SpeakingLiveAudioScoringInput {
+  fullAudioBase64: string; // Real audio recording (audio/webm, audio/mp3, audio/wav)
+  mimeType?: string;
+  conversationHistory?: Array<{
+    turnIndex: number;
+    part: string;
+    question: string;
+    userTranscript?: string;
+    timestampSeconds?: number;
+    durationSeconds?: number;
+  }>;
+  targetBand?: number;
+  totalDurationSeconds?: number;
+}
+
 
