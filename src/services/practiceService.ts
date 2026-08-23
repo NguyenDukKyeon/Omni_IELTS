@@ -30,6 +30,8 @@ import {
   GrammarCurriculumResult,
   ItemWriterPracticeInput,
   ItemWriterPracticeResult,
+  FullGraderInput,
+  FullGraderResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -359,6 +361,24 @@ export async function generateItemWriterPracticeApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi sinh câu hỏi luyện tập (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+/**
+ * Full Grader 4-Criteria Assessment (full-grader-v1) for Writing & Speaking
+ */
+export async function evaluateFullGraderApi(
+  params: FullGraderInput
+): Promise<FullGraderResult> {
+  const res = await fetch('/api/grade/full-grader-v1', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi chấm điểm bài thi (HTTP ${res.status}).`);
   }
   return await res.json();
 }
