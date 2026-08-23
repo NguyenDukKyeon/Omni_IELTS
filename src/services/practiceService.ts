@@ -13,6 +13,7 @@ import {
   SentenceAcademicStylistInput,
   SentenceAcademicStylistResult,
   SpeakingLiveAudioScoringInput,
+  SpeakingLiveEvaluationReport,
   QuestionTrapAnalysisInput,
   QuestionTrapAnalysisResult,
   MasterMentorPanelInput,

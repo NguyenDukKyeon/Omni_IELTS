@@ -71,9 +71,10 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
 
   useEffect(() => {
     if (isOpen) {
-      setSkill(initialSkill);
+      const activeS = (initialSkill as 'reading' | 'listening') || 'reading';
+      setSkill(activeS);
       setQuestionType(initialQuestionType);
-      handleGenerate(initialSkill, initialQuestionType, topicDomain, difficultyBand);
+      handleGenerate(activeS, initialQuestionType, topicDomain, difficultyBand);
     } else {
       setResult(null);
       setErrorMessage(null);
@@ -87,8 +88,8 @@ export const ItemWriterPracticeModal: React.FC<ItemWriterPracticeModalProps> = (
   if (!isOpen) return null;
 
   // Learner profile context
-  const weakestAxes = profile.estimatedBandRange ? ['lexicalResource', 'coherence'] : [];
-  const recentMistakeTags = Array.from(new Set(mistakes.flatMap((m) => m.tags || []))).slice(0, 5);
+  const weakestAxes: string[] = [];
+  const recentMistakeTags = (Array.from(new Set(mistakes.flatMap((m) => m.tags || []))) as string[]).slice(0, 5);
 
   const handleGenerate = async (
     sOverride?: 'reading' | 'listening',

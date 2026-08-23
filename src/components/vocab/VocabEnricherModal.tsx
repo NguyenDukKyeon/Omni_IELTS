@@ -133,18 +133,20 @@ export const VocabEnricherModal: React.FC<VocabEnricherModalProps> = ({
       examples: (result.exampleSentences || []).map((s) => ({
         en: s,
         vi: '',
-        context: interestContext || 'IELTS Context',
+        context: 'Academic' as const,
       })),
-      synonyms: (result.synonyms || []).map((s) => ({ word: s, nuanceVi: 'Đồng nghĩa' })),
+      synonyms: (result.synonyms || []).map((s) => ({ word: s, nuance: 'Đồng nghĩa' })),
       antonyms: result.antonyms || [],
       collocations: result.collocations || [],
-      topic: interestContext || 'IELTS Lexical Resource',
-      difficulty: (result.cefrLevel as any) || 'C1',
+      topicDeck: interestContext || 'IELTS Lexical Resource',
+      cefrLevel: (result.cefrLevel as any) || 'C1',
+      originModule: 'vocabulary',
       srsStage: 0,
+      intervalDays: 1,
+      repetitions: 0,
+      easeFactor: 2.5,
       nextReviewDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      reviewCount: 0,
       mastered: false,
-      createdAt: new Date().toISOString(),
     };
 
     addVocabCard(newCard);

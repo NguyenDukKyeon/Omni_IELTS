@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Zap,
   Target,
+  HelpCircle,
 } from 'lucide-react';
 import { ReadingQuestionType, ReadingPracticeExercise, TrapCategory, QuestionTrapAnalysisInput } from '../../types';
 import { generateReadingPracticeApi } from '../../services/practiceService';
@@ -460,7 +461,7 @@ export const ReadingQuestionModule: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              {exercise.questions.map((q) => {
+              {exercise.questions.map((q, idx) => {
                 const userVal = userAnswers[q.id] || '';
                 const isCorrect =
                   isSubmitted &&

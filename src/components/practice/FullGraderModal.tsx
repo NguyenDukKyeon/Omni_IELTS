@@ -22,6 +22,7 @@ import {
   FullGraderResult,
   StandardErrorObject,
   MistakeEntry,
+  ErrorCategory,
 } from '../../types';
 import { evaluateFullGraderApi } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
@@ -106,8 +107,8 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
     setSavedErrors({});
 
     try {
-      const weakestAxes = profile.estimatedBandRange ? ['lexicalResource', 'coherence'] : [];
-      const recentMistakeTags = Array.from(new Set(mistakes.flatMap((m) => m.tags || []))).slice(0, 5);
+      const weakestAxes: string[] = [];
+      const recentMistakeTags = (Array.from(new Set(mistakes.flatMap((m) => m.tags || []))) as string[]).slice(0, 5);
 
       const data = await evaluateFullGraderApi({
         taskType,
@@ -136,18 +137,30 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
   };
 
   const handleSaveErrorToNotebook = (err: StandardErrorObject, idx: number) => {
+    const errorCat: ErrorCategory =
+      err.errorCategory?.toLowerCase().includes('vocab') || err.errorCategory?.toLowerCase().includes('collocation')
+        ? 'vocab'
+        : err.errorCategory?.toLowerCase().includes('cohesion')
+        ? 'cohesion'
+        : 'grammar';
+
     const newEntry: MistakeEntry = {
       id: `mistake_grader_${Date.now()}_${idx}`,
       skill: taskType.startsWith('writing') ? 'writing' : 'speaking',
-      subType: err.errorTag,
-      originalText: err.originalText,
-      correctedText: err.correctedText,
+      errorText: err.errorSubstring,
+      correctedText: '',
       explanation: err.explanationVi,
-      tags: [err.errorTag, err.severity],
-      severity: err.severity,
-      dateAdded: new Date().toISOString(),
-      srsReviewDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      errorType: errorCat,
+      originModule: 'writing_eval',
+      tags: [err.errorCategory || 'Grammar', err.severity || 'medium'],
       srsStage: 0,
+      intervalDays: 1,
+      repetitions: 0,
+      easeFactor: 2.5,
+      reviewCount: 0,
+      mastered: false,
+      nextReviewDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date().toISOString(),
     };
 
     addMistake(newEntry);

@@ -161,16 +161,27 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
       phonetic: item.srsCardContent.phonetic || '',
       pos: 'phrase / collocation',
       definitionVi: item.srsCardContent.backDefinitionVi,
+      definitionEn: item.srsCardContent.backDefinitionVi,
+      exampleEn: item.srsCardContent.sampleSentence,
+      exampleVi: '',
+      examples: [
+        {
+          en: item.srsCardContent.sampleSentence,
+          vi: '',
+          context: 'Academic',
+        },
+      ],
       collocations: [item.srsCardContent.front],
-      examples: [item.srsCardContent.sampleSentence],
-      topic: 'IELTS High-Yield Accuracy',
-      difficulty: (item.srsCardContent.cefrLevel as any) || 'C1',
+      topicDeck: 'IELTS High-Yield Accuracy',
+      cefrLevel: (item.srsCardContent.cefrLevel as any) || 'C1',
+      originModule: 'writing_eval',
       // Deterministic SRS Initial State
       srsStage: 0,
+      intervalDays: 1,
+      easeFactor: 2.5,
+      repetitions: 0,
       nextReviewDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      reviewCount: 0,
       mastered: false,
-      createdAt: new Date().toISOString(),
     };
 
     addMistake(mistakeEntry);

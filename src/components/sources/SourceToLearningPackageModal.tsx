@@ -101,8 +101,8 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
   if (!isOpen) return null;
 
   // Extract learner weaknesses
-  const weakestAxes = profile.estimatedBandRange ? ['lexicalResource', 'coherence'] : [];
-  const recentMistakeTags = Array.from(new Set(mistakes.flatMap((m) => m.tags || []))).slice(0, 5);
+  const weakestAxes: string[] = [];
+  const recentMistakeTags = (Array.from(new Set(mistakes.flatMap((m) => m.tags || []))) as string[]).slice(0, 5);
 
   const handleGeneratePackage = async (textOverride?: string, bandOverride?: number) => {
     const text = textOverride || sourceText;
@@ -161,17 +161,30 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
       id: `vocab_cd_${Date.now()}_${index}`,
       word: item.word,
       phonetic: item.phonetic || '',
-      pos: 'academic',
+      pos: 'noun',
       definitionVi: item.meaningVi,
+      definitionEn: item.meaningVi,
+      exampleEn: item.example || item.word,
+      exampleVi: '',
       collocations: item.collocation ? [item.collocation] : [],
-      examples: item.example ? [item.example] : [],
-      topic: result?.detectedTopic || 'IELTS Academic Reading/Listening',
-      difficulty: (item.cefrLevel as any) || 'C1',
+      examples: item.example
+        ? [
+            {
+              en: item.example,
+              vi: '',
+              context: 'Academic',
+            },
+          ]
+        : [],
+      topicDeck: result?.detectedTopic || 'IELTS Academic Reading/Listening',
+      cefrLevel: (item.cefrLevel as any) || 'C1',
+      originModule: 'source_import',
       srsStage: 0,
+      intervalDays: 1,
+      repetitions: 0,
+      easeFactor: 2.5,
       nextReviewDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      reviewCount: 0,
       mastered: false,
-      createdAt: new Date().toISOString(),
     };
 
     addVocabCard(newCard);

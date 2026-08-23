@@ -17,6 +17,7 @@ import {
   Search,
   Crosshair,
   Tag,
+  Layers,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MistakeEntry, ErrorCategory, SkillType, TrapCategory } from '../types';
@@ -120,9 +121,9 @@ export const MistakeNotebookModal: React.FC = () => {
   return (
     <div
       id="unified-mistake-notebook-modal"
-      className="fixed inset-0 z-50 bg-stone-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
     >
-      <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl max-w-4xl w-full shadow-2xl overflow-hidden my-4 flex flex-col max-h-[92vh]">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full shadow-2xl overflow-hidden my-4 flex flex-col max-h-[92vh]">
         {/* Modal Header Banner */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-600 via-orange-600 to-rose-600 text-white flex items-center justify-between shrink-0 shadow-md">
           <div className="flex items-center gap-3">
@@ -147,7 +148,7 @@ export const MistakeNotebookModal: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsTaggerOpen(true)}
-              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
             >
               <Tag className="w-3.5 h-3.5" />
               <span>🏷️ AI Error Tagger (Bóc Tách Lỗi Tự Động)</span>
@@ -156,7 +157,7 @@ export const MistakeNotebookModal: React.FC = () => {
             <button
               id="close-mistake-modal-btn"
               onClick={() => setIsMistakeNotebookOpen(false)}
-              className="p-2 rounded-xl hover:bg-white/20 text-white transition-colors"
+              className="p-2 rounded-xl hover:bg-white/20 text-white transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -164,15 +165,15 @@ export const MistakeNotebookModal: React.FC = () => {
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-4 sm:px-6 pt-3 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950 flex items-center justify-between gap-2 overflow-x-auto shrink-0">
+        <div className="px-4 sm:px-6 pt-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between gap-2 overflow-x-auto shrink-0">
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               id="tab-mistake-analytics"
               onClick={() => setActiveTab('analytics')}
-              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
                 activeTab === 'analytics'
-                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-stone-900 shadow-sm'
-                  : 'border-transparent text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white'
+                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-slate-900 shadow-sm'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <BarChart3 className="w-4 h-4" />
@@ -185,10 +186,10 @@ export const MistakeNotebookModal: React.FC = () => {
                 setWorkoutTrapTarget('all');
                 setActiveTab('workout');
               }}
-              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
                 activeTab === 'workout'
-                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-stone-900 shadow-sm'
-                  : 'border-transparent text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white'
+                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-slate-900 shadow-sm'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Flame className="w-4 h-4 text-orange-500" />
@@ -203,10 +204,10 @@ export const MistakeNotebookModal: React.FC = () => {
             <button
               id="tab-mistake-vault"
               onClick={() => setActiveTab('vault')}
-              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
                 activeTab === 'vault'
-                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-stone-900 shadow-sm'
-                  : 'border-transparent text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white'
+                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-slate-900 shadow-sm'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Layers className="w-4 h-4" />
@@ -216,10 +217,10 @@ export const MistakeNotebookModal: React.FC = () => {
             <button
               id="tab-mistake-add"
               onClick={() => setActiveTab('add')}
-              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 sm:px-4 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all shrink-0 cursor-pointer ${
                 activeTab === 'add'
-                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-stone-900 shadow-sm'
-                  : 'border-transparent text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white'
+                  ? 'border-amber-600 text-amber-600 dark:text-amber-400 bg-white dark:bg-slate-900 shadow-sm'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Plus className="w-4 h-4" />
@@ -229,7 +230,7 @@ export const MistakeNotebookModal: React.FC = () => {
         </div>
 
         {/* Modal Main Content Container */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-white dark:bg-stone-900">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-white dark:bg-slate-900">
           {/* TAB 1: ANALYTICS & WEAKNESS RADAR */}
           {activeTab === 'analytics' && (
             <MistakeAnalyticsView
@@ -254,13 +255,13 @@ export const MistakeNotebookModal: React.FC = () => {
               {/* Search & Filters */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-3 text-stone-700 dark:text-stone-300" />
+                  <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Tìm kiếm bẫy, từ khóa..."
-                    className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
                 </div>
 
@@ -268,7 +269,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   <select
                     value={selectedTrapFilter}
                     onChange={(e) => setSelectedTrapFilter(e.target.value as any)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
                   >
                     <option value="all">Tất cả Nhóm Bẫy (8 nhóm)</option>
                     {Object.entries(TRAP_CATEGORY_METAS).map(([k, meta]) => (
@@ -283,7 +284,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   <select
                     value={selectedSkill}
                     onChange={(e) => setSelectedSkill(e.target.value as any)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium"
                   >
                     <option value="all">Tất cả Kỹ năng</option>
                     <option value="reading">Reading</option>
@@ -299,10 +300,10 @@ export const MistakeNotebookModal: React.FC = () => {
               {filteredMistakes.length === 0 ? (
                 <div className="text-center py-12 space-y-2">
                   <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto opacity-70" />
-                  <h4 className="text-sm font-bold text-stone-900 dark:text-white">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                     Không tìm thấy lỗi sai nào trong bộ lọc này
                   </h4>
-                  <p className="text-xs text-stone-700 dark:text-stone-300">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     Hãy thử thay đổi điều kiện lọc hoặc tạo thêm bẫy mới.
                   </p>
                 </div>
@@ -313,7 +314,7 @@ export const MistakeNotebookModal: React.FC = () => {
                     return (
                       <div
                         key={m.id}
-                        className="p-4 rounded-2xl bg-stone-50/80 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700/80 hover:border-amber-400 dark:hover:border-amber-600 transition-all space-y-3"
+                        className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 hover:border-amber-400 dark:hover:border-amber-600 transition-all space-y-3"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
@@ -324,12 +325,12 @@ export const MistakeNotebookModal: React.FC = () => {
                                 {trapMeta.titleVi}
                               </span>
                             ) : (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-200 dark:bg-stone-700 text-stone-800 dark:text-stone-200 uppercase">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 uppercase">
                                 {m.errorType}
                               </span>
                             )}
 
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-stone-200/60 dark:bg-stone-700/60 text-stone-700 dark:text-stone-300">
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300">
                               {m.skill}
                             </span>
                           </div>
@@ -347,7 +348,7 @@ export const MistakeNotebookModal: React.FC = () => {
 
                             <button
                               onClick={() => deleteMistake(m.id)}
-                              className="p-1 text-stone-700 hover:text-rose-500 transition-colors"
+                              className="p-1 text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
                               title="Xóa lỗi này"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -373,7 +374,7 @@ export const MistakeNotebookModal: React.FC = () => {
                         </div>
 
                         {/* Trap Breakdown & Explanation */}
-                        <div className="text-xs text-stone-700 dark:text-stone-300 space-y-1">
+                        <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1">
                           {m.trapBreakdownVi && (
                             <p className="text-amber-800 dark:text-amber-300 text-[11px] leading-relaxed">
                               <strong>🔍 Mổ xẻ bẫy:</strong> {m.trapBreakdownVi}
@@ -383,17 +384,17 @@ export const MistakeNotebookModal: React.FC = () => {
                             <strong>📖 Giải thích:</strong> {m.explanation}
                           </p>
                           {m.examinerTipVi && (
-                            <p className="text-stone-700 dark:text-stone-300 text-[11px] italic">
+                            <p className="text-slate-500 dark:text-slate-400 text-[11px] italic">
                               💡 <strong>Mẹo Giám khảo:</strong> {m.examinerTipVi}
                             </p>
                           )}
                         </div>
 
                         {/* Card Actions */}
-                        <div className="pt-2 border-t border-stone-200 dark:border-stone-700/60 flex items-center justify-between text-xs">
+                        <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
                           <button
                             onClick={() => playTextToSpeech(m.correctedText || m.errorText)}
-                            className="flex items-center gap-1 text-stone-700 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                            className="flex items-center gap-1 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors cursor-pointer"
                           >
                             <Volume2 className="w-3.5 h-3.5" />
                             <span>Nghe phát âm</span>
@@ -401,7 +402,7 @@ export const MistakeNotebookModal: React.FC = () => {
 
                           <button
                             onClick={() => handleStartTargetedDrill(m.trapCategory)}
-                            className="flex items-center gap-1 px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] transition-colors"
+                            className="flex items-center gap-1 px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
                           >
                             <Crosshair className="w-3 h-3" />
                             <span>Luyện tập dạng này</span>
@@ -419,23 +420,23 @@ export const MistakeNotebookModal: React.FC = () => {
           {activeTab === 'add' && (
             <form onSubmit={handleCreateMistake} className="space-y-4 max-w-xl mx-auto py-2">
               <div className="text-center space-y-1 pb-2">
-                <h3 className="text-base font-bold text-stone-900 dark:text-white">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Thêm Bẫy / Lỗi Sai Vào Sổ Tay Cá Nhân
                 </h3>
-                <p className="text-xs text-stone-700 dark:text-stone-300">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Ghi lại các bẫy bạn tự làm sai khi luyện đề bên ngoài để thuật toán SRS nhắc nhở.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-stone-700 dark:text-stone-300 block mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     Nhóm Bẫy:
                   </label>
                   <select
                     value={newTrapCategory}
                     onChange={(e) => setNewTrapCategory(e.target.value as any)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
                     {Object.entries(TRAP_CATEGORY_METAS).map(([k, meta]) => (
                       <option key={k} value={k}>
@@ -446,13 +447,13 @@ export const MistakeNotebookModal: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-stone-700 dark:text-stone-300 block mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     Kỹ Năng:
                   </label>
                   <select
                     value={newSkill}
                     onChange={(e) => setNewSkill(e.target.value as any)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
                     <option value="reading">Reading</option>
                     <option value="listening">Listening</option>
@@ -463,13 +464,13 @@ export const MistakeNotebookModal: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-stone-700 dark:text-stone-300 block mb-1">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     Phân Loại Lỗi:
                   </label>
                   <select
                     value={newErrorType}
                     onChange={(e) => setNewErrorType(e.target.value as any)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
                     <option value="task_response">Bẫy đề thi (Task Response)</option>
                     <option value="grammar">Ngữ pháp (Grammar)</option>
@@ -489,7 +490,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   value={newErrorText}
                   onChange={(e) => setNewErrorText(e.target.value)}
                   placeholder="Ví dụ: Statement: Government subsidizes all companies (Thí sinh chọn FALSE)..."
-                  className="w-full text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   required
                 />
               </div>
@@ -503,13 +504,13 @@ export const MistakeNotebookModal: React.FC = () => {
                   value={newCorrectedText}
                   onChange={(e) => setNewCorrectedText(e.target.value)}
                   placeholder="Ví dụ: Đáp án chuẩn: NOT GIVEN..."
-                  className="w-full text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   required
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-stone-700 dark:text-stone-300 block mb-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
                   Giải thích chi tiết:
                 </label>
                 <textarea
@@ -517,7 +518,7 @@ export const MistakeNotebookModal: React.FC = () => {
                   value={newExplanation}
                   onChange={(e) => setNewExplanation(e.target.value)}
                   placeholder="Giải thích vì sao câu ban đầu sai..."
-                  className="w-full text-xs p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />
               </div>
 
@@ -525,13 +526,13 @@ export const MistakeNotebookModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setActiveTab('vault')}
-                  className="px-4 py-2 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-bold rounded-xl"
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white text-xs font-bold rounded-xl shadow-md"
+                  className="px-6 py-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer"
                 >
                   Lưu vào Sổ Tay Bẫy
                 </button>

@@ -11,6 +11,11 @@ export const XP_REWARDS = {
   PRACTICE_COMPLETED: 50,
   MOCK_TEST_COMPLETED: 100,
   DIAGNOSTIC_COMPLETED: 80,
+  EXERCISE_COMPLETED: 25,
+  GRAMMAR_PRACTICE: 20,
+  ESSAY_FEEDBACK_REVIEWED: 30,
+  ESSAY_EVALUATION: 50,
+  FLASHCARD_REVIEWED: 5,
 };
 
 export function calculateLevel(totalXP: number): { level: number; currentLevelXP: number; nextLevelXP: number; progressPercent: number } {

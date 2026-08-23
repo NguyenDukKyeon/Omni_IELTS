@@ -70,8 +70,8 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
   if (!isOpen) return null;
 
   // Learner profile context
-  const weakestAxes = profile.estimatedBandRange ? ['lexicalResource', 'coherence'] : [];
-  const recentMistakeTags = Array.from(new Set(mistakes.flatMap((m) => m.tags || []))).slice(0, 5);
+  const weakestAxes: string[] = [];
+  const recentMistakeTags = (Array.from(new Set(mistakes.flatMap((m) => m.tags || []))) as string[]).slice(0, 5);
 
   const handleGenerate = async (topicOverride?: string, countOverride?: number) => {
     const targetTopic = topicOverride || topicInput;

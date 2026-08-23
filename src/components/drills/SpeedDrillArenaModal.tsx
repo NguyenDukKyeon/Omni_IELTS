@@ -63,8 +63,9 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setActiveType(initialChallengeType);
-      handleLoadChallenge(initialChallengeType);
+      const targetType = (initialChallengeType as ChallengeType) || 'paraphrase_blitz';
+      setActiveType(targetType);
+      handleLoadChallenge(targetType);
     } else {
       setChallenge(null);
       setEvaluation(null);

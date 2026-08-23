@@ -140,15 +140,20 @@ export const Header: React.FC = () => {
             </div>
           </div>
 
-          {/* Dark Mode Toggle */}
+          {/* Dark Mode Toggle with Practice Izone Pill Switcher */}
           <button
             id="darkmode-toggle-btn"
             onClick={toggleDarkMode}
-            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            title={darkMode ? 'Chuyển sang Giao diện Sáng' : 'Chuyển sang Giao diện Tối'}
+            className="flex items-center gap-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100/90 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-white dark:hover:bg-slate-750 transition-all cursor-pointer shadow-xs group"
+            title={darkMode ? 'Chuyển sang Giao diện Sáng (Izone Light)' : 'Chuyển sang Giao diện Tối (Izone Dark / Midnight)'}
             aria-label="Toggle theme"
           >
-            {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+            <div className="w-5 h-5 rounded-lg flex items-center justify-center bg-white dark:bg-slate-700 text-amber-500 dark:text-amber-300 shadow-xs group-hover:scale-105 transition-transform">
+              {darkMode ? <Moon className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> : <Sun className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />}
+            </div>
+            <span className="text-[11px] font-semibold hidden md:inline text-slate-600 dark:text-slate-300">
+              {darkMode ? 'Dark' : 'Light'}
+            </span>
           </button>
 
           {/* Profile Quick Button */}

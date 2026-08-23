@@ -13,6 +13,7 @@ import {
   ArrowRight,
   FileText,
   Users,
+  Lightbulb,
 } from 'lucide-react';
 import {
   WritingPracticeType,

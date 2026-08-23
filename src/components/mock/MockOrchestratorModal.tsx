@@ -75,8 +75,8 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
 
   if (!isOpen) return null;
 
-  const weakestAxes = profile.estimatedBandRange ? ['lexicalResource', 'coherence'] : [];
-  const recentMistakeTags = Array.from(new Set(mistakes.flatMap((m) => m.tags || []))).slice(0, 5);
+  const weakestAxes: string[] = [];
+  const recentMistakeTags = (Array.from(new Set(mistakes.flatMap((m) => m.tags || []))) as string[]).slice(0, 5);
   const recentPromptIds = mockResults.map((m) => m.testId).slice(0, 10);
 
   const handleAssemble = async () => {
