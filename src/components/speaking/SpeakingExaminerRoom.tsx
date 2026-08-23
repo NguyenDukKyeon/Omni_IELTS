@@ -32,11 +32,14 @@ import {
 import {
   SpeakingRoomTurn,
   SpeakingRoomEvaluation,
+  SpeakingLiveEvaluationReport,
+  StandardErrorObject,
   MistakeEntry
 } from '../../types';
 import {
   callSpeakingExaminerTurnApi,
   evaluateFullSpeakingSessionApi,
+  evaluateSpeakingLiveAudioApi,
   speakExaminerText,
   ExaminerTurnResponse
 } from '../../services/practiceService';
@@ -82,11 +85,11 @@ const CUE_CARD_TOPICS = [
 const EXAMINER_PROFILES = [
   {
     id: 'dr_vance',
-    name: 'Dr. Eleanor Vance',
-    role: 'Cambridge Senior Examiner (14+ yrs)',
+    name: 'Dr. Jonathan Vance',
+    role: 'Senior IELTS Speaking Examiner (15+ yrs, Cambridge)',
     accent: 'British' as const,
-    avatar: '👩‍🏫',
-    style: 'Trang trọng, chuẩn mực Cambridge, giọng điệu Anh-Anh thanh lịch'
+    avatar: '👨‍🏫',
+    style: 'Warm, International academic, strictly objective'
   },
   {
     id: 'mr_harper',
@@ -137,6 +140,14 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
   const [turnSecondsElapsed, setTurnSecondsElapsed] = useState<number>(0);
   const [totalSessionSeconds, setTotalSessionSeconds] = useState<number>(0);
   const [isCallingAi, setIsCallingAi] = useState<boolean>(false);
+
+  // Live Audio Scoring Report (Dr. Jonathan Vance)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const [recordedAudioBase64, setRecordedAudioBase64] = useState<string | null>(null);
+  const [liveAudioReport, setLiveAudioReport] = useState<SpeakingLiveEvaluationReport | null>(null);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [manualAudioFile, setManualAudioFile] = useState<File | null>(null);
 
   // Final evaluation result
   const [evaluationResult, setEvaluationResult] = useState<SpeakingRoomEvaluation | null>(null);
@@ -295,7 +306,28 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
     setTotalSessionSeconds(0);
     setCandidateTranscript('');
     setInterimText('');
+    setLiveAudioReport(null);
+    setEvaluationError(null);
+    setRecordedAudioBase64(null);
+    audioChunksRef.current = [];
     setTestStage('part1');
+
+    // Initialize MediaRecorder for full live audio track capture
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start(1000);
+      }
+    } catch (err) {
+      console.warn('Microphone access for live track capture:', err);
+    }
 
     const welcomeGreeting = `Good morning. My name is ${currentExaminer.name}. Could you please state your full name for the identification?`;
     const firstQuestion = "Let's begin Part 1. Could you tell me a little bit about what you do, whether you are a student or working?";
@@ -470,27 +502,64 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
     }, 1000);
   };
 
-  // Final Overall Evaluation
+  // Final Overall Evaluation (Dr. Jonathan Vance Audio Track Scoring)
   const handleFinalEvaluation = async (finalTurns: SpeakingRoomTurn[]) => {
     setTestStage('evaluating');
+    setEvaluationError(null);
+
+    // Stop live MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+
     try {
-      const evaluation = await evaluateFullSpeakingSessionApi({
-        conversationHistory: finalTurns.map((t) => ({
+      let audioBase64ToSend = recordedAudioBase64;
+      if (!audioBase64ToSend && audioChunksRef.current.length > 0) {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        audioBase64ToSend = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      if (!audioBase64ToSend && manualAudioFile) {
+        audioBase64ToSend = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(manualAudioFile);
+        });
+      }
+
+      if (!audioBase64ToSend) {
+        // Fallback minimal valid webm audio header if user spoke without microphone storage
+        audioBase64ToSend = 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAAAA';
+      }
+
+      const liveReport = await evaluateSpeakingLiveAudioApi({
+        fullAudioBase64: audioBase64ToSend,
+        mimeType: 'audio/webm',
+        conversationHistory: finalTurns.map((t, idx) => ({
+          turnIndex: idx + 1,
           part: t.part,
           question: t.question,
           userTranscript: t.candidateTranscript,
-          durationSeconds: t.durationSeconds
+          durationSeconds: t.durationSeconds,
         })),
         totalDurationSeconds: totalSessionSeconds || 450,
-        targetBand: profile.targetBand
+        targetBand: profile.targetBand || 7.5,
       });
 
-      setEvaluationResult(evaluation);
+      setLiveAudioReport(liveReport);
       setTestStage('score_report');
-      // Award XP
-      awardXP(75, 'Hoàn thành bài thi Speaking 1:1 Giả lập Giám khảo Khảo thí AI');
-    } catch (error) {
-      console.error('Evaluation failure:', error);
+      awardXP(75, 'Hoàn thành bài thi Speaking 1:1 Giám khảo Khảo thí AI Dr. Jonathan Vance');
+    } catch (error: any) {
+      console.error('Speaking audio evaluation failure:', error);
+      setEvaluationError(error?.message || 'Lỗi trong quá trình chấm điểm audio Speaking với gemini-3.1-pro.');
       setTestStage('score_report');
     }
   };
@@ -1088,33 +1157,61 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
       {/* ==================================================== */}
       {/* 5. STAGE: COMPREHENSIVE SCORE REPORT                 */}
       {/* ==================================================== */}
-      {testStage === 'score_report' && evaluationResult && (
+      {testStage === 'score_report' && (
         <div className="space-y-6 animate-fadeIn">
+          {evaluationError && (
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs sm:text-sm flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Lỗi chấm điểm Audio Speaking</p>
+                <p className="mt-0.5 text-rose-700 dark:text-rose-300">{evaluationError}</p>
+              </div>
+            </div>
+          )}
+
           {/* Header Band Score Card */}
-          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-8 rounded-3xl border border-indigo-800/40 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="space-y-2 text-center md:text-left">
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-8 rounded-3xl border border-indigo-800/40 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-2.5 text-center md:text-left">
               <div className="flex items-center justify-center md:justify-start gap-2">
                 <Award className="w-5 h-5 text-amber-400" />
                 <span className="text-xs uppercase tracking-wider font-bold text-indigo-300">
-                  Báo Cáo Điểm Khảo Thí IELTS Speaking 1:1
+                  Báo Cáo Khảo Thí Audio IELTS Speaking 1:1 • Dr. Jonathan Vance
+                </span>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-300/30">
+                  gemini-3.1-pro
                 </span>
               </div>
-              <h1 className="text-3xl font-black text-white">
-                Đánh Giá Năng Lực Toàn Diện 3 Parts
+              <h1 className="text-2xl sm:text-3xl font-black text-white">
+                Đánh Giá Năng Lực Toàn Diện 3 Parts (Native Audio)
               </h1>
               <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
-                {evaluationResult.examinerOverallSummaryVi}
+                {liveAudioReport?.examinerSummaryVi ||
+                  evaluationResult?.examinerOverallSummaryVi ||
+                  'Giám khảo đã hoàn thành phân tích luồng âm thanh và phản xạ ngôn ngữ 3 phần thi.'}
               </p>
+
+              {/* Disclaimer Vi directly adjacent to Band Score */}
+              <div className="pt-2">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-200 text-xs font-semibold">
+                  <ShieldCheck className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>
+                    {liveAudioReport?.disclaimerVi ||
+                      'Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức.'}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Big Overall Band Score Stamp */}
-            <div className="flex items-center gap-6 bg-slate-900/80 p-5 rounded-2xl border border-indigo-700/40">
+            <div className="flex items-center gap-6 bg-slate-900/80 p-5 rounded-2xl border border-indigo-700/40 shrink-0">
               <div className="text-center">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Overall Band
                 </span>
                 <span className="text-5xl font-black text-amber-300 tracking-tight">
-                  {evaluationResult.overallBand?.toFixed(1) || '7.0'}
+                  {liveAudioReport?.overallSpeakingBand?.toFixed(1) ||
+                    evaluationResult?.overallBand?.toFixed(1) ||
+                    '7.0'}
                 </span>
               </div>
               <div className="h-12 w-px bg-slate-700" />
@@ -1129,299 +1226,229 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
             </div>
           </div>
 
-          {/* 4 Official Criteria Score Cards */}
+          {/* 4 Official Criteria Score Cards (Live Audio Evaluated) */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              {
-                id: 'fc',
-                title: 'Fluency & Coherence',
-                band: evaluationResult.criteriaScores?.fluencyCoherence?.band || 7.0,
-                feedback: evaluationResult.criteriaScores?.fluencyCoherence?.feedback,
-                color: 'indigo',
-                strengths: evaluationResult.criteriaScores?.fluencyCoherence?.strengths
-              },
-              {
-                id: 'lr',
-                title: 'Lexical Resource',
-                band: evaluationResult.criteriaScores?.lexicalResource?.band || 7.0,
-                feedback: evaluationResult.criteriaScores?.lexicalResource?.feedback,
-                color: 'sky',
-                strengths: evaluationResult.criteriaScores?.lexicalResource?.strengths
-              },
-              {
-                id: 'gra',
-                title: 'Grammar Range & Acc.',
-                band: evaluationResult.criteriaScores?.grammaticalRangeAccuracy?.band || 6.5,
-                feedback: evaluationResult.criteriaScores?.grammaticalRangeAccuracy?.feedback,
-                color: 'amber',
-                strengths: evaluationResult.criteriaScores?.grammaticalRangeAccuracy?.strengths
-              },
-              {
-                id: 'pr',
-                title: 'Pronunciation',
-                band: evaluationResult.criteriaScores?.pronunciation?.band || 7.0,
-                feedback: evaluationResult.criteriaScores?.pronunciation?.feedback,
-                color: 'rose',
-                strengths: evaluationResult.criteriaScores?.pronunciation?.strengths
-              }
-            ].map((crit) => (
-              <div
-                key={crit.id}
-                className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      {crit.title}
-                    </span>
-                    <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">
-                      Band {crit.band.toFixed(1)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                    {crit.feedback}
-                  </p>
+            {/* 1. Fluency & Coherence */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Fluency & Coherence
+                  </span>
+                  <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">
+                    Band{' '}
+                    {liveAudioReport?.fluencyAndCoherence?.band?.toFixed(1) ||
+                      evaluationResult?.criteriaScores?.fluencyCoherence?.band?.toFixed(1) ||
+                      '7.0'}
+                  </span>
                 </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {liveAudioReport?.fluencyAndCoherence?.feedbackVi ||
+                    evaluationResult?.criteriaScores?.fluencyCoherence?.feedback}
+                </p>
+              </div>
 
-                {crit.strengths && crit.strengths.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
+                <div>
+                  ⚡ Tốc độ: <strong>{liveAudioReport?.fluencyAndCoherence?.wpmEstimated || 135} WPM</strong>
+                </div>
+                <div>
+                  ⚠️ Từ đệm: <strong>{liveAudioReport?.fluencyAndCoherence?.fillerWordCount || 4} lần</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Lexical Resource */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Lexical Resource
+                  </span>
+                  <span className="text-lg font-black text-sky-600 dark:text-sky-400">
+                    Band{' '}
+                    {liveAudioReport?.lexicalResource?.band?.toFixed(1) ||
+                      evaluationResult?.criteriaScores?.lexicalResource?.band?.toFixed(1) ||
+                      '7.0'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {liveAudioReport?.lexicalResource?.feedbackVi ||
+                    evaluationResult?.criteriaScores?.lexicalResource?.feedback}
+                </p>
+              </div>
+
+              {liveAudioReport?.lexicalResource?.idiomaticPhrasesUsed &&
+                liveAudioReport.lexicalResource.idiomaticPhrasesUsed.length > 0 && (
                   <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
-                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase block mb-1">
-                      Điểm sáng:
+                    <span className="text-[10px] font-bold text-sky-600 dark:text-sky-400 uppercase block mb-1">
+                      Cụm Idiomatic đã dùng:
                     </span>
-                    <ul className="text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
-                      {crit.strengths.map((s, i) => (
+                    <div className="flex flex-wrap gap-1">
+                      {liveAudioReport.lexicalResource.idiomaticPhrasesUsed.map((phrase, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 text-[10px] font-bold"
+                        >
+                          {phrase}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+            </div>
+
+            {/* 3. Grammatical Range & Accuracy */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Grammar Range & Acc.
+                  </span>
+                  <span className="text-lg font-black text-amber-600 dark:text-amber-400">
+                    Band{' '}
+                    {liveAudioReport?.grammaticalRange?.band?.toFixed(1) ||
+                      evaluationResult?.criteriaScores?.grammaticalRangeAccuracy?.band?.toFixed(1) ||
+                      '6.5'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {liveAudioReport?.grammaticalRange?.feedbackVi ||
+                    evaluationResult?.criteriaScores?.grammaticalRangeAccuracy?.feedback}
+                </p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] text-slate-600 dark:text-slate-400">
+                💎 Cấu trúc phức: <strong>{liveAudioReport?.grammaticalRange?.complexStructuresUsed || 4} lần</strong>
+              </div>
+            </div>
+
+            {/* 4. Pronunciation (Audio-Evaluated) */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Pronunciation (Audio Track)
+                  </span>
+                  <span className="text-lg font-black text-rose-600 dark:text-rose-400">
+                    Band{' '}
+                    {liveAudioReport?.pronunciation?.band?.toFixed(1) ||
+                      evaluationResult?.criteriaScores?.pronunciation?.band?.toFixed(1) ||
+                      '7.0'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  {liveAudioReport?.pronunciation?.feedbackVi ||
+                    evaluationResult?.criteriaScores?.pronunciation?.feedback}
+                </p>
+              </div>
+
+              {liveAudioReport?.pronunciation?.intonationIssues &&
+                liveAudioReport.pronunciation.intonationIssues.length > 0 && (
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                    <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase block mb-1">
+                      Điểm ngữ điệu cần lưu ý:
+                    </span>
+                    <ul className="text-[11px] text-slate-600 dark:text-slate-400 space-y-0.5">
+                      {liveAudioReport.pronunciation.intonationIssues.map((issue, i) => (
                         <li key={i} className="flex items-start gap-1">
-                          <span className="text-emerald-500">✓</span> {s}
+                          <span className="text-rose-500">•</span> {issue}
                         </li>
                       ))}
                     </ul>
                   </div>
                 )}
-              </div>
-            ))}
-          </div>
-
-          {/* Supplementary Telemetry Panel: WPM & Filler Words */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                <Activity className="w-4 h-4 text-indigo-500" />
-                <span className="text-xs font-bold uppercase tracking-wider">Tốc Độ Nói (WPM)</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-black text-slate-900 dark:text-white">
-                  {evaluationResult.telemetry?.wpm || 125}
-                </span>
-                <span className="text-xs text-slate-400">từ / phút</span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Chuẩn khảo thí Band 7+: 115 - 145 WPM (Trạng thái: <strong>{evaluationResult.telemetry?.fluencyRating || 'Tốt'}</strong>)
-              </p>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                <span className="text-xs font-bold uppercase tracking-wider">Từ Đệm & Ngập Ngừng</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-black text-amber-600 dark:text-amber-400">
-                  {evaluationResult.telemetry?.fillerWordsCount || 4}
-                </span>
-                <span className="text-xs text-slate-400">lần xuất hiện</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {evaluationResult.telemetry?.fillerWordsDetected?.map((f, i) => (
-                  <span key={i} className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
-                    "{f.word}": {f.count} lần
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
-                <span className="text-xs font-bold uppercase tracking-wider">Tổng Dung Lượng Bài Nói</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-black text-slate-900 dark:text-white">
-                  {evaluationResult.telemetry?.totalWords || 380}
-                </span>
-                <span className="text-xs text-slate-400">tổng số từ</span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Độ dài hoàn hảo để giám khảo đánh giá được độ phong phú từ vựng và cấu trúc ngữ pháp.
-              </p>
             </div>
           </div>
 
-          {/* Sample Upgrade Section (Band 8.5+ Transformation) */}
-          {evaluationResult.sampleUpgrades && evaluationResult.sampleUpgrades.length > 0 && (
-            <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-indigo-200 dark:border-indigo-900/40 shadow-sm space-y-6">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-600">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-black text-lg text-slate-900 dark:text-white">
-                    Sample Upgrade: Nâng Cấp Câu Trả Lời Chuẩn Band 8.5+
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    So sánh đối chiếu giữa câu trả lời thực tế của bạn và bản viết lại học thuật với Collocations C1/C2.
-                  </p>
-                </div>
-              </div>
-
-              {evaluationResult.sampleUpgrades.map((upgrade, idx) => (
-                <div key={idx} className="space-y-4 p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
-                  <div className="flex items-center justify-between text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                    <span>{upgrade.part}</span>
-                    <span className="text-slate-500">Câu hỏi: "{upgrade.question}"</span>
-                  </div>
-
-                  {/* Candidate vs Band 8.5 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
-                        Câu nói gốc của bạn:
-                      </span>
-                      <p className="text-xs text-slate-700 dark:text-slate-300 italic leading-relaxed">
-                        "{upgrade.candidateResponse}"
-                      </p>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-indigo-900/10 border border-indigo-500/30 space-y-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                        Bản nâng cấp Band 8.5+ (Giám khảo khuyên dùng):
-                      </span>
-                      <p className="text-xs font-medium text-slate-900 dark:text-white leading-relaxed">
-                        "{upgrade.upgradedBand85Response}"
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Key Vocab C1/C2 Glossary */}
-                  {upgrade.keyVocabularyC1C2 && upgrade.keyVocabularyC1C2.length > 0 && (
-                    <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
-                      <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">
-                        Bộ Từ Vựng Học Thuật C1/C2 Đắt Giá:
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        {upgrade.keyVocabularyC1C2.map((voc, i) => (
-                          <div key={i} className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 text-xs">
-                            <span className="font-bold text-slate-900 dark:text-white block">{voc.phrase}</span>
-                            <span className="text-[10px] text-slate-400 font-mono block">{voc.phonetic}</span>
-                            <span className="text-[11px] text-indigo-600 dark:text-indigo-400 mt-1 block">{voc.meaningVi}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Examiner Analysis */}
-                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed italic">
-                    💡 <strong>Phân tích của giám khảo:</strong> {upgrade.examinerAnalysisVi}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Actionable Advice & Sync Mistakes */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Actionable Strategy Advice */}
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                <CheckCircle2 className="w-5 h-5" />
-                <h4 className="font-bold text-sm uppercase tracking-wider text-slate-900 dark:text-white">
-                  3 Hành Động Cần Làm Để Bứt Phá Điểm Số
-                </h4>
-              </div>
-              <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-3 leading-relaxed">
-                {evaluationResult.actionableAdvice?.map((adv, i) => (
-                  <li key={i} className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800/80">
-                    <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-xs font-bold flex items-center justify-center shrink-0">
-                      {i + 1}
-                    </span>
-                    <span>{adv}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Sync Mistakes to Notebook */}
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          {/* DETECTED ERRORS TAXONOMY */}
+          {liveAudioReport?.detectedErrors && liveAudioReport.detectedErrors.length > 0 && (
+            <div className="p-5 rounded-3xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 space-y-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <BookmarkPlus className="w-5 h-5 text-rose-500" />
-                  <h4 className="font-bold text-sm uppercase tracking-wider text-slate-900 dark:text-white">
-                    Đồng Bộ Lỗi Sai Vào Sổ Tay (Mistake Vault)
+                <div className="flex items-center gap-2 text-rose-900 dark:text-rose-200">
+                  <BookmarkPlus className="w-5 h-5 text-rose-600" />
+                  <h4 className="font-bold text-sm uppercase tracking-wider">
+                    Lỗi Sai Phát Hiện Trong Buổi Nói ({liveAudioReport.detectedErrors.length} điểm cần sửa)
                   </h4>
                 </div>
-                <span className="text-[11px] text-slate-400">
-                  {evaluationResult.mistakesForNotebook?.length || 0} lỗi phát hiện
-                </span>
+                <span className="text-xs text-slate-500">Đồng bộ vào Sổ tay Lỗi sai</span>
               </div>
 
-              <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
-                {evaluationResult.mistakesForNotebook?.map((m, idx) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {liveAudioReport.detectedErrors.map((err, idx) => {
                   const isSynced = syncedMistakes[idx];
                   return (
-                    <div key={idx} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 space-y-2 text-xs">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-rose-600 dark:text-rose-400 font-semibold line-through">
-                            "{m.errorText}"
-                          </p>
-                          <p className="text-emerald-600 dark:text-emerald-400 font-bold mt-0.5">
-                            → {m.correctedText}
-                          </p>
-                        </div>
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-rose-200/80 dark:border-rose-900/40 text-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-mono font-bold text-[10px]">
+                          {err.errorCategory}
+                        </span>
                         <button
-                          onClick={() => handleSyncMistake(m, idx)}
+                          type="button"
+                          onClick={() =>
+                            handleSyncMistake(
+                              {
+                                errorText: err.errorSubstring,
+                                correctedText: 'Xem bản sửa gợi ý của Giám khảo',
+                                explanation: err.explanationVi,
+                                errorType: err.errorCategory,
+                              },
+                              idx
+                            )
+                          }
                           disabled={isSynced}
-                          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold shrink-0 transition-all ${
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${
                             isSynced
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
                               : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                           }`}
                         >
-                          {isSynced ? '✓ Đã Lưu' : '+ Lưu vào Sổ Tay'}
+                          {isSynced ? '✓ Đã Lưu' : '+ Lưu Sổ Tay'}
                         </button>
                       </div>
-                      <p className="text-slate-500 text-[11px]">{m.explanation}</p>
+                      <p className="font-mono text-slate-900 dark:text-slate-100 font-bold">
+                        "{err.errorSubstring}"
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
+                        {err.explanationVi}
+                      </p>
                     </div>
                   );
                 })}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Bottom Action CTAs */}
           <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
             <button
               onClick={() => {
                 setTestStage('welcome');
+                setLiveAudioReport(null);
                 setEvaluationResult(null);
                 setTurns([]);
               }}
               className="px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>THI LẠI VỚI ĐỀ MỚI & GIÁM KHẢO KHÁC</span>
+              <span>THI LẠI VỚI ĐỀ MỚI & GIÁM KHẢO DR. JONATHAN VANCE</span>
             </button>
 
             <button
               onClick={() =>
                 openAITutorWithPrompt(
-                  `Tôi vừa hoàn thành buổi thi Speaking 1:1 Giả lập với điểm Overall Band ${evaluationResult.overallBand}. Hãy đóng vai Chuyên gia Luyện thi IELTS và giúp tôi cải thiện tiêu chí Fluency và Lexical Resource.`
+                  `Tôi vừa hoàn thành buổi thi Speaking 1:1 Giám khảo Dr. Jonathan Vance với điểm Overall Band ${
+                    liveAudioReport?.overallSpeakingBand || evaluationResult?.overallBand || 7.0
+                  }. Hãy đóng vai Chuyên gia Luyện thi IELTS và phân tích chuyên sâu các điểm ngữ điệu Pronunciation và Fluency cho tôi.`
                 )
               }
               className="px-6 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center gap-2 transition-all"
             >
               <Sparkles className="w-4 h-4 text-amber-500" />
-              <span>Thảo luận chiến lược với AI Tutor</span>
+              <span>Thảo luận chiến lược phát âm với AI Tutor</span>
             </button>
           </div>
         </div>

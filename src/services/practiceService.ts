@@ -12,6 +12,8 @@ import {
   EssayUpgradeResult,
   SentenceAcademicStylistInput,
   SentenceAcademicStylistResult,
+  SpeakingLiveAudioScoringInput,
+  SpeakingLiveEvaluationReport,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -188,6 +190,21 @@ export async function evaluateFullSpeakingSessionApi(params: {
     body: JSON.stringify(params),
   });
   if (!res.ok) throw new Error('Không thể tạo bảng điểm Speaking.');
+  return await res.json();
+}
+
+export async function evaluateSpeakingLiveAudioApi(
+  params: SpeakingLiveAudioScoringInput
+): Promise<SpeakingLiveEvaluationReport> {
+  const res = await fetch('/api/gemini/speaking-live-audio-evaluation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi chấm điểm Audio Speaking (HTTP ${res.status}).`);
+  }
   return await res.json();
 }
 
