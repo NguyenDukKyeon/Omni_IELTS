@@ -28,6 +28,8 @@ import {
   VocabEnricherResult,
   GrammarCurriculumInput,
   GrammarCurriculumResult,
+  ItemWriterPracticeInput,
+  ItemWriterPracticeResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -342,6 +344,21 @@ export async function generateGrammarCurriculumLessonApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi thiết kế bài học ngữ pháp (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function generateItemWriterPracticeApi(
+  params: ItemWriterPracticeInput
+): Promise<ItemWriterPracticeResult> {
+  const res = await fetch('/api/practice/item-writer-generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi sinh câu hỏi luyện tập (HTTP ${res.status}).`);
   }
   return await res.json();
 }
