@@ -22,11 +22,13 @@ import {
   Globe,
   UploadCloud,
   Check,
+  GraduationCap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LearningSource, SourceType, ExtractedVocabItem } from '../types';
 import { analyzeLearningSourceApi, fetchUrlContentApi } from '../services/aiTutor';
 import { LessonPackViewer } from '../components/LessonPackViewer';
+import { SourceToLearningPackageModal } from '../components/sources/SourceToLearningPackageModal';
 
 export const SourceIngestionView: React.FC = () => {
   const { sources, addSource, deleteSource, addVocabCard, awardXP } = useApp();
@@ -44,6 +46,7 @@ export const SourceIngestionView: React.FC = () => {
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [fetchUrlSuccess, setFetchUrlSuccess] = useState(false);
+  const [isCourseDesignerOpen, setIsCourseDesignerOpen] = useState(false);
 
   // Batch Ingestion State
   const [batchSources, setBatchSources] = useState<
@@ -264,31 +267,42 @@ export const SourceIngestionView: React.FC = () => {
           </p>
         </div>
 
-        {/* Mode Switcher */}
-        <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+        <div className="flex items-center gap-2">
           <button
-            id="mode-single-btn"
-            onClick={() => setIngestionMode('single')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              ingestionMode === 'single'
-                ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
+            type="button"
+            onClick={() => setIsCourseDesignerOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md transition-all"
           >
-            Nạp Nguồn Đơn
+            <GraduationCap className="w-4 h-4" />
+            <span>🎓 AI Course Designer (Gói 4 Kỹ Năng)</span>
           </button>
-          <button
-            id="mode-batch-btn"
-            onClick={() => setIngestionMode('batch')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-              ingestionMode === 'batch'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            <span>Gộp Khoá Mini (Nhiều Nguồn)</span>
-          </button>
+
+          {/* Mode Switcher */}
+          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+            <button
+              id="mode-single-btn"
+              onClick={() => setIngestionMode('single')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                ingestionMode === 'single'
+                  ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              Nạp Nguồn Đơn
+            </button>
+            <button
+              id="mode-batch-btn"
+              onClick={() => setIngestionMode('batch')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                ingestionMode === 'batch'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span>Gộp Khoá Mini (Nhiều Nguồn)</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -858,6 +872,14 @@ export const SourceIngestionView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* AI Course Designer Modal */}
+      <SourceToLearningPackageModal
+        isOpen={isCourseDesignerOpen}
+        onClose={() => setIsCourseDesignerOpen(false)}
+        initialSourceText={rawTextContent || ''}
+        initialTargetBand={targetBand || 7.0}
+      />
     </div>
   );
 };

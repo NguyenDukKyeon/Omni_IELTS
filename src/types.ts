@@ -1524,4 +1524,67 @@ export interface SpeedDrillEvaluationResult {
   detailedBreakdown: SpeedDrillEvaluationBreakdown[];
 }
 
+// ==========================================
+// Source-To-Learning Package Designer Types
+// ==========================================
+
+export interface LearnerProfileWeighting {
+  targetBand?: number;
+  weakestAxes?: string[]; // e.g. ["lexicalResource", "coherence", "taskResponse", "grammaticalAccuracy"]
+  recentMistakeTags?: string[]; // e.g. ["LEXICAL_COLLOCATION", "GRAMMAR_TENSE"]
+}
+
+export interface SourceToLearningPackageInput {
+  sourceText: string;
+  targetBand?: number;
+  learnerProfile?: LearnerProfileWeighting;
+}
+
+export interface CourseDesignerReadingQuestion {
+  type: 'true_false_not_given' | 'matching_headings' | 'sentence_completion' | 'multiple_choice' | 'summary_completion';
+  text: string;
+  options?: string[];
+  answer: string;
+  explanationVi?: string;
+}
+
+export interface CourseDesignerListeningQuestion {
+  type: 'gap_fill' | 'multiple_choice' | 'short_answer';
+  text: string;
+  options?: string[];
+  answer: string;
+  explanationVi?: string;
+}
+
+export interface CourseDesignerVocabItem {
+  word: string;
+  meaningVi: string;
+  phonetic?: string;
+  cefrLevel?: string;
+  collocation?: string;
+  example?: string;
+}
+
+export interface SourceToLearningPackageResult {
+  promptVersion: string; // "source-to-learning-v1"
+  detectedTopic: string;
+  estimatedSourceDifficulty: string; // "B2" | "C1" | "C2"
+  reading: {
+    passage: string;
+    questions: CourseDesignerReadingQuestion[];
+  };
+  listening: {
+    script: string;
+    speakerCount: number;
+    questions: CourseDesignerListeningQuestion[];
+  };
+  speaking: {
+    discussionQuestions: string[];
+  };
+  writing: {
+    prompt: string;
+  };
+  extractedVocabulary: CourseDesignerVocabItem[];
+}
+
 
