@@ -29,6 +29,7 @@ import { WritingExamView } from '../components/mock/WritingExamView';
 import { SpeakingExamView } from '../components/mock/SpeakingExamView';
 import { MockTestReportView } from '../components/mock/MockTestReportView';
 import { MockProgressChart } from '../components/mock/MockProgressChart';
+import { MockOrchestratorModal } from '../components/mock/MockOrchestratorModal';
 import { XP_REWARDS } from '../services/gamification';
 
 type ExamPhase = 'idle' | 'in_progress' | 'evaluating' | 'report_view';
@@ -44,6 +45,7 @@ export const MockTestView: React.FC = () => {
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'available' | 'progress' | 'history'>('available');
+  const [isOrchestratorOpen, setIsOrchestratorOpen] = useState<boolean>(false);
   const [selectedTestPackage, setSelectedTestPackage] = useState<FullMockTestPackage>(CAM_19_TEST_01);
   const [examPhase, setExamPhase] = useState<ExamPhase>('idle');
   const [currentSkill, setCurrentSkill] = useState<MockExamSkill>('listening');
@@ -642,6 +644,35 @@ export const MockTestView: React.FC = () => {
           {/* TAB 1: AVAILABLE TESTS */}
           {activeTab === 'available' && (
             <div className="space-y-6">
+              {/* AI Mock Orchestrator Banner & Trigger */}
+              <div className="p-6 rounded-3xl bg-gradient-to-r from-teal-950 via-slate-900 to-slate-900 border border-teal-800/40 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-teal-400/20 text-teal-300 font-mono font-bold text-[10px] uppercase border border-teal-300/30">
+                      mock-assembler-v1
+                    </span>
+                    <span className="text-xs text-teal-300 font-bold">
+                      Cambridge Full Mock Test Engine
+                    </span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-white">
+                    Tự Động Lắp Ráp & Tổng Hợp Đề Thi Thử 4 Kỹ Năng
+                  </h3>
+                  <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                    Điều phối 40 câu Reading + 40 câu Listening + 2 Task Writing (đề mới không trùng lặp) + Speaking Interview kèm tổng hợp báo cáo Overall Band chuẩn xác.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsOrchestratorOpen(true)}
+                  className="px-5 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md transition-all cursor-pointer shrink-0"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>🧭 Mở Mock Test Orchestrator</span>
+                </button>
+              </div>
+
               {/* Cambridge Full Mock Packages Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {ALL_FULL_MOCK_TESTS.map((pkg) => (
@@ -827,6 +858,12 @@ export const MockTestView: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Mock Test Orchestrator Modal */}
+      <MockOrchestratorModal
+        isOpen={isOrchestratorOpen}
+        onClose={() => setIsOrchestratorOpen(false)}
+      />
     </div>
   );
 };

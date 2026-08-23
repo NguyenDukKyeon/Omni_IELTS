@@ -32,6 +32,10 @@ import {
   ItemWriterPracticeResult,
   FullGraderInput,
   FullGraderResult,
+  MockAssemblerInput,
+  MockAssemblerPackage,
+  MockSynthesizerInput,
+  MockSynthesizerResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -379,6 +383,42 @@ export async function evaluateFullGraderApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi chấm điểm bài thi (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+/**
+ * Assemble Custom 4-Skill Cambridge Mock Exam Package (mock-assembler-v1)
+ */
+export async function assembleFullMockPackageApi(
+  params: MockAssemblerInput
+): Promise<MockAssemblerPackage> {
+  const res = await fetch('/api/mock/assemble-full-package', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi lắp ráp bộ đề thi thử (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+/**
+ * Synthesize Final Mock Exam Report with Deterministic Band Rounding (mock-assembler-v1)
+ */
+export async function synthesizeFinalMockReportApi(
+  params: MockSynthesizerInput
+): Promise<MockSynthesizerResult> {
+  const res = await fetch('/api/mock/synthesize-final-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tổng hợp báo cáo thi thử (HTTP ${res.status}).`);
   }
   return await res.json();
 }
