@@ -19,6 +19,7 @@ import { WritingQuestionModule } from '../components/practice/WritingQuestionMod
 import { SpeakingQuestionModule } from '../components/practice/SpeakingQuestionModule';
 import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
 import { ItemWriterPracticeModal } from '../components/practice/ItemWriterPracticeModal';
+import { FullGraderModal } from '../components/practice/FullGraderModal';
 
 export type PracticeTabType = SkillType | 'forecast_hub';
 
@@ -26,6 +27,7 @@ export const IELTSPracticeView: React.FC = () => {
   const { mistakes, openAITutorWithPrompt } = useApp();
   const [activeTab, setActiveTab] = useState<PracticeTabType>('forecast_hub');
   const [isItemWriterOpen, setIsItemWriterOpen] = useState<boolean>(false);
+  const [isFullGraderOpen, setIsFullGraderOpen] = useState<boolean>(false);
 
   // Count mistake items per skill
   const skillMistakesCount = {
@@ -109,10 +111,18 @@ export const IELTSPracticeView: React.FC = () => {
         {/* Quick Review Action */}
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
+            onClick={() => setIsFullGraderOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>⚖️ Giám Khảo Chấm 4 Tiêu Chí (full-grader-v1)</span>
+          </button>
+
+          <button
             onClick={() => setIsItemWriterOpen(true)}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer"
           >
-            <Target className="w-4 h-4 text-amber-300 animate-pulse" />
+            <Target className="w-4 h-4 text-amber-300" />
             <span>🎯 Cambridge Item Writer (Sinh Đề)</span>
           </button>
 
@@ -240,6 +250,13 @@ export const IELTSPracticeView: React.FC = () => {
         isOpen={isItemWriterOpen}
         onClose={() => setIsItemWriterOpen(false)}
         initialSkill={activeTab === 'listening' ? 'listening' : 'reading'}
+      />
+
+      {/* IELTS Examiner 4-Criteria Full Grader Modal */}
+      <FullGraderModal
+        isOpen={isFullGraderOpen}
+        onClose={() => setIsFullGraderOpen(false)}
+        initialTaskType={activeTab === 'speaking' ? 'speaking' : 'writing_task2'}
       />
     </div>
   );

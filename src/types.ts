@@ -1700,4 +1700,50 @@ export interface ItemWriterPracticeResult {
   explanationVi?: string;
 }
 
+// ==========================================
+// IELTS Examiner 4-Criteria Full Grader (full-grader-v1)
+// ==========================================
+
+export interface FullGraderCriterionScore {
+  band: number;
+  feedbackVi: string;
+}
+
+export interface FullGraderInlineAnnotation {
+  location: string;
+  issue: string;
+  suggestionVi: string;
+}
+
+export interface FullGraderInput {
+  taskType:
+    | 'writing_task1'
+    | 'writing_task2'
+    | 'speaking'
+    | 'speaking_part1'
+    | 'speaking_part2'
+    | 'speaking_part3';
+  prompt: string;
+  submission: string;
+  learnerProfile?: LearnerProfileWeighting;
+}
+
+export interface FullGraderResult {
+  promptVersion: string; // "full-grader-v1"
+  disclaimerVi: string;
+  insufficientData: boolean;
+  insufficientDataReasonVi?: string;
+  criteria: {
+    taskResponse?: FullGraderCriterionScore;
+    coherenceAndCohesion?: FullGraderCriterionScore;
+    fluencyAndCoherence?: FullGraderCriterionScore;
+    lexicalResource?: FullGraderCriterionScore;
+    grammaticalRangeAndAccuracy?: FullGraderCriterionScore;
+    pronunciation?: FullGraderCriterionScore;
+  };
+  overallBand: number;
+  inlineAnnotations: FullGraderInlineAnnotation[];
+  detectedErrors: StandardErrorObject[];
+}
+
 
