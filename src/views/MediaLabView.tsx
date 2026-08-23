@@ -22,6 +22,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { MediaSession } from '../types';
 import { YouTubeUrlInputModal } from '../components/media/YouTubeUrlInputModal';
+import { AudioTranscribeModal } from '../components/media/AudioTranscribeModal';
 import { ShadowingStudio } from '../components/media/ShadowingStudio';
 import { DictationStudio } from '../components/media/DictationStudio';
 import { MediaVocabDrawer } from '../components/media/MediaVocabDrawer';
@@ -43,6 +44,7 @@ export const MediaLabView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'studio' | 'transcript' | 'vocab'>('studio');
   const [mode, setMode] = useState<'shadowing' | 'dictation'>('shadowing');
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [isAudioTranscribeOpen, setIsAudioTranscribeOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Selected session helper
@@ -67,7 +69,7 @@ export const MediaLabView: React.FC = () => {
     setActiveTab('studio');
   };
 
-  const handleDeleteSession = (e: React.MouseEvent, id: string) => {
+  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm('Bạn có chắc muốn xoá bài luyện Media này không?')) {
       deleteMediaSession(id);
@@ -75,7 +77,6 @@ export const MediaLabView: React.FC = () => {
         const remaining = mediaSessions.filter((s) => s.id !== id);
         if (remaining.length > 0) {
           setSelectedSessionId(remaining[0].id);
-          setActiveSegmentIndex(0);
         }
       }
     }
@@ -97,15 +98,24 @@ export const MediaLabView: React.FC = () => {
           </p>
         </div>
 
-        {/* Action Button */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Action Buttons */}
+        <div className="flex items-center gap-3 shrink-0 flex-wrap">
+          <button
+            id="audio-transcribe-btn"
+            onClick={() => setIsAudioTranscribeOpen(true)}
+            className="px-5 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-violet-600/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-102"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>🎙️ AI Audio Transcription (media-transcribe-v1)</span>
+          </button>
+
           <button
             id="import-youtube-btn"
             onClick={() => setIsImportModalOpen(true)}
             className="px-5 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-600/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-102"
           >
             <Youtube className="w-4 h-4" />
-            <span>+ Nhập URL YouTube Mới</span>
+            <span>+ Nhập URL YouTube</span>
           </button>
         </div>
       </div>
@@ -431,6 +441,13 @@ export const MediaLabView: React.FC = () => {
       <YouTubeUrlInputModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
+        onSessionCreated={handleSessionCreated}
+      />
+
+      {/* AI Audio Transcription Modal */}
+      <AudioTranscribeModal
+        isOpen={isAudioTranscribeOpen}
+        onClose={() => setIsAudioTranscribeOpen(false)}
         onSessionCreated={handleSessionCreated}
       />
     </div>

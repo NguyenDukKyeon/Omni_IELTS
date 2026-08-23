@@ -1,4 +1,10 @@
-import { MediaSession, MediaShadowingEvaluation, MediaExtractedVocab } from '../types';
+import {
+  MediaSession,
+  MediaShadowingEvaluation,
+  MediaExtractedVocab,
+  AudioTranscribeInput,
+  AudioTranscribeResult,
+} from '../types';
 
 export interface ProcessYouTubeResponse {
   session?: MediaSession;
@@ -84,4 +90,24 @@ export async function extractMediaVocab(
 
   const data: ExtractVocabResponse = await response.json();
   return data.vocabItems || [];
+}
+
+/**
+ * Transcribe & Segment Audio into sentence-level timestamps for Shadowing/Dictation (media-transcribe-v1)
+ */
+export async function transcribeAudioAndSegmentApi(
+  params: AudioTranscribeInput
+): Promise<AudioTranscribeResult> {
+  const response = await fetch('/api/media/transcribe-and-segment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi phiên âm audio (${response.status})`);
+  }
+
+  return await response.json();
 }
