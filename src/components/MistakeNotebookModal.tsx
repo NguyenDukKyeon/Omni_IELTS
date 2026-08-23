@@ -14,9 +14,9 @@ import {
   Flame,
   Target,
   BarChart3,
-  Layers,
   Search,
   Crosshair,
+  Tag,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MistakeEntry, ErrorCategory, SkillType, TrapCategory } from '../types';
@@ -24,6 +24,7 @@ import { ReviewRating, TRAP_CATEGORY_METAS, getDueMistakes } from '../services/s
 import { playTextToSpeech } from '../services/aiTutor';
 import { MistakeAnalyticsView } from './mistakes/MistakeAnalyticsView';
 import { DailyMistakeWorkoutView } from './mistakes/DailyMistakeWorkoutView';
+import { IntelligentErrorTaggerModal } from './mistakes/IntelligentErrorTaggerModal';
 
 export const MistakeNotebookModal: React.FC = () => {
   const {
@@ -42,6 +43,7 @@ export const MistakeNotebookModal: React.FC = () => {
   const [selectedSkill, setSelectedSkill] = useState<SkillType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [workoutTrapTarget, setWorkoutTrapTarget] = useState<TrapCategory | 'all'>('all');
+  const [isTaggerOpen, setIsTaggerOpen] = useState<boolean>(false);
 
   // New mistake form state
   const [newErrorText, setNewErrorText] = useState('');
@@ -143,6 +145,14 @@ export const MistakeNotebookModal: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsTaggerOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+            >
+              <Tag className="w-3.5 h-3.5" />
+              <span>🏷️ AI Error Tagger (Bóc Tách Lỗi Tự Động)</span>
+            </button>
+
             <button
               id="close-mistake-modal-btn"
               onClick={() => setIsMistakeNotebookOpen(false)}
@@ -530,6 +540,12 @@ export const MistakeNotebookModal: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Intelligent Error Tagger Modal */}
+      <IntelligentErrorTaggerModal
+        isOpen={isTaggerOpen}
+        onClose={() => setIsTaggerOpen(false)}
+      />
     </div>
   );
 };

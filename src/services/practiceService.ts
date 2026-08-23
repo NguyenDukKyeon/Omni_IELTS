@@ -17,6 +17,8 @@ import {
   QuestionTrapAnalysisResult,
   MasterMentorPanelInput,
   MasterMentorPanelReport,
+  IntelligentErrorTaggerInput,
+  IntelligentErrorTaggerReport,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -237,6 +239,21 @@ export async function consultMasterMentorPanelApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi tham vấn Master Mentor Panel (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function extractIntelligentErrorTagsApi(
+  params: IntelligentErrorTaggerInput
+): Promise<IntelligentErrorTaggerReport> {
+  const res = await fetch('/api/gemini/intelligent-error-tagger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi bóc tách lỗi sai & tạo thẻ SRS (HTTP ${res.status}).`);
   }
   return await res.json();
 }
