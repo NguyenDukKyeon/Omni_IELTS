@@ -26,6 +26,8 @@ import {
   SourceToLearningPackageResult,
   VocabEnricherInput,
   VocabEnricherResult,
+  GrammarCurriculumInput,
+  GrammarCurriculumResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -325,6 +327,21 @@ export async function enrichVocabCardApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi làm giàu thẻ từ vựng (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function generateGrammarCurriculumLessonApi(
+  params: GrammarCurriculumInput
+): Promise<GrammarCurriculumResult> {
+  const res = await fetch('/api/gemini/grammar-curriculum-lesson', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi thiết kế bài học ngữ pháp (HTTP ${res.status}).`);
   }
   return await res.json();
 }

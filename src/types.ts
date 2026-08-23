@@ -1611,4 +1611,30 @@ export interface VocabEnricherResult {
   ttsScript?: string;
 }
 
+// ==========================================
+// Grammar Curriculum Designer Types (grammar-lesson-v1)
+// ==========================================
+
+export interface GrammarCurriculumInput {
+  grammarTopic: string;
+  learnerProfile?: LearnerProfileWeighting;
+  exerciseCount?: number;
+}
+
+export interface GrammarCurriculumExercise {
+  type: string; // "fill_blank" | "multiple_choice" | "error_correction" | "sentence_transformation"
+  question: string;
+  options?: string[];
+  answer: string;
+  explanationVi: string;
+}
+
+export interface GrammarCurriculumResult {
+  promptVersion: string; // "grammar-lesson-v1"
+  topic: string;
+  explanationVi: string;
+  exampleSentences: string[];
+  exercises: GrammarCurriculumExercise[];
+}
+
 

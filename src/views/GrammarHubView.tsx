@@ -31,6 +31,7 @@ import {
   evaluateGrammarExerciseApi,
   diagnoseGrammarApi,
 } from '../services/aiTutor';
+import { GrammarCurriculumModal } from '../components/grammar/GrammarCurriculumModal';
 
 type TabType = 'curriculum' | 'diagnostician';
 type FilterType = 'all' | 'recommended' | 'band6' | 'band7' | 'band8';
@@ -51,6 +52,7 @@ export const GrammarHubView: React.FC = () => {
   const [selectedTopicId, setSelectedTopicId] = useState<string>(grammarTopics[0]?.id || 'grm_tenses');
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isCurriculumDesignerOpen, setIsCurriculumDesignerOpen] = useState<boolean>(false);
 
   // Exercise Drill State
   const [activeExerciseIndex, setActiveExerciseIndex] = useState<number>(0);
@@ -326,30 +328,41 @@ export const GrammarHubView: React.FC = () => {
           </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex items-center p-1 rounded-2xl bg-stone-200/80 dark:bg-stone-800 border border-stone-300/80 dark:border-stone-700">
+        <div className="flex items-center gap-2">
+          {/* AI Grammar Curriculum Designer Trigger */}
           <button
-            onClick={() => setActiveTab('curriculum')}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'curriculum'
-                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-sm'
-                : 'text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100'
-            }`}
+            onClick={() => setIsCurriculumDesignerOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
           >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>Lộ Trình Cấu Trúc ({grammarTopics.length})</span>
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>✨ AI Curriculum Designer (Soạn Bài Học)</span>
           </button>
-          <button
-            onClick={() => setActiveTab('diagnostician')}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'diagnostician'
-                ? 'bg-white dark:bg-stone-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
-                : 'text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100'
-            }`}
-          >
-            <BrainCircuit className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Chẩn Đoán Đoạn Văn (AI Diagnostician)</span>
-          </button>
+
+          {/* Tab Switcher */}
+          <div className="flex items-center p-1 rounded-2xl bg-stone-200/80 dark:bg-stone-800 border border-stone-300/80 dark:border-stone-700">
+            <button
+              onClick={() => setActiveTab('curriculum')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'curriculum'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-sm'
+                  : 'text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Lộ Trình Cấu Trúc ({grammarTopics.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('diagnostician')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'diagnostician'
+                  ? 'bg-white dark:bg-stone-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                  : 'text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100'
+              }`}
+            >
+              <BrainCircuit className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Chẩn Đoán Đoạn Văn (AI Diagnostician)</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1049,6 +1062,13 @@ export const GrammarHubView: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* AI Grammar Curriculum Designer Modal */}
+      <GrammarCurriculumModal
+        isOpen={isCurriculumDesignerOpen}
+        onClose={() => setIsCurriculumDesignerOpen(false)}
+        initialTopic={selectedTopicId || 'conditional_sentences_type_2'}
+      />
     </div>
   );
 };
