@@ -17,6 +17,7 @@ import {
   Mic2,
   BookOpen,
   ArrowUpRight,
+  Compass,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getDueVocabCards, getDueMistakes } from '../services/srsScheduler';
@@ -32,6 +33,7 @@ export const DashboardView: React.FC = () => {
     setActiveModule,
     setIsMistakeNotebookOpen,
     setIsOnboardingOpen,
+    setIsDiagnosticOpen,
     openAITutorWithPrompt,
   } = useApp();
 
@@ -74,6 +76,17 @@ export const DashboardView: React.FC = () => {
             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-2xl">
               Bạn đang ở <strong>Band {profile.currentBand.toFixed(1)}</strong>. Hệ thống đã chuẩn bị bài ôn tập ngắt quãng (SRS) và các lỗi sai cần củng cố hôm nay từ các nguồn học liệu của bạn.
             </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsDiagnosticOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
+              >
+                <Compass className="w-4 h-4 text-sky-200" />
+                <span>Chẩn Đoán 8 Trục Psychometrician (gemini-3.1-pro)</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           {/* 4 Skill Mini Breakdown inside Bento Cell */}

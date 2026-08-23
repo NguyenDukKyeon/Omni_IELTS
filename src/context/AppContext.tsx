@@ -75,6 +75,8 @@ interface AppContextType {
   setIsMistakeNotebookOpen: (open: boolean) => void;
   isOnboardingOpen: boolean;
   setIsOnboardingOpen: (open: boolean) => void;
+  isDiagnosticOpen: boolean;
+  setIsDiagnosticOpen: (open: boolean) => void;
   darkMode: boolean;
   toggleDarkMode: () => void;
   awardXP: (amount: number, reason?: string) => void;
@@ -103,6 +105,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAITutorOpen, setIsAITutorOpen] = useState<boolean>(false);
   const [isMistakeNotebookOpen, setIsMistakeNotebookOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState<boolean>(false);
   const [isTutorLoading, setIsTutorLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<NotificationState | null>(null);
   const [isExamModeActive, setIsExamModeActive] = useState<boolean>(false);
@@ -686,6 +689,8 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
         setIsMistakeNotebookOpen,
         isOnboardingOpen,
         setIsOnboardingOpen,
+        isDiagnosticOpen,
+        setIsDiagnosticOpen,
         darkMode,
         toggleDarkMode,
         awardXP,

@@ -1180,4 +1180,65 @@ export interface ForecastGroundingResponse {
   detectedTrends?: string[];
 }
 
+// ==========================================
+// 8-Axis Diagnostic Psychometrician Types
+// ==========================================
+
+export type DiagnosticSkillType = 'writing' | 'speaking' | 'reading' | 'listening';
+
+export type EightAxisKey =
+  | 'taskResponse'
+  | 'coherence'
+  | 'lexicalResource'
+  | 'grammaticalAccuracy'
+  | 'pronunciationAndFluency'
+  | 'readingDistractorFilter'
+  | 'listeningComprehension'
+  | 'criticalHedging';
+
+export interface EightAxisCompetencyRadar {
+  taskResponse: number | null;
+  coherence: number | null;
+  lexicalResource: number | null;
+  grammaticalAccuracy: number | null;
+  pronunciationAndFluency: number | null;
+  readingDistractorFilter: number | null;
+  listeningComprehension: number | null;
+  criticalHedging: number | null;
+}
+
+export interface RoadmapWeek {
+  week: number;
+  coreFocus: string;
+  dailyQuests: string[];
+}
+
+export interface DiagnosticQuestionAnswer {
+  questionId: string;
+  questionText: string;
+  userAnswer: string;
+  correctAnswer?: string;
+  isCorrect?: boolean;
+}
+
+export interface DiagnosticMultiSkillInput {
+  submittedSkills: DiagnosticSkillType[];
+  writingSample?: string | null;
+  speakingAudioRef?: string | null; // Real audio base64 or reference
+  readingAnswers?: DiagnosticQuestionAnswer[] | null;
+  listeningAnswers?: DiagnosticQuestionAnswer[] | null;
+  targetBand?: number;
+}
+
+export interface DiagnosticPsychometricianReport {
+  overallEstimatedBand: number;
+  confidenceInterval: string;
+  disclaimerVi: string;
+  projectedBandIn60Days: number;
+  insufficientDataAxes: string[];
+  competencyRadar: EightAxisCompetencyRadar;
+  primaryBottlenecks: string[];
+  personalized30DayRoadmap: RoadmapWeek[];
+}
+
 
