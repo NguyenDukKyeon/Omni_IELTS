@@ -1339,4 +1339,44 @@ export interface SpeakingLiveAudioScoringInput {
   totalDurationSeconds?: number;
 }
 
+// ==========================================
+// Reading & Listening Trap Taxonomy Types
+// ==========================================
+
+export type TrapTypeIdentified =
+  | 'Trap 1'
+  | 'Trap 2'
+  | 'Trap 3'
+  | 'Trap 4'
+  | 'Trap 5'
+  | 'Trap 6'
+  | 'Other';
+
+export interface TrapParaphraseMapping {
+  questionKeyword: string;
+  passageEquivalent: string;
+}
+
+export interface QuestionTrapAnalysisResult {
+  questionNumber: number;
+  questionType: string;
+  userAnswer: string;
+  correctAnswer: string;
+  trapTypeIdentified: TrapTypeIdentified;
+  trapDescriptionIfOther?: string | null;
+  distractorMechanismVi: string;
+  paraphraseMapping: TrapParaphraseMapping[];
+  examinerAdviceVi: string;
+}
+
+export interface QuestionTrapAnalysisInput {
+  questionNumber: number;
+  questionType: string;
+  questionStatement: string;
+  passageSnippet: string; // Minimum passage text needed to prove trap
+  userAnswer: string;
+  correctAnswer: string;
+  targetBand?: number;
+}
+
 

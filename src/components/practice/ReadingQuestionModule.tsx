@@ -7,14 +7,14 @@ import {
   AlertTriangle,
   Clock,
   RefreshCw,
-  HelpCircle,
-  ArrowRight,
   ExternalLink,
   Zap,
+  Target,
 } from 'lucide-react';
-import { ReadingQuestionType, ReadingPracticeExercise, TrapCategory } from '../../types';
+import { ReadingQuestionType, ReadingPracticeExercise, TrapCategory, QuestionTrapAnalysisInput } from '../../types';
 import { generateReadingPracticeApi } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
+import { QuestionTrapDiagnosticModal } from './QuestionTrapDiagnosticModal';
 
 const READING_TYPES: Array<{
   type: ReadingQuestionType;
@@ -162,6 +162,8 @@ export const ReadingQuestionModule: React.FC = () => {
   const [selectedTopic, setSelectedTopic] = useState<string>('Scientific Innovation & Ecology');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('Band 7.0-8.0');
   const [highlightedText, setHighlightedText] = useState<string>('');
+  const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
+  const [selectedQuestionForTrap, setSelectedQuestionForTrap] = useState<QuestionTrapAnalysisInput | null>(null);
 
   const handleGenerateNew = async (typeToGen: ReadingQuestionType = selectedType) => {
     setIsGenerating(true);
@@ -614,6 +616,41 @@ export const ReadingQuestionModule: React.FC = () => {
                             </button>
                           </div>
                         )}
+
+                        {/* Interactive Trap Classification AI Trigger */}
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const snippet = q.paragraphReference
+                                ? `Đoạn ${q.paragraphReference}: ${
+                                    exercise.passage.paragraphs.find(
+                                      (p) =>
+                                        p.label === q.paragraphReference ||
+                                        q.paragraphReference?.includes(p.label)
+                                    )?.text?.slice(0, 200) ||
+                                    exercise.passage.paragraphs[0]?.text?.slice(0, 200) ||
+                                    ''
+                                  }`
+                                : exercise.passage.paragraphs[0]?.text?.slice(0, 200) || '';
+
+                              setSelectedQuestionForTrap({
+                                questionNumber: q.questionNumber || idx + 1,
+                                questionType: exercise.type,
+                                questionStatement: q.statementOrQuestion,
+                                passageSnippet: snippet,
+                                userAnswer: userVal || 'Chưa chọn',
+                                correctAnswer: q.correctAnswer,
+                                targetBand: 7.5,
+                              });
+                              setDiagnosticModalOpen(true);
+                            }}
+                            className="w-full py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
+                          >
+                            <Target className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            <span>Bóc Tách Bẫy Câu Này (Trap Diagnostics AI)</span>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -653,6 +690,13 @@ export const ReadingQuestionModule: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Trap Diagnostics Modal */}
+      <QuestionTrapDiagnosticModal
+        isOpen={diagnosticModalOpen}
+        onClose={() => setDiagnosticModalOpen(false)}
+        questionData={selectedQuestionForTrap}
+      />
     </div>
   );
 };
