@@ -18,12 +18,14 @@ import { ListeningQuestionModule } from '../components/practice/ListeningQuestio
 import { WritingQuestionModule } from '../components/practice/WritingQuestionModule';
 import { SpeakingQuestionModule } from '../components/practice/SpeakingQuestionModule';
 import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
+import { ItemWriterPracticeModal } from '../components/practice/ItemWriterPracticeModal';
 
 export type PracticeTabType = SkillType | 'forecast_hub';
 
 export const IELTSPracticeView: React.FC = () => {
   const { mistakes, openAITutorWithPrompt } = useApp();
   const [activeTab, setActiveTab] = useState<PracticeTabType>('forecast_hub');
+  const [isItemWriterOpen, setIsItemWriterOpen] = useState<boolean>(false);
 
   // Count mistake items per skill
   const skillMistakesCount = {
@@ -105,17 +107,25 @@ export const IELTSPracticeView: React.FC = () => {
         </div>
 
         {/* Quick Review Action */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => setIsItemWriterOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer"
+          >
+            <Target className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>🎯 Cambridge Item Writer (Sinh Đề)</span>
+          </button>
+
           <button
             onClick={() =>
               openAITutorWithPrompt(
                 'Hãy kiểm tra lại các bẫy thường gặp nhất trong kỳ thi IELTS ở cả 4 kỹ năng (Reading, Listening, Writing, Speaking) và cho tôi 5 mẹo khắc phục quan trọng nhất.'
               )
             }
-            className="px-4 py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold flex items-center gap-2 border border-indigo-400/40 shadow-sm transition-all whitespace-nowrap"
+            className="px-4 py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold flex items-center gap-2 border border-indigo-400/40 shadow-sm transition-all whitespace-nowrap cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>Chiến thuật bẻ bẫy cùng AI Tutor</span>
+            <span>Chiến thuật bẻ bẫy</span>
           </button>
         </div>
       </div>
@@ -224,6 +234,13 @@ export const IELTSPracticeView: React.FC = () => {
         {activeTab === 'writing' && <WritingQuestionModule />}
         {activeTab === 'speaking' && <SpeakingQuestionModule />}
       </div>
+
+      {/* Cambridge Item Writer Practice Modal */}
+      <ItemWriterPracticeModal
+        isOpen={isItemWriterOpen}
+        onClose={() => setIsItemWriterOpen(false)}
+        initialSkill={activeTab === 'listening' ? 'listening' : 'reading'}
+      />
     </div>
   );
 };

@@ -1667,4 +1667,37 @@ export interface AudioTranscribeInput {
   topicContext?: string;
 }
 
+// ==========================================
+// Cambridge Item Writer Practice Generator (practice-generator-v1)
+// ==========================================
+
+export interface ItemWriterPracticeInput {
+  skill: 'reading' | 'listening';
+  questionType: string;
+  topicDomain?: string;
+  difficultyBand?: number;
+  learnerProfile?: LearnerProfileWeighting;
+}
+
+export interface ItemWriterQuestionItem {
+  statement?: string;
+  question?: string;
+  prompt?: string;
+  options?: string[];
+  answer: string;
+  explanationVi: string;
+}
+
+export interface ItemWriterPracticeResult {
+  promptVersion: string; // "practice-generator-v1"
+  skill: 'reading' | 'listening';
+  questionType: string;
+  passage: string;
+  paragraphs?: string[];
+  headingOptions?: string[];
+  correctMapping?: Record<string, string>;
+  questions?: ItemWriterQuestionItem[];
+  explanationVi?: string;
+}
+
 
