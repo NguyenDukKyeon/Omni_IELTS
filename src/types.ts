@@ -1461,4 +1461,67 @@ export interface IntelligentErrorTaggerInput {
   targetBand?: number;
 }
 
+// ==========================================
+// Daily Speed Drill Challenge Types (60s)
+// ==========================================
+
+export type ChallengeType = 'paraphrase_blitz' | 'cohesive_jigsaw' | 'collocation_match';
+
+export interface ParaphraseBlitzChallenge {
+  challengeType: 'paraphrase_blitz';
+  timeLimitSeconds: number; // 60
+  promptSentence: string;
+  targetTechniques: string[]; // e.g. ["Passive Voice", "Nominalization", "Inversion"]
+  expectedBand85Answers: string[]; // Natural, precise, avoiding thesaurus stuffing
+  scoringRubricVi: string;
+}
+
+export interface CohesiveJigsawConnectorPlacement {
+  sentenceIndex: number;
+  connector: string;
+}
+
+export interface CohesiveJigsawChallenge {
+  challengeType: 'cohesive_jigsaw';
+  timeLimitSeconds: number; // 60
+  sentences: string[]; // 3 sentences missing connectors
+  missingConnectors: string[];
+  correctOrderAndConnectors: CohesiveJigsawConnectorPlacement[];
+  scoringRubricVi: string;
+}
+
+export interface CollocationMatchPair {
+  word: string;
+  correctPartner: string;
+  distractorPartners: string[];
+}
+
+export interface CollocationMatchChallenge {
+  challengeType: 'collocation_match';
+  timeLimitSeconds: number; // 60
+  pairs: CollocationMatchPair[];
+  scoringRubricVi: string;
+}
+
+export type SpeedDrillChallenge =
+  | ParaphraseBlitzChallenge
+  | CohesiveJigsawChallenge
+  | CollocationMatchChallenge;
+
+export interface SpeedDrillEvaluationBreakdown {
+  item: string;
+  userResponse: string;
+  correctTarget: string;
+  isCorrect: boolean;
+  explanationVi: string;
+}
+
+export interface SpeedDrillEvaluationResult {
+  scorePercentage: number;
+  bandEstimate: number;
+  isPerfect: boolean;
+  feedbackVi: string;
+  detailedBreakdown: SpeedDrillEvaluationBreakdown[];
+}
+
 

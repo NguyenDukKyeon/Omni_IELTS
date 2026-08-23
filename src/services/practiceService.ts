@@ -19,6 +19,9 @@ import {
   MasterMentorPanelReport,
   IntelligentErrorTaggerInput,
   IntelligentErrorTaggerReport,
+  ChallengeType,
+  SpeedDrillChallenge,
+  SpeedDrillEvaluationResult,
 } from '../types';
 
 export async function generateReadingPracticeApi(
@@ -254,6 +257,40 @@ export async function extractIntelligentErrorTagsApi(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Lỗi bóc tách lỗi sai & tạo thẻ SRS (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function generateSpeedDrillApi(
+  challengeType: ChallengeType,
+  topic: string = 'Academic Writing & Natural Lexicon',
+  targetBand: number = 7.5
+): Promise<SpeedDrillChallenge> {
+  const res = await fetch('/api/gemini/generate-speed-drill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challengeType, topic, targetBand }),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi sinh bài tập Speed Drill (HTTP ${res.status}).`);
+  }
+  return await res.json();
+}
+
+export async function evaluateSpeedDrillApi(params: {
+  challenge: SpeedDrillChallenge;
+  userSubmission: any;
+  targetBand?: number;
+}): Promise<SpeedDrillEvaluationResult> {
+  const res = await fetch('/api/gemini/evaluate-speed-drill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi chấm điểm Speed Drill (HTTP ${res.status}).`);
   }
   return await res.json();
 }

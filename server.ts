@@ -5479,6 +5479,308 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
   }
 });
 
+// =========================================================================
+// Daily Speed Drill Generator (Paraphrase Blitz, Cohesive Jigsaw, Collocation Match)
+// =========================================================================
+app.post("/api/gemini/generate-speed-drill", async (req, res) => {
+  try {
+    const {
+      challengeType = "paraphrase_blitz",
+      topic = "Academic & Environmental Science",
+      targetBand = 7.5,
+    } = req.body;
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng thêm API key vào .env để tạo bài tập Daily Speed Drill.",
+      });
+    }
+
+    let systemInstruction = "";
+    let responseSchema: any = null;
+
+    if (challengeType === "paraphrase_blitz") {
+      systemInstruction = `You are the IELTS Speed Drill Master.
+Generate a 60-second "paraphrase_blitz" micro-challenge.
+Provide a prompt sentence, target grammatical techniques (e.g. Passive Voice, Nominalization, Cleft Sentences, Inversion), and natural Band 8.5+ expected answers (prioritize natural academic style without thesaurus-stuffing rare vocabulary).`;
+
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          challengeType: { type: Type.STRING },
+          timeLimitSeconds: { type: Type.NUMBER },
+          promptSentence: { type: Type.STRING },
+          targetTechniques: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          expectedBand85Answers: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          scoringRubricVi: { type: Type.STRING },
+        },
+        required: [
+          "challengeType",
+          "timeLimitSeconds",
+          "promptSentence",
+          "targetTechniques",
+          "expectedBand85Answers",
+          "scoringRubricVi",
+        ],
+      };
+    } else if (challengeType === "cohesive_jigsaw") {
+      systemInstruction = `You are the IELTS Speed Drill Master.
+Generate a 60-second "cohesive_jigsaw" challenge.
+Provide 3 coherent sentences missing connectors, a list of missing connectors (such as "Furthermore", "Consequently", "In contrast", "Conversely"), the correct order & connector pairs, and a scoring rubric.`;
+
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          challengeType: { type: Type.STRING },
+          timeLimitSeconds: { type: Type.NUMBER },
+          sentences: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          missingConnectors: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          correctOrderAndConnectors: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                sentenceIndex: { type: Type.NUMBER },
+                connector: { type: Type.STRING },
+              },
+              required: ["sentenceIndex", "connector"],
+            },
+          },
+          scoringRubricVi: { type: Type.STRING },
+        },
+        required: [
+          "challengeType",
+          "timeLimitSeconds",
+          "sentences",
+          "missingConnectors",
+          "correctOrderAndConnectors",
+          "scoringRubricVi",
+        ],
+      };
+    } else {
+      // collocation_match
+      systemInstruction = `You are the IELTS Speed Drill Master.
+Generate a 60-second "collocation_match" challenge.
+Provide 4-5 high-yield IELTS collocation pairs with correct partner and 2 distractor partners (e.g. word: "conduct", correctPartner: "research", distractorPartners: ["make", "do"]).`;
+
+      responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          challengeType: { type: Type.STRING },
+          timeLimitSeconds: { type: Type.NUMBER },
+          pairs: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                word: { type: Type.STRING },
+                correctPartner: { type: Type.STRING },
+                distractorPartners: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                },
+              },
+              required: ["word", "correctPartner", "distractorPartners"],
+            },
+          },
+          scoringRubricVi: { type: Type.STRING },
+        },
+        required: [
+          "challengeType",
+          "timeLimitSeconds",
+          "pairs",
+          "scoringRubricVi",
+        ],
+      };
+    }
+
+    const promptText = `Generate 01 ${challengeType} speed drill on topic "${topic}" for target Band ${targetBand}. Output strictly according to responseSchema with timeLimitSeconds = 60.`;
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.3,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Speed Drill Generator] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi tạo Speed Drill.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    parsed.challengeType = challengeType;
+    parsed.timeLimitSeconds = 60;
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Speed Drill Generator Error:", error);
+    return res.status(500).json({
+      error: error.message || "Lỗi trong quá trình sinh bài tập Speed Drill.",
+    });
+  }
+});
+
+// Evaluation endpoint for Speed Drills
+app.post("/api/gemini/evaluate-speed-drill", async (req, res) => {
+  try {
+    const { challenge, userSubmission, targetBand = 7.5 } = req.body;
+
+    if (!challenge || !userSubmission) {
+      return res.status(400).json({
+        error: "Vui lòng cung cấp đầy đủ thông tin bài tập và câu trả lời của thí sinh.",
+      });
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error: "Chưa cấu hình GEMINI_API_KEY trong hệ thống.",
+      });
+    }
+
+    const systemInstruction = `You are the IELTS Speed Drill Examiner.
+Evaluate the user's submission for the 60-second micro-challenge according to its challengeType, expected answers, and scoringRubricVi.
+Provide scorePercentage (0-100), estimated Band, feedbackVi, and detailed breakdown.`;
+
+    const promptText = `CHALLENGE DATA:
+${JSON.stringify(challenge, null, 2)}
+
+USER SUBMISSION:
+${JSON.stringify(userSubmission, null, 2)}
+
+Evaluate accurately and return JSON matching responseSchema.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        scorePercentage: { type: Type.NUMBER },
+        bandEstimate: { type: Type.NUMBER },
+        isPerfect: { type: Type.BOOLEAN },
+        feedbackVi: { type: Type.STRING },
+        detailedBreakdown: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              item: { type: Type.STRING },
+              userResponse: { type: Type.STRING },
+              correctTarget: { type: Type.STRING },
+              isCorrect: { type: Type.BOOLEAN },
+              explanationVi: { type: Type.STRING },
+            },
+            required: [
+              "item",
+              "userResponse",
+              "correctTarget",
+              "isCorrect",
+              "explanationVi",
+            ],
+          },
+        },
+      },
+      required: [
+        "scorePercentage",
+        "bandEstimate",
+        "isPerfect",
+        "feedbackVi",
+        "detailedBreakdown",
+      ],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Speed Drill Evaluator] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro khi chấm Speed Drill.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Speed Drill Evaluator Error:", error);
+    return res.status(500).json({
+      error: error.message || "Lỗi trong quá trình chấm điểm bài tập Speed Drill.",
+    });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
