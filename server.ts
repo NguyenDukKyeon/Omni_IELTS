@@ -4594,6 +4594,179 @@ Please perform a rigorous psychometric analysis and output strict JSON according
   }
 });
 
+// =========================================================================
+// 3-Tier Sentence Academic Stylist (Cambridge Examiner & Academic Stylist)
+// =========================================================================
+app.post("/api/gemini/sentence-stylist", async (req, res) => {
+  try {
+    const { sentence, essayTopic = "IELTS Academic Writing", targetBand = 7.5 } = req.body;
+
+    // 1. Input Validation
+    if (!sentence || typeof sentence !== "string" || sentence.trim().length < 5) {
+      return res.status(400).json({
+        error: "Vui lòng nhập câu văn hợp lệ để tiến hành nâng cấp 3 cấp độ Band.",
+      });
+    }
+
+    // 2. AI Client Verification (Strict error handling - no fake text)
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error:
+          "Chưa cấu hình GEMINI_API_KEY trong hệ thống. Vui lòng điền API key vào file .env để kích hoạt Sentence Academic Stylist.",
+      });
+    }
+
+    // 3. Construct System Prompt & Instructions
+    const systemInstruction = `You are an elite Cambridge IELTS Examiner and Academic Stylist.
+Rewrite the user's selected sentence into 3 band tiers.
+
+### HARD CONSTRAINTS
+- Preserve the EXACT original meaning/stance/claim. Never add or remove the writer's argument — you are upgrading language, not content.
+- Do NOT prioritize rare/impressive vocabulary over naturalness. Real Band 9 writing reads as precise and natural, not "thesaurus-heavy". If a simpler word is what a native academic writer would actually use, use it.
+- Every upgraded version must remain something a real examiner would believe a genuine candidate wrote — flag internally if a version starts to sound artificial and simplify it back.
+
+### TIER SPECIFICATIONS
+1. Band 6.5 (Clean & Accurate): fix grammar/syntax only.
+2. Band 7.5 (Academic & Cohesive): natural B2/C1 collocations, better flow.
+3. Band 8.5+ (Mastery & Nuance): advanced but NATURAL structures (cleft sentences, nominalization, hedging) — precision over decoration.
+
+### EXPLANATIONS
+- Provide clear Vietnamese explanations in keyFixesVi explaining why changes were made and how they boost IELTS band descriptors.`;
+
+    const promptText = `TASK CONTEXT:
+- Essay Topic / Context: "${essayTopic}"
+- Target Band: ${targetBand}
+
+SENTENCE TO REWRITE:
+"""${sentence.trim()}"""
+
+Please analyze errors and provide 3-tier rewrites according to the strict JSON responseSchema.`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        originalSentence: { type: Type.STRING },
+        essayTopicContext: { type: Type.STRING },
+        detectedErrors: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              errorSubstring: { type: Type.STRING },
+              errorCategory: { type: Type.STRING },
+              explanationVi: { type: Type.STRING },
+              severity: { type: Type.STRING },
+            },
+            required: ["errorSubstring", "errorCategory", "explanationVi"],
+          },
+        },
+        upgradedVersions: {
+          type: Type.OBJECT,
+          properties: {
+            band65: {
+              type: Type.OBJECT,
+              properties: {
+                text: { type: Type.STRING },
+                keyFixesVi: { type: Type.STRING },
+              },
+              required: ["text", "keyFixesVi"],
+            },
+            band75: {
+              type: Type.OBJECT,
+              properties: {
+                text: { type: Type.STRING },
+                keyCollocations: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                },
+                keyFixesVi: { type: Type.STRING },
+              },
+              required: ["text", "keyCollocations", "keyFixesVi"],
+            },
+            band85: {
+              type: Type.OBJECT,
+              properties: {
+                text: { type: Type.STRING },
+                grammaticalTechnique: { type: Type.STRING },
+                keyCollocations: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                },
+                keyFixesVi: { type: Type.STRING },
+              },
+              required: [
+                "text",
+                "grammaticalTechnique",
+                "keyCollocations",
+                "keyFixesVi",
+              ],
+            },
+          },
+          required: ["band65", "band75", "band85"],
+        },
+      },
+      required: [
+        "originalSentence",
+        "essayTopicContext",
+        "detectedErrors",
+        "upgradedVersions",
+      ],
+    };
+
+    const modelsToTry = [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro",
+      "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    let responseText: string | null = null;
+    let lastGeminiErr: any = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+            temperature: 0.2,
+          },
+        });
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
+      } catch (err: any) {
+        lastGeminiErr = err;
+        console.warn(`[Sentence Stylist] Model ${model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!responseText) {
+      return res.status(500).json({
+        error:
+          lastGeminiErr?.message ||
+          "Không nhận được phản hồi từ mô hình gemini-3.1-pro.",
+      });
+    }
+
+    const parsed = JSON.parse(responseText);
+    return res.json(parsed);
+  } catch (error: any) {
+    console.error("Sentence Stylist API Error:", error);
+    return res.status(500).json({
+      error:
+        error.message ||
+        "Lỗi trong quá trình nâng cấp câu văn với gemini-3.1-pro.",
+    });
+  }
+});
+
 // Vite middleware setup
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

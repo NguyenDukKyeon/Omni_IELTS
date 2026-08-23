@@ -13,6 +13,7 @@ import { FloatingAITutor } from './components/FloatingAITutor';
 import { OnboardingModal } from './components/OnboardingModal';
 import { MistakeNotebookModal } from './components/MistakeNotebookModal';
 import { DiagnosticPsychometricianModal } from './components/diagnostic/DiagnosticPsychometricianModal';
+import { SentenceAcademicStylistModal } from './components/practice/SentenceAcademicStylistModal';
 
 import { DashboardView } from './views/DashboardView';
 import { SourceIngestionView } from './views/SourceIngestionView';
@@ -25,7 +26,15 @@ import { KnowledgeBaseView } from './views/KnowledgeBaseView';
 import { LearnerProfileView } from './views/LearnerProfileView';
 
 const MainContent: React.FC = () => {
-  const { activeModule, isExamModeActive } = useApp();
+  const {
+    activeModule,
+    isExamModeActive,
+    isDiagnosticOpen,
+    setIsDiagnosticOpen,
+    isSentenceStylistOpen,
+    setIsSentenceStylistOpen,
+    sentenceStylistData,
+  } = useApp();
 
   const renderActiveView = () => {
     switch (activeModule) {
@@ -101,6 +110,12 @@ const MainContent: React.FC = () => {
       <DiagnosticPsychometricianModal
         isOpen={isDiagnosticOpen}
         onClose={() => setIsDiagnosticOpen(false)}
+      />
+      <SentenceAcademicStylistModal
+        isOpen={isSentenceStylistOpen}
+        onClose={() => setIsSentenceStylistOpen(false)}
+        initialSentence={sentenceStylistData.sentence}
+        initialTopic={sentenceStylistData.topic}
       />
     </div>
   );
