@@ -289,7 +289,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
         {/* Left: Passage Tabs */}
         <div className="flex items-center gap-1.5 p-1 rounded-lg border border-slate-700/60">
           {passages.map((p, idx) => (
-            <button
+            <button data-ux-flow="mock.exam"
               key={p.passageNumber}
               onClick={() => onSelectPassage(idx)}
               className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
@@ -310,21 +310,21 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
           {/* Split presets */}
           <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono text-slate-400">
             <span className="mr-1">Tỷ lệ chia:</span>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setLeftWidthPercent(35)}
               className={`px-2 py-0.5 rounded border ${leftWidthPercent <= 38 ? 'bg-slate-700 text-white font-bold border-slate-500' : 'border-slate-800 hover:bg-slate-800'}`}
               title="35% Bài đọc - 65% Câu hỏi"
             >
               35:65
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setLeftWidthPercent(50)}
               className={`px-2 py-0.5 rounded border ${leftWidthPercent >= 45 && leftWidthPercent <= 55 ? 'bg-slate-700 text-white font-bold border-slate-500' : 'border-slate-800 hover:bg-slate-800'}`}
               title="50% Bài đọc - 50% Câu hỏi (Chuẩn IDP)"
             >
               50:50
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setLeftWidthPercent(65)}
               className={`px-2 py-0.5 rounded border ${leftWidthPercent >= 62 ? 'bg-slate-700 text-white font-bold border-slate-500' : 'border-slate-800 hover:bg-slate-800'}`}
               title="65% Bài đọc - 35% Câu hỏi"
@@ -334,7 +334,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
           </div>
 
           {/* Sticky Notes Drawer Trigger */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setShowNotesDrawer(!showNotesDrawer)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
               passageNotes.length > 0
@@ -512,7 +512,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                           ).map((val) => {
                             const isSelected = currentAns.toUpperCase() === val;
                             return (
-                              <button
+                              <button data-ux-flow="mock.exam"
                                 key={val}
                                 onClick={() => onAnswerChange(q.number, val)}
                                 className={`px-4 py-2 rounded-lg font-mono font-bold text-xs border transition-all ${
@@ -536,7 +536,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                           {['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'].map((roman) => {
                             const isSelected = currentAns.toLowerCase() === roman;
                             return (
-                              <button
+                              <button data-ux-flow="mock.exam"
                                 key={roman}
                                 onClick={() => onAnswerChange(q.number, roman)}
                                 className={`w-9 h-9 rounded-lg font-mono font-bold text-xs border transition-all flex items-center justify-center ${
@@ -572,7 +572,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                                     : 'bg-slate-900/60 border-slate-800 hover:bg-slate-900 text-slate-300'
                                 }`}
                               >
-                                <input
+                                <input data-ux-flow="mock.exam"
                                   type="radio"
                                   name={`reading-q-${q.number}`}
                                   value={optionLetter}
@@ -590,7 +590,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                       {/* 4. Gap Fill / Sentence Completion */}
                       {(q.type === 'gap_fill' || q.type === 'sentence_completion') && (
                         <div className="flex items-center gap-2 max-w-md">
-                          <input
+                          <input data-ux-flow="mock.exam"
                             type="text"
                             value={currentAns}
                             onChange={(e) => onAnswerChange(q.number, e.target.value)}
@@ -618,7 +618,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
           className="fixed z-50 flex items-center gap-1 p-1 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl animate-fadeIn"
         >
           {/* Yellow Highlight Button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => handleAddHighlight('yellow')}
             className="flex items-center gap-1 px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-lg shadow-sm"
             title="Bôi màu vàng"
@@ -627,7 +627,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
           </button>
 
           {/* Green Highlight Button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => handleAddHighlight('green')}
             className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg shadow-sm"
             title="Bôi màu xanh lá"
@@ -636,7 +636,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
           </button>
 
           {/* Take Note Button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={handleOpenTakeNote}
             className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs rounded-lg border border-slate-700"
             title="Ghi chú đoạn văn này"
@@ -646,7 +646,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
           </button>
 
           {/* Remove Highlight */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={handleRemoveHighlight}
             className="p-1 text-slate-400 hover:text-rose-300 rounded hover:bg-slate-800"
             title="Xóa Highlight"
@@ -665,7 +665,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                 <StickyNote className="w-4 h-4 text-amber-400" />
                 Gắn Ghi Chú (Sticky Note) {activeNoteModal.paragraphLabel ? `— Đoạn [${activeNoteModal.paragraphLabel}]` : ''}
               </h3>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setActiveNoteModal(null)}
                 className="text-slate-400 hover:text-white"
               >
@@ -681,7 +681,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
               <label className="text-xs font-semibold text-slate-300 mb-1.5 block">
                 Nội dung ghi chú của bạn:
               </label>
-              <textarea
+              <textarea data-ux-flow="mock.exam"
                 value={newNoteInput}
                 onChange={(e) => setNewNoteInput(e.target.value)}
                 placeholder="VD: Từ khóa chính là 'solar radiation', liên quan đến câu 14..."
@@ -692,13 +692,13 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
             </div>
 
             <div className="flex items-center justify-end gap-2">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setActiveNoteModal(null)}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium"
               >
                 Hủy
               </button>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={handleSaveNote}
                 disabled={!newNoteInput.trim()}
                 className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-lg shadow-sm"
@@ -718,7 +718,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
               <StickyNote className="w-4 h-4 text-amber-400" />
               Danh sách Ghi chú ({notes.length})
             </h3>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => setShowNotesDrawer(false)}
               className="text-slate-400 hover:text-white"
             >
@@ -744,7 +744,7 @@ export const ReadingExamView: React.FC<ReadingExamViewProps> = ({
                   <p className="text-[11px] text-slate-400 italic line-clamp-1 border-t border-slate-800/80 pt-1">
                     "{n.selectedText}"
                   </p>
-                  <button
+                  <button data-ux-flow="mock.exam"
                     onClick={() => handleDeleteNote(n.id)}
                     className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-300 p-1"
                     title="Xóa ghi chú"

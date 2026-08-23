@@ -184,7 +184,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="dashboard.daily"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white transition-colors"
           >
@@ -194,7 +194,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
 
         {/* Mode Tabs */}
         <div className="px-5 pt-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center gap-2 overflow-x-auto shrink-0">
-          <button
+          <button data-ux-flow="dashboard.daily"
             type="button"
             onClick={() => {
               setActiveType('paraphrase_blitz');
@@ -210,7 +210,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
             <span>⚡ Paraphrase Blitz (60s)</span>
           </button>
 
-          <button
+          <button data-ux-flow="dashboard.daily"
             type="button"
             onClick={() => {
               setActiveType('cohesive_jigsaw');
@@ -226,7 +226,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
             <span>🧩 Cohesive Jigsaw (60s)</span>
           </button>
 
-          <button
+          <button data-ux-flow="dashboard.daily"
             type="button"
             onClick={() => {
               setActiveType('collocation_match');
@@ -272,7 +272,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              <button data-ux-flow="dashboard.daily"
                 type="button"
                 onClick={() => handleLoadChallenge(activeType)}
                 disabled={isLoading}
@@ -335,7 +335,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
 
               {!evaluation ? (
                 <div className="space-y-3">
-                  <textarea
+                  <textarea data-ux-flow="dashboard.daily"
                     value={paraphraseInput}
                     onChange={(e) => setParaphraseInput(e.target.value)}
                     placeholder="Viết lại câu trên bằng các kỹ thuật học thuật tự nhiên (Band 8.5+)..."
@@ -343,7 +343,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
                     className="w-full p-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm leading-relaxed focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   />
 
-                  <button
+                  <button data-ux-flow="dashboard.daily"
                     type="button"
                     onClick={handleSubmit}
                     disabled={isEvaluating || !paraphraseInput.trim()}
@@ -388,7 +388,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-bold text-slate-500">Câu {idx + 1}:</span>
-                      <select
+                      <select data-ux-flow="dashboard.daily"
                         value={jigsawSelections[idx] || ''}
                         onChange={(e) =>
                           setJigsawSelections((prev) => ({ ...prev, [idx]: e.target.value }))
@@ -414,7 +414,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
               </div>
 
               {!evaluation && (
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={handleSubmit}
                   disabled={isEvaluating}
@@ -452,7 +452,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
                       {options.map((opt, oIdx) => {
                         const isSelected = collocationSelections[pIdx] === opt;
                         return (
-                          <button
+                          <button data-ux-flow="dashboard.daily"
                             key={oIdx}
                             type="button"
                             onClick={() =>
@@ -475,7 +475,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
               })}
 
               {!evaluation && (
-                <button
+                <button data-ux-flow="dashboard.daily"
                   type="button"
                   onClick={handleSubmit}
                   disabled={isEvaluating}
@@ -566,7 +566,7 @@ export const SpeedDrillArenaModal: React.FC<SpeedDrillArenaModalProps> = ({
               )}
 
               {/* Action: Play Again */}
-              <button
+              <button data-ux-flow="dashboard.daily"
                 type="button"
                 onClick={() => handleLoadChallenge(activeType)}
                 className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg transition-all"

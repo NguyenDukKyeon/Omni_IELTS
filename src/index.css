@@ -14,6 +14,60 @@
 }
 
 @layer utilities {
+  /* Keep compact learning metadata readable against light surfaces (WCAG AA). */
+  html:not(.dark) .text-slate-400,
+  html:not(.dark) .text-slate-500 {
+    color: #475569;
+  }
+  html:not(.dark) .text-stone-400,
+  html:not(.dark) .text-stone-500 {
+    color: #57534e;
+  }
+  html:not(.dark) .text-zinc-400,
+  html:not(.dark) .text-zinc-500 {
+    color: #52525b;
+  }
+  html:not(.dark) .text-emerald-500,
+  html:not(.dark) .text-emerald-600 {
+    color: #065f46;
+  }
+  html:not(.dark) .text-amber-500,
+  html:not(.dark) .text-amber-600 {
+    color: #92400e;
+  }
+  html:not(.dark) .text-sky-500,
+  html:not(.dark) .text-sky-600 {
+    color: #075985;
+  }
+  html:not(.dark) .text-teal-500,
+  html:not(.dark) .text-teal-600 {
+    color: #115e59;
+  }
+  html:not(.dark) .text-violet-500,
+  html:not(.dark) .text-violet-600 {
+    color: #5b21b6;
+  }
+  html:not(.dark) .text-indigo-500,
+  html:not(.dark) .text-indigo-600 {
+    color: #3730a3;
+  }
+  html:not(.dark) .text-rose-500,
+  html:not(.dark) .text-rose-600 {
+    color: #9f1239;
+  }
+  html:not(.dark) .bg-blue-600 .text-blue-100,
+  html:not(.dark) .bg-blue-600 .text-blue-200,
+  html:not(.dark) .bg-indigo-600 .text-indigo-100,
+  html:not(.dark) .bg-indigo-600 .text-indigo-200 {
+    color: #ffffff;
+  }
+  .bg-emerald-600 {
+    background-color: #047857;
+  }
+  .bg-teal-600 {
+    background-color: #0f766e;
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;

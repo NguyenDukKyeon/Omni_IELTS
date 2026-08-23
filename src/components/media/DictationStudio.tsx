@@ -175,7 +175,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
           <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
             <Gauge className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
             {[0.75, 0.9, 1.0].map((spd) => (
-              <button
+              <button data-ux-flow="media.learning"
                 key={spd}
                 onClick={() => setPlaybackSpeed(spd)}
                 className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
@@ -193,7 +193,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
         {/* Audio Player Card (Transcript Hidden) */}
         <div className="p-6 sm:p-8 rounded-3xl bg-stone-50/80 dark:bg-stone-900/60 border border-stone-200/80 dark:border-stone-700/80 text-center space-y-4">
           <div className="flex justify-center">
-            <button
+            <button data-ux-flow="media.learning"
               onClick={handlePlayAudio}
               className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all cursor-pointer ${
                 isPlayingAudio
@@ -223,7 +223,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
           )}
 
           <div className="flex items-center justify-center gap-3 pt-1">
-            <button
+            <button data-ux-flow="media.learning"
               type="button"
               onClick={() => setShowHintFirstLetters(!showHintFirstLetters)}
               className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:underline flex items-center gap-1 cursor-pointer"
@@ -235,12 +235,12 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
         </div>
 
         {/* Dictation Input Form */}
-        <form onSubmit={handleCheckDictation} className="space-y-4">
+        <form data-ux-flow="media.learning" onSubmit={handleCheckDictation} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
               Gõ chính xác những gì bạn nghe được vào đây:
             </label>
-            <textarea
+            <textarea data-ux-flow="media.learning"
               rows={3}
               required
               value={userInput}
@@ -252,7 +252,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
           </div>
 
           <div className="flex items-center justify-between">
-            <button
+            <button data-ux-flow="media.learning"
               type="button"
               onClick={() => setShowFullAnswer(!showFullAnswer)}
               className="text-xs font-semibold text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
@@ -261,7 +261,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
               <span>{showFullAnswer ? 'Ẩn đáp án' : 'Xem đáp án ngay'}</span>
             </button>
 
-            <button
+            <button data-ux-flow="media.learning"
               type="submit"
               disabled={!userInput.trim()}
               className="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white font-bold text-xs shadow-md shadow-sky-600/20 flex items-center gap-2 cursor-pointer transition-all"
@@ -370,7 +370,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
             {/* Actions for Incorrect */}
             {accuracyScore < 85 && (
               <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
+                <button data-ux-flow="media.learning"
                   onClick={handleSaveMistakeToNotebook}
                   disabled={mistakeSaved}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -383,7 +383,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
                   <span>{mistakeSaved ? 'Đã lưu vào Sổ Tay Lỗi Sai' : 'Lưu vào Sổ Tay Lỗi Sai'}</span>
                 </button>
 
-                <button
+                <button data-ux-flow="media.learning"
                   onClick={() =>
                     openAITutorWithPrompt(
                       `Hãy giải thích các hiện tượng nối âm (connected speech) hoặc từ vựng khiến tôi nghe nhầm trong câu: "${segment.text}"`
@@ -401,7 +401,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
 
         {/* Bottom Navigation */}
         <div className="pt-4 border-t border-stone-100 dark:border-stone-700 flex items-center justify-between">
-          <button
+          <button data-ux-flow="media.learning"
             onClick={handlePrev}
             disabled={activeSegmentIndex === 0}
             className="px-4 py-2 rounded-xl text-xs font-bold text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700 disabled:opacity-30 transition-all flex items-center gap-1.5 cursor-pointer"
@@ -414,7 +414,7 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
             {activeSegmentIndex + 1} / {session.transcriptSegments.length}
           </span>
 
-          <button
+          <button data-ux-flow="media.learning"
             onClick={handleNext}
             disabled={activeSegmentIndex === session.transcriptSegments.length - 1}
             className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-30 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shadow-sky-600/20"

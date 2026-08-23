@@ -98,7 +98,14 @@ export const OriginalMediaPlayer = forwardRef<OriginalMediaPlayerHandle, Origina
     }), [session.youtubeId, onPlaybackEnded]);
 
     if (session.youtubeId) {
-      return <div className="aspect-video w-full overflow-hidden rounded-2xl bg-black" ref={hostRef} aria-label="YouTube original lesson player" />;
+      return <div role="region" className="aspect-video w-full overflow-hidden rounded-2xl bg-black" ref={hostRef} aria-label="YouTube original lesson player" />;
+    }
+    if (!session.mediaUrl) {
+      return (
+        <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          Bài mẫu chỉ có transcript. Hãy nhập URL YouTube hoặc audio của bạn để luyện với âm thanh gốc.
+        </div>
+      );
     }
     return <audio ref={audioRef} controls src={session.mediaUrl} className="w-full" aria-label="Original lesson audio" />;
   },

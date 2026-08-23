@@ -100,7 +100,7 @@ export const MediaLabView: React.FC = () => {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-3 shrink-0 flex-wrap">
-          <button
+          <button data-ux-flow="media.learning"
             id="audio-transcribe-btn"
             onClick={() => setIsAudioTranscribeOpen(true)}
             className="px-5 py-3 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-violet-600/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-102"
@@ -109,10 +109,10 @@ export const MediaLabView: React.FC = () => {
             <span>🎙️ AI Audio Transcription (media-transcribe-v1)</span>
           </button>
 
-          <button
+          <button data-ux-flow="media.learning"
             id="import-youtube-btn"
             onClick={() => setIsImportModalOpen(true)}
-            className="px-5 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-600/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-102"
+            className="px-5 py-3 rounded-2xl bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-600/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-102"
           >
             <Youtube className="w-4 h-4" />
             <span>+ Nhập URL YouTube</span>
@@ -134,7 +134,7 @@ export const MediaLabView: React.FC = () => {
 
             {/* Search filter */}
             <div className="relative">
-              <input
+              <input data-ux-flow="media.learning"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -203,7 +203,7 @@ export const MediaLabView: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-1">
-                        <button
+                        <button data-ux-flow="media.learning"
                           onClick={(e) => handleDeleteSession(e, session.id)}
                           className="p-1 text-stone-400 hover:text-rose-600 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                           title="Xóa bài luyện này"
@@ -225,7 +225,7 @@ export const MediaLabView: React.FC = () => {
 
             {/* AI Pronunciation Helper Card */}
             <div className="pt-3 border-t border-stone-100 dark:border-stone-700">
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={() =>
                   openAITutorWithPrompt(
                     `Hãy hướng dẫn các quy tắc nối âm (Connected Speech), nuốt âm (Elision), và trọng âm câu (Sentence Stress) trong bài nghe "${selectedSession?.title || 'IELTS Speaking'}".`
@@ -266,7 +266,7 @@ export const MediaLabView: React.FC = () => {
 
                   {/* Mode Switcher */}
                   <div className="bg-stone-100 dark:bg-stone-900 p-1 rounded-2xl flex items-center gap-1 border border-stone-200 dark:border-stone-700 shrink-0">
-                    <button
+                    <button data-ux-flow="media.learning"
                       onClick={() => setMode('shadowing')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         mode === 'shadowing'
@@ -277,7 +277,7 @@ export const MediaLabView: React.FC = () => {
                       <Mic2 className="w-3.5 h-3.5" />
                       <span>Shadowing (Nói)</span>
                     </button>
-                    <button
+                    <button data-ux-flow="media.learning"
                       onClick={() => setMode('dictation')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         mode === 'dictation'
@@ -293,7 +293,7 @@ export const MediaLabView: React.FC = () => {
 
                 {/* Sub-tabs for the Active Session */}
                 <div className="flex items-center gap-2 border-b border-stone-100 dark:border-stone-700 pt-2">
-                  <button
+                  <button data-ux-flow="media.learning"
                     onClick={() => setActiveTab('studio')}
                     className={`pb-3 px-3 text-xs font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
                       activeTab === 'studio'
@@ -305,7 +305,7 @@ export const MediaLabView: React.FC = () => {
                     <span>Luyện Tập Trực Tiếp (Studio)</span>
                   </button>
 
-                  <button
+                  <button data-ux-flow="media.learning"
                     onClick={() => setActiveTab('transcript')}
                     className={`pb-3 px-3 text-xs font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
                       activeTab === 'transcript'
@@ -317,7 +317,7 @@ export const MediaLabView: React.FC = () => {
                     <span>Toàn Bộ Transcript ({selectedSession.transcriptSegments.length})</span>
                   </button>
 
-                  <button
+                  <button data-ux-flow="media.learning"
                     onClick={() => setActiveTab('vocab')}
                     className={`pb-3 px-3 text-xs font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
                       activeTab === 'vocab'
@@ -426,7 +426,7 @@ export const MediaLabView: React.FC = () => {
               <p className="text-xs text-stone-500 max-w-sm mx-auto">
                 Bấm "+ Nhập URL YouTube Mới" để dán đường link video học thuật bất kỳ và tạo bài học tự động.
               </p>
-              <button
+              <button data-ux-flow="media.learning"
                 onClick={() => setIsImportModalOpen(true)}
                 className="px-6 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md cursor-pointer"
               >

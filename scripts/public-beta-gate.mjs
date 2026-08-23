@@ -6,7 +6,7 @@ if (!npmCli) {
   process.exit(1);
 }
 
-for (const script of ['test', 'lint', 'build', 'test:e2e']) {
+for (const script of ['test', 'check:ux-contracts', 'lint', 'build', 'test:e2e', 'test:e2e:live']) {
   const result = spawnSync(process.execPath, [npmCli, 'run', script], {
     cwd: process.cwd(),
     shell: false,
@@ -18,4 +18,4 @@ for (const script of ['test', 'lint', 'build', 'test:e2e']) {
   }
 }
 
-console.log('Public beta gate passed: unit tests, TypeScript, production build, and browser E2E are clean.');
+console.log('Public beta gate passed: unit/API tests, UX contracts, TypeScript, production build, deterministic E2E, accessibility, and live provider canaries are clean.');

@@ -195,7 +195,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -208,7 +208,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Task Type Switcher */}
             <div className="flex gap-1.5 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
-              <button
+              <button data-ux-flow="practice.skills"
                 type="button"
                 onClick={() => {
                   setTaskType('writing_task2');
@@ -223,7 +223,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
               >
                 Writing Task 2 (Essay)
               </button>
-              <button
+              <button data-ux-flow="practice.skills"
                 type="button"
                 onClick={() => {
                   setTaskType('writing_task1');
@@ -238,7 +238,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
               >
                 Writing Task 1 (Report)
               </button>
-              <button
+              <button data-ux-flow="practice.skills"
                 type="button"
                 onClick={() => {
                   setTaskType('speaking');
@@ -265,7 +265,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Đề bài (Prompt / Cue Card):
             </label>
-            <input
+            <input data-ux-flow="practice.skills"
               type="text"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -279,7 +279,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
               Bài nộp của thí sinh (Submission):
             </label>
-            <textarea
+            <textarea data-ux-flow="practice.skills"
               rows={5}
               value={submission}
               onChange={(e) => setSubmission(e.target.value)}
@@ -289,7 +289,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
           </div>
 
           <div className="flex justify-end">
-            <button
+            <button data-ux-flow="practice.skills"
               type="button"
               onClick={handleEvaluate}
               disabled={isLoading || !submission.trim()}
@@ -539,7 +539,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
                                 {err.errorTag}
                               </span>
 
-                              <button
+                              <button data-ux-flow="practice.skills"
                                 type="button"
                                 onClick={() => handleSaveErrorToNotebook(err, errIdx)}
                                 disabled={isSaved}

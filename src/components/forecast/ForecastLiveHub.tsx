@@ -37,6 +37,8 @@ import {
 } from '../../types';
 import { fetchRealExamForecastApi, playTextToSpeech } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
+import { ApiResponseError, classifyApiFailure } from '../../lib/apiFailure';
+import { loadForecastSnapshot, saveForecastSnapshot } from '../../lib/forecastSnapshot';
 
 interface ForecastLiveHubProps {
   onSelectPromptForPractice?: (item: RealExamForecastItem) => void;
@@ -45,13 +47,21 @@ interface ForecastLiveHubProps {
 
 export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPromptForPractice, usageContext = 'practice' }) => {
   const { awardXP, addVocabCard, openAITutorWithPrompt, setActiveModule } = useApp();
+  const [initialSnapshot] = useState<ForecastGroundingResponse | null>(() =>
+    typeof window === 'undefined' ? null : loadForecastSnapshot(window.localStorage),
+  );
 
-  const [forecastItems, setForecastItems] = useState<RealExamForecastItem[]>([]);
+  const [forecastItems, setForecastItems] = useState<RealExamForecastItem[]>(initialSnapshot?.forecastItems || []);
   const [isGroundingLoading, setIsGroundingLoading] = useState<boolean>(false);
-  const [groundingSources, setGroundingSources] = useState<Array<{ title: string; url: string }>>([]);
-  const [activeSearchQueries, setActiveSearchQueries] = useState<string[]>([]);
-  const [summaryOverview, setSummaryOverview] = useState<string>('Chưa có snapshot đã xác minh. Bấm “Cập nhật” để dùng Google Search Grounding.');
+  const [groundingSources, setGroundingSources] = useState<Array<{ title: string; url: string }>>(initialSnapshot?.groundingSources || []);
+  const [activeSearchQueries, setActiveSearchQueries] = useState<string[]>(initialSnapshot?.searchQueries || []);
+  const [summaryOverview, setSummaryOverview] = useState<string>(initialSnapshot?.summaryOverviewVi || 'Chưa có snapshot đã xác minh. Bấm “Cập nhật” để dùng Google Search Grounding.');
+  const [snapshotStatus, setSnapshotStatus] = useState<ForecastGroundingResponse['status']>(initialSnapshot?.status || 'unavailable');
+  const [activeProvider, setActiveProvider] = useState<ForecastGroundingResponse['provider']>(initialSnapshot?.provider);
+  const [fallbackReason, setFallbackReason] = useState<ForecastGroundingResponse['fallbackReason']>(initialSnapshot?.fallbackReason);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(initialSnapshot?.lastUpdated || null);
   const [hubError, setHubError] = useState<string | null>(null);
+  const [hubFailure, setHubFailure] = useState<ApiResponseError['failure']>();
 
   // Filters
   const [selectedSkill, setSelectedSkill] = useState<string>('all');
@@ -70,12 +80,13 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null);
 
   // Preset search tags
+  const currentYear = new Date().getFullYear();
   const PRESET_SEARCH_QUERIES = [
-    { label: '🔥 Đề thi thật mới nhất tuần này', query: 'IELTS real exam August 2026 IDP British Council Vietnam' },
-    { label: '🤖 AI & Tự động hóa việc làm', query: 'IELTS Writing Task 2 AI automation employment forecast 2026' },
-    { label: '🌱 Môi trường & Thuế Carbon', query: 'IELTS Task 2 environment carbon tax green energy 2026' },
-    { label: '🎙️ Speaking Part 2 Dự đoán Quý', query: 'IELTS Speaking Part 2 cue cards forecast Q3 2026 IDP BC' },
-    { label: '📊 Task 1 Biểu đồ Năng lượng', query: 'IELTS Writing Task 1 renewable energy line graph chart 2026' },
+    { label: '🔥 Đề thi thật mới nhất tuần này', query: `IELTS real exam reports this week ${currentYear} IDP British Council Vietnam` },
+    { label: '🤖 AI & Tự động hóa việc làm', query: `IELTS Writing Task 2 AI automation employment forecast ${currentYear}` },
+    { label: '🌱 Môi trường & Thuế Carbon', query: `IELTS Task 2 environment carbon tax green energy ${currentYear}` },
+    { label: '🎙️ Speaking Part 2 Dự đoán Quý', query: `IELTS Speaking Part 2 cue cards latest quarter ${currentYear} IDP BC` },
+    { label: '📊 Task 1 Biểu đồ Năng lượng', query: `IELTS Writing Task 1 renewable energy line graph chart ${currentYear}` },
   ];
 
   // Perform Google Search Grounding Fetch
@@ -83,6 +94,7 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
     const queryToUse = overrideQuery !== undefined ? overrideQuery : customSearchQuery;
     setIsGroundingLoading(true);
     setHubError(null);
+    setHubFailure(undefined);
     try {
       const response: ForecastGroundingResponse = await fetchRealExamForecastApi({
         skill: selectedSkill,
@@ -109,13 +121,31 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
       if (response.summaryOverviewVi) {
         setSummaryOverview(response.summaryOverviewVi);
       }
-      awardXP(25, 'Tra cứu đề thi thật qua Google Search Grounding');
+      setSnapshotStatus(response.status);
+      setActiveProvider(response.provider);
+      setFallbackReason(response.fallbackReason);
+      setLastUpdated(response.lastUpdated);
+      if (typeof window !== 'undefined') saveForecastSnapshot(window.localStorage, response);
+      if (response.forecastItems.length > 0) {
+        awardXP(25, 'Tra cứu nguồn IELTS qua Google Search Grounding');
+      }
     } catch (err: any) {
-      console.error('Grounding fetch error:', err);
-      setHubError(err?.message || 'Search Grounding không khả dụng; snapshot hiện tại được giữ nguyên.');
+      const failure = err instanceof ApiResponseError && err.failure
+        ? err.failure
+        : classifyApiFailure(err, 'forecast');
+      setHubFailure(failure);
+      setHubError(failure?.messageVi || err?.message || 'Search Grounding không khả dụng; snapshot hiện tại được giữ nguyên.');
+      if (forecastItems.length > 0) setSnapshotStatus('stale');
     } finally {
       setIsGroundingLoading(false);
     }
+  };
+
+  const formatSnapshotTime = (value: string | null) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString('vi-VN');
   };
 
   // Copy prompt
@@ -277,7 +307,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             <div className="flex items-center gap-2.5">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
                 <Globe2 className="w-3.5 h-3.5 text-blue-400 animate-spin-slow" />
-                Google Search Grounding Live
+                {activeProvider === 'groq' ? 'Groq Web Search fallback' : 'Google Search Grounding Live'}
               </span>
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2.5 py-0.5 rounded-full">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -288,6 +318,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             <button
               onClick={() => handleTriggerGroundingSearch()}
               disabled={isGroundingLoading}
+              data-ux-flow="live-hub.refresh"
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/30 active:scale-95"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isGroundingLoading ? 'animate-spin' : ''}`} />
@@ -300,13 +331,52 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
               IELTS Real Exam & Forecast Live Hub
             </h1>
             <p className="text-xs md:text-sm text-slate-300 max-w-3xl mt-1 leading-relaxed">
-              Google Search Grounding tổng hợp các bản báo cáo, recall và forecast; từng item chỉ được gắn nhãn “verified” khi có URL trực tiếp hỗ trợ claim. Nội dung luyện tập phái sinh luôn được ghi nguồn.
+              Gemini Google Search là nguồn chính; Groq Web Search tự động tiếp quản khi provider chính không khả dụng. Từng item chỉ được gắn nhãn “verified” khi URL trực tiếp hỗ trợ claim.
             </p>
+            {activeProvider === 'groq' && fallbackReason === 'quota_exhausted' && (
+              <p className="mt-2 text-xs font-semibold text-amber-300">
+                Gemini hết quota ngày; dữ liệu này được tra cứu bằng Groq.
+              </p>
+            )}
           </div>
 
           {hubError && (
-            <div role="alert" className="rounded-xl border border-amber-400/40 bg-amber-950/40 px-4 py-3 text-xs text-amber-100">
-              {hubError} Dữ liệu live không được thay bằng đề mô phỏng.
+            <div role="alert" className="rounded-xl border border-amber-400/40 bg-amber-950/40 px-4 py-3 text-xs text-amber-100 space-y-2">
+              <p>{hubError}</p>
+              {hubFailure?.requestId && <p className="font-mono text-[10px] text-amber-200/80">Mã yêu cầu: {hubFailure.requestId}</p>}
+              <div className="flex flex-wrap gap-2">
+                {hubFailure?.retryable && (
+                  <button
+                    type="button"
+                    data-ux-flow="live-hub.retry"
+                    onClick={() => handleTriggerGroundingSearch()}
+                    className="rounded-lg border border-amber-300/50 px-2.5 py-1 font-bold hover:bg-amber-300/10"
+                  >
+                    Thử lại
+                  </button>
+                )}
+                {hubFailure?.action === 'open_api_settings' && (
+                  <button
+                    type="button"
+                    data-ux-flow="live-hub.open-api-settings"
+                    onClick={() => setActiveModule('profile')}
+                    className="rounded-lg border border-amber-300/50 px-2.5 py-1 font-bold hover:bg-amber-300/10"
+                  >
+                    Mở cài đặt API key
+                  </button>
+                )}
+                {hubFailure?.action === 'open_quota' && (
+                  <a
+                    data-ux-flow="live-hub.open-quota"
+                    href={hubFailure.provider === 'groq' ? 'https://console.groq.com/settings/limits' : 'https://aistudio.google.com/app/apikey'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg border border-amber-300/50 px-2.5 py-1 font-bold hover:bg-amber-300/10"
+                  >
+                    Kiểm tra quota {hubFailure.provider === 'groq' ? 'Groq' : 'Gemini'}
+                  </a>
+                )}
+              </div>
             </div>
           )}
 
@@ -325,7 +395,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <span className="text-[11px] font-bold text-indigo-200">Tra cứu nhanh:</span>
             {PRESET_SEARCH_QUERIES.map((preset, idx) => (
-              <button
+              <button data-ux-flow="live-hub.refresh"
                 key={idx}
                 onClick={() => {
                   setCustomSearchQuery(preset.query);
@@ -346,7 +416,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
+            <input data-ux-flow="live-hub.refresh"
               type="text"
               value={customSearchQuery}
               onChange={(e) => setCustomSearchQuery(e.target.value)}
@@ -356,15 +426,21 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             />
           </div>
 
-          <button
+          <button data-ux-flow="live-hub.refresh"
             onClick={() => handleTriggerGroundingSearch()}
             disabled={isGroundingLoading}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all shrink-0"
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>{isGroundingLoading ? 'Đang tìm kiếm...' : 'Tra cứu Grounding'}</span>
-          </button>
-        </div>
+              <span>{isGroundingLoading ? 'Đang tìm kiếm...' : 'Tra cứu Grounding'}</span>
+            </button>
+          </div>
+
+          {lastUpdated && (
+            <p className="text-[11px] text-slate-300">
+              {snapshotStatus === 'stale' ? 'Snapshot đã lưu' : 'Cập nhật trực tiếp'}: {formatSnapshotTime(lastUpdated)}
+            </p>
+          )}
 
         {/* Citations / Grounding Sources Chips */}
         {groundingSources && groundingSources.length > 0 && (
@@ -374,7 +450,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
               Nguồn trích dẫn thời gian thực:
             </span>
             {groundingSources.map((src, idx) => (
-              <a
+              <a data-ux-flow="live-hub.refresh"
                 key={idx}
                 href={src.url}
                 target="_blank"
@@ -403,7 +479,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             const Icon = tab.icon;
             const isActive = selectedSkill === tab.id;
             return (
-              <button
+              <button data-ux-flow="live-hub.refresh"
                 key={tab.id}
                 onClick={() => setSelectedSkill(tab.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
@@ -422,7 +498,8 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
         {/* Secondary Council & Trend Dropdowns & Local Search */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Council Filter */}
-          <select
+          <select data-ux-flow="live-hub.refresh"
+            aria-label="Lọc theo hội đồng thi"
             value={selectedCouncil}
             onChange={(e) => setSelectedCouncil(e.target.value)}
             className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -435,7 +512,8 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
           </select>
 
           {/* Trend Filter */}
-          <select
+          <select data-ux-flow="live-hub.refresh"
+            aria-label="Lọc theo trạng thái đề"
             value={selectedTrend}
             onChange={(e) => setSelectedTrend(e.target.value)}
             className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -448,7 +526,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
 
           {/* Quick Filter Keyword */}
           <div className="relative">
-            <input
+            <input data-ux-flow="live-hub.refresh"
               type="text"
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
@@ -473,7 +551,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
               Hãy thử chọn lại kỹ năng, đặt lại bộ lọc hoặc nhấn nút "Tra cứu Grounding" để AI tìm kiếm thêm các đề mới nhất từ internet.
             </p>
-            <button
+            <button data-ux-flow="live-hub.refresh"
               onClick={() => {
                 setSelectedSkill('all');
                 setSelectedCouncil('all');
@@ -491,6 +569,8 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             const currentTab = activeTabPerItem[item.id] || 'peel';
             const isCopied = copiedItemId === item.id;
             const isAudioActive = isPlayingAudio === item.id;
+            const hasEnrichment = item.enrichmentStatus === 'ready'
+              || Boolean(item.outlinePEEL || item.band8ModelAnswer || item.topicVocabularyC1C2?.length);
 
             return (
               <div
@@ -583,7 +663,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                         )}
                       </div>
 
-                      <button
+                      <button data-ux-flow="live-hub.refresh"
                         onClick={() => handleCopyPrompt(item)}
                         className="p-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shadow-sm transition-all shrink-0"
                         title="Sao chép đề bài"
@@ -600,7 +680,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                   {/* Quick Action Toolbar */}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
+                      <button data-ux-flow="live-hub.refresh"
                         onClick={() => handlePracticeNow(item)}
                         className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 active:scale-95 transition-all"
                       >
@@ -609,7 +689,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                         <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
                       </button>
 
-                      <button
+                      <button data-ux-flow="live-hub.refresh"
                         onClick={() => handleAskAITutor(item)}
                         className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 transition-all"
                       >
@@ -618,13 +698,20 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                       </button>
                     </div>
 
-                    <button
-                      onClick={() => setExpandedItemId(isExpanded ? '' : item.id)}
-                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors flex items-center gap-1"
-                    >
-                      <span>{isExpanded ? 'Thu gọn phân tích' : 'Xem Dàn ý & Bài mẫu Band 8.0+'}</span>
-                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
+                    {hasEnrichment ? (
+                      <button
+                        data-ux-flow="live-hub.toggle-enrichment"
+                        onClick={() => setExpandedItemId(isExpanded ? '' : item.id)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors flex items-center gap-1"
+                      >
+                        <span>{isExpanded ? 'Thu gọn phân tích' : 'Xem Dàn ý & Bài mẫu'}</span>
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Phân tích chuyên sâu sẽ được tạo trong bài luyện để tiết kiệm quota.
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -652,7 +739,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                         const Icon = tab.icon;
                         const isActive = currentTab === tab.id;
                         return (
-                          <button
+                          <button data-ux-flow="live-hub.refresh"
                             key={tab.id}
                             onClick={() =>
                               setActiveTabPerItem((prev) => ({
@@ -817,7 +904,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                                 </div>
 
                                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                                  <button
+                                  <button data-ux-flow="live-hub.refresh"
                                     onClick={() => playTextToSpeech(vocab.phrase, 1.0, 'British')}
                                     className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400"
                                     title="Phát âm"
@@ -825,7 +912,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                                     <Volume2 className="w-3.5 h-3.5" />
                                   </button>
 
-                                  <button
+                                  <button data-ux-flow="live-hub.refresh"
                                     onClick={() => handleSaveVocabToSRS(vocab, item.id)}
                                     disabled={isAdded}
                                     className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
@@ -868,7 +955,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <button
+                            <button data-ux-flow="live-hub.refresh"
                               onClick={() => handlePlayModelAudio(item.band8ModelAnswer, item.id)}
                               className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
                                 isAudioActive
@@ -889,7 +976,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                               )}
                             </button>
 
-                            <button
+                            <button data-ux-flow="live-hub.refresh"
                               onClick={() => {
                                 navigator.clipboard.writeText(item.band8ModelAnswer);
                                 awardXP(5, 'Sao chép bài mẫu');
@@ -924,7 +1011,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                           <div className="pt-3 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between">
                             <span>Nguồn xác thực khảo thí: {item.groundingSourceTitle}</span>
                             {item.groundingSourceUrl && (
-                              <a
+                              <a data-ux-flow="live-hub.refresh"
                                 href={item.groundingSourceUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"

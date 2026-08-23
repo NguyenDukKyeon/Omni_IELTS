@@ -286,7 +286,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="media.learning"
             onClick={() => {
               window.speechSynthesis?.cancel();
               onClose();
@@ -299,7 +299,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 
         {/* Input Mode Selector */}
         <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center gap-2 overflow-x-auto text-xs">
-          <button
+          <button data-ux-flow="media.learning"
             type="button"
             onClick={() => setInputMode('upload')}
             className={`px-3.5 py-1.5 rounded-xl font-bold transition-all ${
@@ -310,7 +310,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
           >
             📁 Tải File Audio (MP3 / WAV / WebM)
           </button>
-          <button
+          <button data-ux-flow="media.learning"
             type="button"
             onClick={() => setInputMode('record')}
             className={`px-3.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 ${
@@ -337,7 +337,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
                   Hỗ trợ định dạng MP3, WAV, WebM, M4A, OGG
                 </p>
               </div>
-              <input
+              <input data-ux-flow="media.learning"
                 type="file"
                 accept="audio/*"
                 onChange={handleFileUpload}
@@ -372,7 +372,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 
               <div className="flex justify-center gap-2">
                 {!isRecording ? (
-                  <button
+                  <button data-ux-flow="media.learning"
                     type="button"
                     onClick={startRecording}
                     className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all"
@@ -381,7 +381,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
                     <span>Bắt Đầu Thu Âm</span>
                   </button>
                 ) : (
-                  <button
+                  <button data-ux-flow="media.learning"
                     type="button"
                     onClick={stopRecording}
                     className="px-5 py-2.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all"
@@ -399,7 +399,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
               Gợi ý ngữ cảnh / Chủ đề bài nghe (Context Hint):
             </label>
-            <input
+            <input data-ux-flow="media.learning"
               type="text"
               value={topicContext}
               onChange={(e) => setTopicContext(e.target.value)}
@@ -409,7 +409,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
           </div>
 
           <div className="flex justify-end">
-            <button
+            <button data-ux-flow="media.learning"
               type="button"
               onClick={handleTranscribe}
               disabled={isLoading}
@@ -465,7 +465,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
                 </span>
               </div>
 
-              <button
+              <button data-ux-flow="media.learning"
                 type="button"
                 onClick={handleCreateMediaSession}
                 className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
@@ -511,7 +511,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
                           Độ tin cậy: {seg.confidence}
                         </span>
 
-                        <button
+                        <button data-ux-flow="media.learning"
                           type="button"
                           onClick={() => handlePlaySentence(seg.text, idx)}
                           className={`p-1.5 rounded-lg transition-all ${
@@ -554,7 +554,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
                           <p className="text-[11px] text-slate-600 dark:text-slate-400">{v.meaningVi}</p>
                         </div>
 
-                        <button
+                        <button data-ux-flow="media.learning"
                           type="button"
                           onClick={() => handleSaveVocab(v, vIdx)}
                           disabled={isSaved}

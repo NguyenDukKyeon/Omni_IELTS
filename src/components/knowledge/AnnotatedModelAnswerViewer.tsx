@@ -70,7 +70,7 @@ export const AnnotatedModelAnswerViewer: React.FC = () => {
         {ANNOTATED_MODEL_ANSWERS.map((model) => {
           const isActive = model.id === activeModel.id;
           return (
-            <button
+            <button data-ux-flow="knowledge.learn"
               key={model.id}
               onClick={() => {
                 setActiveModelId(model.id);
@@ -138,7 +138,7 @@ export const AnnotatedModelAnswerViewer: React.FC = () => {
                 Bộ Lọc Tiêu Chí Điểm Cao (Nhấp để bôi màu theo tiêu chí):
               </span>
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => setSelectedCategoryFilter('all')}
                   className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
                     selectedCategoryFilter === 'all'
@@ -148,7 +148,7 @@ export const AnnotatedModelAnswerViewer: React.FC = () => {
                 >
                   Tất cả chú thích
                 </button>
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => setSelectedCategoryFilter('vocab')}
                   className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
                     selectedCategoryFilter === 'vocab'
@@ -158,7 +158,7 @@ export const AnnotatedModelAnswerViewer: React.FC = () => {
                 >
                   <span className="w-2 h-2 rounded-full bg-emerald-500" /> Từ vựng C1/C2
                 </button>
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => setSelectedCategoryFilter('grammar')}
                   className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
                     selectedCategoryFilter === 'grammar'
@@ -168,7 +168,7 @@ export const AnnotatedModelAnswerViewer: React.FC = () => {
                 >
                   <span className="w-2 h-2 rounded-full bg-blue-500" /> Ngữ pháp phức tạp
                 </button>
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => setSelectedCategoryFilter('cohesion')}
                   className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
                     selectedCategoryFilter === 'cohesion'
@@ -178,7 +178,7 @@ export const AnnotatedModelAnswerViewer: React.FC = () => {
                 >
                   <span className="w-2 h-2 rounded-full bg-purple-500" /> Mạch lạc & Liên kết
                 </button>
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => setSelectedCategoryFilter('task_response')}
                   className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
                     selectedCategoryFilter === 'task_response'

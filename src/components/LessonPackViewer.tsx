@@ -282,7 +282,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
               {extractedVocab.slice(0, 4).map((v, i) => {
                 const isSaved = savedWords[v.word.toLowerCase()];
                 return (
-                  <button
+                  <button data-ux-flow="knowledge.learn"
                     key={i}
                     id={`quick-save-vocab-${i}`}
                     onClick={() => handleQuickAddVocab(v)}
@@ -314,7 +314,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
           const Icon = tab.icon;
           const isActive = activeSkillTab === tab.id;
           return (
-            <button
+            <button data-ux-flow="knowledge.learn"
               key={tab.id}
               id={`skill-tab-${tab.id}`}
               onClick={() => setActiveSkillTab(tab.id as any)}
@@ -352,7 +352,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                   {lessonPack.reading.title}
                 </h3>
               </div>
-              <button
+              <button data-ux-flow="knowledge.learn"
                 onClick={() => playTextToSpeech(lessonPack.reading.adaptedPassage, 'us')}
                 className="p-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-blue-600 transition-colors"
                 title="Nghe phát âm toàn bài đọc"
@@ -382,7 +382,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                 Câu Hỏi Đọc Hiểu ({lessonPack.reading.questions.length})
               </h3>
               {readingSubmitted && (
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => {
                     setReadingSubmitted(false);
                     setReadingAnswers({});
@@ -442,7 +442,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                         {q.type === 'true_false_not_given' && (
                           <div className="grid grid-cols-3 gap-2 pt-1">
                             {['TRUE', 'FALSE', 'NOT GIVEN'].map((opt) => (
-                              <button
+                              <button data-ux-flow="knowledge.learn"
                                 key={opt}
                                 id={`q-${q.id}-opt-${opt}`}
                                 disabled={readingSubmitted}
@@ -462,7 +462,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                         {q.type === 'multiple_choice' && q.options && (
                           <div className="space-y-1.5 pt-1">
                             {q.options.map((opt, oi) => (
-                              <button
+                              <button data-ux-flow="knowledge.learn"
                                 key={oi}
                                 id={`q-${q.id}-opt-${oi}`}
                                 disabled={readingSubmitted}
@@ -481,7 +481,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
 
                         {q.type === 'sentence_completion' && (
                           <div className="pt-1">
-                            <input
+                            <input data-ux-flow="knowledge.learn"
                               type="text"
                               disabled={readingSubmitted}
                               value={userAnswer}
@@ -511,7 +511,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
             </div>
 
             {!readingSubmitted && (
-              <button
+              <button data-ux-flow="knowledge.learn"
                 id="submit-reading-btn"
                 onClick={handleCheckReading}
                 className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 cursor-pointer"
@@ -541,7 +541,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                 </h3>
               </div>
 
-              <button
+              <button data-ux-flow="knowledge.learn"
                 id="play-full-listening-audio-btn"
                 onClick={handlePlayFullAudio}
                 disabled={isPlayingAudio}
@@ -583,7 +583,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                             : 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800'
                         }`}
                       >
-                        <button
+                        <button data-ux-flow="knowledge.learn"
                           onClick={() => handlePlayDialogueTurn(turn.text, ti, turn.gender)}
                           className="w-8 h-8 rounded-full bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 hover:scale-105 transition-transform cursor-pointer"
                           title="Nghe câu này"
@@ -632,7 +632,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                 Câu Hỏi Nghe Hiểu ({lessonPack.listening.questions.length})
               </h3>
               {listeningSubmitted && (
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => {
                     setListeningSubmitted(false);
                     setListeningAnswers({});
@@ -672,7 +672,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                         {q.type === 'multiple_choice' && q.options && (
                           <div className="space-y-1.5 pt-1">
                             {q.options.map((opt, oi) => (
-                              <button
+                              <button data-ux-flow="knowledge.learn"
                                 key={oi}
                                 id={`lq-${q.id}-opt-${oi}`}
                                 disabled={listeningSubmitted}
@@ -691,7 +691,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
 
                         {q.type === 'gap_fill' && (
                           <div className="pt-1">
-                            <input
+                            <input data-ux-flow="knowledge.learn"
                               type="text"
                               disabled={listeningSubmitted}
                               value={userAnswer}
@@ -720,7 +720,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
             </div>
 
             {!listeningSubmitted && (
-              <button
+              <button data-ux-flow="knowledge.learn"
                 id="submit-listening-btn"
                 onClick={handleCheckListening}
                 className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer"
@@ -846,7 +846,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
             {/* Input & Voice Controls */}
             <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-700">
               <div className="flex items-center gap-2">
-                <input
+                <input data-ux-flow="knowledge.learn"
                   type="text"
                   value={speakingUserInput}
                   onChange={(e) => setSpeakingUserInput(e.target.value)}
@@ -854,7 +854,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                   placeholder="Gõ hoặc nói câu trả lời của bạn..."
                   className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-slate-100"
                 />
-                <button
+                <button data-ux-flow="knowledge.learn"
                   id="send-speaking-reply-btn"
                   onClick={handleSendSpeakingUtterance}
                   disabled={!speakingUserInput.trim() || isAiReplyingSpeaking}
@@ -866,7 +866,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
 
               <div className="flex items-center justify-between text-[11px] text-slate-500">
                 <span>Gợi ý: Trả lời kèm ít nhất 1 collocation học thuật</span>
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => openAITutorWithPrompt(`Gợi ý câu trả lời mẫu đạt band ${lessonPack.targetBand} cho câu hỏi Speaking Part 3 này: "${lessonPack.speaking.discussionQuestions[0]?.question}"`)}
                   className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline"
                 >
@@ -918,7 +918,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
                   {wordCount} từ {lessonPack.writing.taskType.includes('Task 1') ? '(Mục tiêu: 150+)' : '(Mục tiêu: 250+)'}
                 </span>
               </div>
-              <textarea
+              <textarea data-ux-flow="knowledge.learn"
                 rows={10}
                 value={essayText}
                 onChange={(e) => setEssayText(e.target.value)}
@@ -927,7 +927,7 @@ export const LessonPackViewer: React.FC<LessonPackViewerProps> = ({
               />
             </div>
 
-            <button
+            <button data-ux-flow="knowledge.learn"
               id="submit-writing-eval-btn"
               onClick={handleEvaluateWriting}
               disabled={isEvaluatingWriting || wordCount < 30}

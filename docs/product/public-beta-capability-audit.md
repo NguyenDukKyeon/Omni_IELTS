@@ -49,4 +49,8 @@ Each journey is reviewed for: journey completion, correctness, reliability, lear
 
 ## Release verification
 
-Run `npm run check:beta`. This is the merge-blocking local gate for unit regressions, TypeScript, the production client/server bundle, and Playwright browser E2E on desktop/mobile for the staged Mock CTA transition. External AI success depends on a valid BYOK/project quota; quota failure must remain a truthful unavailable state and must never produce fabricated content.
+Run `npm run check:release` (the legacy alias `check:beta` runs the same gate). The gate now executes unit/API regressions, the UX contract checker, TypeScript, the production client/server bundle, deterministic Playwright flows on desktop/mobile, WCAG AA checks, and the live-provider canary.
+
+Current UX inventory on `fix/ux-contracts-live-hub`: 645 native controls map to 18 owned contracts. The TypeScript AST checker rejects unregistered controls, unknown flow IDs, missing executable evidence, decorative buttons/links, and editable forms/fields without a handler or submit transition. Deterministic E2E keeps trace and screenshot evidence and rejects unexpected `pageerror`/console errors.
+
+Release status on 2026-08-23: deterministic gates pass, but the real Gemini Search Grounding canary is blocked by `quota_exhausted`. This branch must remain unmerged until `npm run test:e2e:live` passes with a valid key/quota. A quota failure remains a truthful Vietnamese unavailable state and never produces seeded or fabricated live content.

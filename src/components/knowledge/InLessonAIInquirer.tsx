@@ -131,7 +131,8 @@ export const InLessonAIInquirer: React.FC<InLessonAIInquirerProps> = ({
           </div>
         </div>
 
-        <button
+        <button data-ux-flow="knowledge.learn"
+          aria-label={isOpen ? 'Thu gọn hỏi đáp AI' : 'Mở hỏi đáp AI'}
           onClick={() => setIsOpen(!isOpen)}
           className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-white/60 dark:hover:bg-slate-800 transition-all cursor-pointer"
         >
@@ -144,7 +145,7 @@ export const InLessonAIInquirer: React.FC<InLessonAIInquirerProps> = ({
           {/* Quick Prompts Carousel */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
             {quickPrompts.map((qp, idx) => (
-              <button
+              <button data-ux-flow="knowledge.learn"
                 key={idx}
                 onClick={() => handleAskAI(qp)}
                 disabled={isLoading}
@@ -203,14 +204,14 @@ export const InLessonAIInquirer: React.FC<InLessonAIInquirerProps> = ({
           )}
 
           {/* Input Box */}
-          <form
+          <form data-ux-flow="knowledge.learn"
             onSubmit={(e) => {
               e.preventDefault();
               handleAskAI(inputQuery);
             }}
             className="relative flex items-center"
           >
-            <input
+            <input data-ux-flow="knowledge.learn"
               type="text"
               placeholder={`Hỏi AI về chiến thuật "${contextTopicTitle}"...`}
               value={inputQuery}
@@ -218,7 +219,8 @@ export const InLessonAIInquirer: React.FC<InLessonAIInquirerProps> = ({
               disabled={isLoading}
               className="w-full pl-4 pr-12 py-2.5 text-xs rounded-2xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
             />
-            <button
+            <button data-ux-flow="knowledge.learn"
+              aria-label="Gửi câu hỏi cho AI"
               type="submit"
               disabled={isLoading || !inputQuery.trim()}
               className="absolute right-1.5 p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 transition-all cursor-pointer shadow-xs active:scale-95"

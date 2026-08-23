@@ -226,7 +226,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="sources.manage"
             onClick={() => {
               window.speechSynthesis?.cancel();
               onClose();
@@ -253,7 +253,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className="text-slate-500">Đổi Band:</span>
             {[6.0, 6.5, 7.0, 7.5, 8.0].map((b) => (
-              <button
+              <button data-ux-flow="sources.manage"
                 key={b}
                 type="button"
                 onClick={() => {
@@ -283,7 +283,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               <span className="text-slate-400">Tải mẫu nhanh:</span>
               {SAMPLE_SOURCES.map((s, idx) => (
-                <button
+                <button data-ux-flow="sources.manage"
                   key={idx}
                   type="button"
                   onClick={() => {
@@ -298,7 +298,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
             </div>
           </div>
 
-          <textarea
+          <textarea data-ux-flow="sources.manage"
             value={sourceText}
             onChange={(e) => setSourceText(e.target.value)}
             placeholder="Dán đoạn văn học thuật từ sách, báo chí hoặc file PDF của bạn vào đây..."
@@ -307,7 +307,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
           />
 
           <div className="flex justify-end">
-            <button
+            <button data-ux-flow="sources.manage"
               type="button"
               onClick={() => handleGeneratePackage()}
               disabled={isLoading || !sourceText.trim()}
@@ -355,7 +355,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
         {result && (
           <>
             <div className="px-5 pt-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-2 overflow-x-auto shrink-0">
-              <button
+              <button data-ux-flow="sources.manage"
                 type="button"
                 onClick={() => setActiveTab('reading')}
                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
@@ -368,7 +368,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                 <span>📖 Reading ({result.reading.questions.length} câu)</span>
               </button>
 
-              <button
+              <button data-ux-flow="sources.manage"
                 type="button"
                 onClick={() => setActiveTab('listening')}
                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
@@ -381,7 +381,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                 <span>🎧 Listening Audio ({result.listening.speakerCount} người nói)</span>
               </button>
 
-              <button
+              <button data-ux-flow="sources.manage"
                 type="button"
                 onClick={() => setActiveTab('speaking')}
                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
@@ -394,7 +394,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                 <span>🗣️ Speaking ({result.speaking.discussionQuestions.length} câu hỏi)</span>
               </button>
 
-              <button
+              <button data-ux-flow="sources.manage"
                 type="button"
                 onClick={() => setActiveTab('writing')}
                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
@@ -407,7 +407,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                 <span>✍️ Writing Task</span>
               </button>
 
-              <button
+              <button data-ux-flow="sources.manage"
                 type="button"
                 onClick={() => setActiveTab('vocab')}
                 className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
@@ -478,7 +478,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                           {q.options && q.options.length > 0 ? (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {q.options.map((opt, oIdx) => (
-                                <button
+                                <button data-ux-flow="sources.manage"
                                   key={oIdx}
                                   type="button"
                                   onClick={() =>
@@ -495,7 +495,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                               ))}
                             </div>
                           ) : (
-                            <input
+                            <input data-ux-flow="sources.manage"
                               type="text"
                               value={userReadingAnswers[qIdx] || ''}
                               onChange={(e) =>
@@ -523,7 +523,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                       );
                     })}
 
-                    <button
+                    <button data-ux-flow="sources.manage"
                       type="button"
                       onClick={() => setShowReadingResults(true)}
                       className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all"
@@ -543,7 +543,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                         Kịch Bản Audio Khảo Thí ({result.listening.speakerCount} người nói):
                       </span>
 
-                      <button
+                      <button data-ux-flow="sources.manage"
                         type="button"
                         onClick={() => handlePlayListeningAudio(result.listening.script)}
                         className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all ${
@@ -589,7 +589,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                           {q.text}
                         </p>
 
-                        <input
+                        <input data-ux-flow="sources.manage"
                           type="text"
                           value={userListeningAnswers[qIdx] || ''}
                           onChange={(e) =>
@@ -615,7 +615,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                       </div>
                     ))}
 
-                    <button
+                    <button data-ux-flow="sources.manage"
                       type="button"
                       onClick={() => setShowListeningResults(true)}
                       className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all"
@@ -667,7 +667,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                     <span className="text-slate-600 dark:text-slate-400 font-medium">
                       Muốn làm bài viết này và được chấm theo 4 tiêu chí Cambridge?
                     </span>
-                    <button
+                    <button data-ux-flow="sources.manage"
                       onClick={() => {
                         sessionStorage.setItem(
                           'omni_pending_writing_prompt',
@@ -706,7 +706,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                     <span className="text-xs font-bold text-blue-900 dark:text-blue-200">
                       Trích xuất {result.extractedVocabulary.length} từ vựng học thuật C1/C2 đáng học nhất
                     </span>
-                    <button
+                    <button data-ux-flow="sources.manage"
                       type="button"
                       onClick={handleSyncAllVocab}
                       className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
@@ -756,7 +756,7 @@ export const SourceToLearningPackageModal: React.FC<SourceToLearningPackageModal
                           </div>
 
                           <div className="pt-2 border-t border-slate-100 dark:border-slate-700 flex justify-end">
-                            <button
+                            <button data-ux-flow="sources.manage"
                               type="button"
                               onClick={() => handleSyncVocab(v, idx)}
                               disabled={isSynced}

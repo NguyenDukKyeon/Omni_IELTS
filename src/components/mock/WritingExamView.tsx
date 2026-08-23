@@ -42,7 +42,7 @@ export const WritingExamView: React.FC<WritingExamViewProps> = ({
       <div className="bg-slate-950 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between gap-4">
         {/* Left: Task Tabs */}
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-lg">
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setActiveTask('task1')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               activeTask === 'task1'
@@ -61,7 +61,7 @@ export const WritingExamView: React.FC<WritingExamViewProps> = ({
             </span>
           </button>
 
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setActiveTask('task2')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               activeTask === 'task2'
@@ -83,7 +83,7 @@ export const WritingExamView: React.FC<WritingExamViewProps> = ({
 
         {/* Right: Word Count Live Monitor */}
         <div className="flex items-center gap-3">
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setShowScratchpad(!showScratchpad)}
             className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
               showScratchpad ? 'bg-amber-950/80 border-amber-600 text-amber-300' : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
@@ -217,7 +217,7 @@ export const WritingExamView: React.FC<WritingExamViewProps> = ({
               <h4 className="text-xs font-bold uppercase text-amber-300">
                 Nháp Dàn ý (Scratchpad - không tính điểm)
               </h4>
-              <textarea
+              <textarea data-ux-flow="mock.exam"
                 value={scratchpad}
                 onChange={(e) => setScratchpad(e.target.value)}
                 placeholder="Ghi chú nhanh dàn ý 4 đoạn, từ vựng hay muốn dùng..."
@@ -240,7 +240,7 @@ export const WritingExamView: React.FC<WritingExamViewProps> = ({
             </span>
           </div>
 
-          <textarea
+          <textarea data-ux-flow="mock.exam"
             value={activeTask === 'task1' ? writingAnswers.task1 : writingAnswers.task2}
             onChange={(e) => onUpdateWriting(activeTask, e.target.value)}
             placeholder={

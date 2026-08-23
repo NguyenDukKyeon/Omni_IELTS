@@ -135,7 +135,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="grammar.learning"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -159,7 +159,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className="text-slate-500">Số câu bài tập:</span>
             {[3, 5, 8].map((c) => (
-              <button
+              <button data-ux-flow="grammar.learning"
                 key={c}
                 type="button"
                 onClick={() => {
@@ -186,7 +186,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
             </span>
           </div>
 
-          <input
+          <input data-ux-flow="grammar.learning"
             type="text"
             value={topicInput}
             onChange={(e) => setTopicInput(e.target.value)}
@@ -197,7 +197,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
           {/* Quick pick chips */}
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             {POPULAR_GRAMMAR_TOPICS.map((t) => (
-              <button
+              <button data-ux-flow="grammar.learning"
                 key={t.id}
                 type="button"
                 onClick={() => {
@@ -216,7 +216,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
           </div>
 
           <div className="flex justify-end pt-1">
-            <button
+            <button data-ux-flow="grammar.learning"
               type="button"
               onClick={() => handleGenerate()}
               disabled={isLoading || !topicInput.trim()}
@@ -344,7 +344,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
                       {ex.options && ex.options.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {ex.options.map((opt, oIdx) => (
-                            <button
+                            <button data-ux-flow="grammar.learning"
                               key={oIdx}
                               type="button"
                               onClick={() => setUserAnswers((prev) => ({ ...prev, [idx]: opt }))}
@@ -359,7 +359,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
                           ))}
                         </div>
                       ) : (
-                        <input
+                        <input data-ux-flow="grammar.learning"
                           type="text"
                           value={userAnswers[idx] || ''}
                           onChange={(e) =>
@@ -387,7 +387,7 @@ export const GrammarCurriculumModal: React.FC<GrammarCurriculumModalProps> = ({
               </div>
 
               {/* Check answers button */}
-              <button
+              <button data-ux-flow="grammar.learning"
                 type="button"
                 onClick={() => setShowResults(true)}
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-xs shadow-md transition-all"

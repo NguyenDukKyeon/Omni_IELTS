@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
+import { navigateToModule } from './helpers/navigation';
 
 const question = (number: number, sectionIndex: number) => ({
   id: `q_${number}`,
@@ -106,7 +107,7 @@ test('staged Mock Orchestrator opens a validated package in the exam room', asyn
 
   await page.goto('/');
   await expect(page).toHaveTitle(/Omni IELTS/);
-  await page.getByRole('button', { name: /Thi thử/ }).last().click();
+  await navigateToModule(page, 'mock_test');
   await expect(page.getByRole('heading', { name: /Phòng Thi Thử IELTS-style/ })).toBeVisible();
   await page.getByRole('button', { name: /Mở Mock Test Orchestrator/ }).click();
   await page.getByRole('button', { name: 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)', exact: true }).click();

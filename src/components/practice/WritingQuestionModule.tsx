@@ -351,7 +351,7 @@ export const WritingQuestionModule: React.FC = () => {
       {/* Top Module Sub-navigation Tabs */}
       <div className="flex items-center justify-between flex-wrap gap-3 bg-white dark:bg-slate-800 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
         <div className="flex items-center gap-2">
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => setWritingSubModule('band_upgrader')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-2 transition-all ${
               writingSubModule === 'band_upgrader'
@@ -363,7 +363,7 @@ export const WritingQuestionModule: React.FC = () => {
             <span>Nâng Cấp Bài Viết Từng Bước (Band 5.5 ➔ 7.0 ➔ 8.5+)</span>
           </button>
 
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => setWritingSubModule('mock_practice')}
             className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-2 transition-all ${
               writingSubModule === 'mock_practice'
@@ -398,7 +398,7 @@ export const WritingQuestionModule: React.FC = () => {
             </p>
           </div>
 
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => handleGenerateNewPrompt(selectedTask)}
             disabled={isGenerating}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
@@ -418,7 +418,7 @@ export const WritingQuestionModule: React.FC = () => {
             const isSelected =
               selectedTask.category === task.category && selectedTask.type === task.type;
             return (
-              <button
+              <button data-ux-flow="practice.skills"
                 key={idx}
                 onClick={() => handleSelectTask(task)}
                 className={`text-left p-3 rounded-xl border transition-all text-xs flex flex-col justify-between ${
@@ -608,7 +608,7 @@ export const WritingQuestionModule: React.FC = () => {
                   <Clock className="w-3.5 h-3.5 text-indigo-500" />
                   <span>{formatTimer(secondsRemaining)}</span>
                 </div>
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={() => setIsTimerRunning(!isTimerRunning)}
                   className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
                 >
@@ -619,7 +619,7 @@ export const WritingQuestionModule: React.FC = () => {
 
             {/* Writing Textarea */}
             <div>
-              <textarea
+              <textarea data-ux-flow="practice.skills"
                 value={essayText}
                 onChange={(e) => setEssayText(e.target.value)}
                 placeholder="Bắt đầu viết bài luận IELTS của bạn tại đây... (Mẹo: Mở bài bằng cách paraphrase đề bài, sau đó nêu quan điểm rõ ràng)."
@@ -630,7 +630,7 @@ export const WritingQuestionModule: React.FC = () => {
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-              <button
+              <button data-ux-flow="practice.skills"
                 type="button"
                 onClick={() => {
                   setMentorInput({
@@ -647,7 +647,7 @@ export const WritingQuestionModule: React.FC = () => {
                 <span>🏛️ Tham Vấn Hội Đồng Mentor Panel (3 Personas)</span>
               </button>
 
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={handleEvaluate}
                 disabled={isEvaluating || wordCount < 20}
                 className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50"
@@ -771,7 +771,7 @@ export const WritingQuestionModule: React.FC = () => {
                         </p>
                         {m.suggestedReviewTopic && (
                           <div className="pt-1 flex items-center gap-2">
-                            <button
+                            <button data-ux-flow="practice.skills"
                               onClick={() =>
                                 openAITutorWithPrompt(
                                   `Hãy giảng chi tiết về chủ đề ngữ pháp "${m.suggestedReviewTopic}" và cách tránh lỗi sai: "${m.originalSegment}".`
@@ -843,7 +843,7 @@ export const WritingQuestionModule: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={() => {
                     setMentorInput({
                       contentOrEssay: essayText,
@@ -871,7 +871,7 @@ export const WritingQuestionModule: React.FC = () => {
                     Chuyển sang phân hệ Nâng Cấp Từng Bước để xem bản Diff 3 cột & bộ Collocations C1/C2.
                   </p>
                 </div>
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={() => setWritingSubModule('band_upgrader')}
                   className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shadow-md transition-all"
                 >

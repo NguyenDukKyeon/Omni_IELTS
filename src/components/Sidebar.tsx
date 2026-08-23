@@ -100,7 +100,7 @@ export const Sidebar: React.FC = () => {
           const isActive = activeModule === item.id;
 
           return (
-            <button
+            <button data-ux-flow="app.navigation"
               key={item.id}
               id={`nav-item-${item.id}`}
               onClick={() => setActiveModule(item.id)}
@@ -155,7 +155,7 @@ export const Sidebar: React.FC = () => {
       {/* Footer Helper Widget */}
       <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
         {/* Quick Ask AI Prompt Banner */}
-        <button
+        <button data-ux-flow="app.navigation"
           id="sidebar-ask-ai-quick-btn"
           onClick={() => setIsAITutorOpen(true)}
           className="w-full p-3 rounded-2xl bg-slate-900 text-white dark:bg-slate-800 text-left hover:bg-slate-800 dark:hover:bg-slate-700 transition-all flex items-center justify-between group shadow-sm"
@@ -177,7 +177,7 @@ export const Sidebar: React.FC = () => {
         </button>
 
         {/* Profile Link in Footer */}
-        <button
+        <button data-ux-flow="app.navigation"
           id="sidebar-profile-link"
           onClick={() => setActiveModule('profile')}
           className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${

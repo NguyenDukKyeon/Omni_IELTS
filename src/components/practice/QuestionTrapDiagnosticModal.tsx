@@ -177,7 +177,7 @@ export const QuestionTrapDiagnosticModal: React.FC<QuestionTrapDiagnosticModalPr
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -221,7 +221,7 @@ export const QuestionTrapDiagnosticModal: React.FC<QuestionTrapDiagnosticModalPr
               <div>
                 <p className="font-bold">Lỗi chẩn đoán bẫy câu hỏi</p>
                 <p className="mt-0.5 text-rose-700 dark:text-rose-300">{errorMessage}</p>
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={handleAnalyzeTrap}
                   className="mt-2 text-xs font-bold text-rose-700 underline"
                 >
@@ -326,7 +326,7 @@ export const QuestionTrapDiagnosticModal: React.FC<QuestionTrapDiagnosticModalPr
 
               {/* 1-Click Save to Mistake Notebook */}
               <div className="pt-2 flex items-center justify-between gap-3">
-                <button
+                <button data-ux-flow="practice.skills"
                   type="button"
                   onClick={handleSaveMistakeToNotebook}
                   disabled={isSavedToNotebook}
@@ -349,7 +349,7 @@ export const QuestionTrapDiagnosticModal: React.FC<QuestionTrapDiagnosticModalPr
                   )}
                 </button>
 
-                <button
+                <button data-ux-flow="practice.skills"
                   type="button"
                   onClick={onClose}
                   className="px-4 py-2.5 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-bold hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"

@@ -330,7 +330,7 @@ export const GrammarHubView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {/* AI Grammar Curriculum Designer Trigger */}
-          <button
+          <button data-ux-flow="grammar.learning"
             onClick={() => setIsCurriculumDesignerOpen(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
           >
@@ -340,7 +340,7 @@ export const GrammarHubView: React.FC = () => {
 
           {/* Tab Switcher */}
           <div className="flex items-center p-1 rounded-2xl bg-stone-200/80 dark:bg-stone-800 border border-stone-300/80 dark:border-stone-700">
-            <button
+            <button data-ux-flow="grammar.learning"
               onClick={() => setActiveTab('curriculum')}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'curriculum'
@@ -351,7 +351,7 @@ export const GrammarHubView: React.FC = () => {
               <BookOpen className="w-3.5 h-3.5" />
               <span>Lộ Trình Cấu Trúc ({grammarTopics.length})</span>
             </button>
-            <button
+            <button data-ux-flow="grammar.learning"
               onClick={() => setActiveTab('diagnostician')}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'diagnostician'
@@ -379,7 +379,7 @@ export const GrammarHubView: React.FC = () => {
                     <span>Bộ lọc bài học</span>
                   </span>
                   {recommendedTopicIds.length > 0 && (
-                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 flex items-center gap-1">
                       <Flame className="w-3 h-3 fill-amber-500 text-amber-500" />
                       <span>{recommendedTopicIds.length} bài nên học</span>
                     </span>
@@ -387,7 +387,7 @@ export const GrammarHubView: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     onClick={() => setActiveFilter('all')}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                       activeFilter === 'all'
@@ -397,7 +397,7 @@ export const GrammarHubView: React.FC = () => {
                   >
                     Tất cả
                   </button>
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     onClick={() => setActiveFilter('recommended')}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
                       activeFilter === 'recommended'
@@ -408,7 +408,7 @@ export const GrammarHubView: React.FC = () => {
                     <Flame className="w-3 h-3" />
                     <span>Theo lỗi sai của bạn</span>
                   </button>
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     onClick={() => setActiveFilter('band7')}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                       activeFilter === 'band7'
@@ -418,7 +418,7 @@ export const GrammarHubView: React.FC = () => {
                   >
                     Band 7.0
                   </button>
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     onClick={() => setActiveFilter('band8')}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
                       activeFilter === 'band8'
@@ -434,7 +434,7 @@ export const GrammarHubView: React.FC = () => {
               {/* Search Bar */}
               <div className="relative">
                 <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
+                <input data-ux-flow="grammar.learning"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -451,7 +451,7 @@ export const GrammarHubView: React.FC = () => {
                   const mastery = topic.userMasteryPercent || 60;
 
                   return (
-                    <button
+                    <button data-ux-flow="grammar.learning"
                       key={topic.id}
                       onClick={() => {
                         setSelectedTopicId(topic.id);
@@ -475,7 +475,7 @@ export const GrammarHubView: React.FC = () => {
                           className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0 ${
                             topic.bandImpact === 'Band 8.0+'
                               ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
-                              : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200'
                           }`}
                         >
                           {topic.bandImpact}
@@ -525,7 +525,7 @@ export const GrammarHubView: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <button
+                <button data-ux-flow="grammar.learning"
                   onClick={() => setIsMistakeNotebookOpen(true)}
                   className="px-3 py-1.5 rounded-xl bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 text-xs font-bold hover:bg-amber-200 shrink-0 cursor-pointer"
                 >
@@ -539,7 +539,7 @@ export const GrammarHubView: React.FC = () => {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-100 dark:border-stone-700">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200">
                       {selectedTopic.bandImpact}
                     </span>
                     <span className="text-xs font-bold text-stone-700 dark:text-stone-300">
@@ -555,13 +555,13 @@ export const GrammarHubView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     onClick={() =>
                       openAITutorWithPrompt(
                         `Tôi muốn bạn giảng sâu về cấu trúc "${selectedTopic.title}" (${selectedTopic.titleVi}). Hãy đưa ra 3 ví dụ dùng trong bài thi IELTS Writing Task 2 đạt Band 8.0+.`
                       )
                     }
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold hover:bg-emerald-100 cursor-pointer shadow-sm"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 text-xs font-bold hover:bg-emerald-100 cursor-pointer shadow-sm"
                   >
                     <Sparkles className="w-4 h-4 text-amber-500" />
                     <span>Hỏi AI về bài này</span>
@@ -661,7 +661,7 @@ export const GrammarHubView: React.FC = () => {
               <div className="p-5 sm:p-7 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 space-y-5 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold border-b border-stone-100 dark:border-stone-700 pb-3">
                   <div className="flex items-center gap-2">
-                    <span className="p-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                    <span className="p-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200">
                       <Zap className="w-3.5 h-3.5" />
                     </span>
                     <span className="uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
@@ -673,7 +673,7 @@ export const GrammarHubView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <button
+                    <button data-ux-flow="grammar.learning"
                       onClick={handleGenerateMoreExercises}
                       disabled={isGeneratingDrills}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 text-xs font-bold cursor-pointer disabled:opacity-50"
@@ -733,7 +733,7 @@ export const GrammarHubView: React.FC = () => {
                       }
 
                       return (
-                        <button
+                        <button data-ux-flow="grammar.learning"
                           key={optIndex}
                           onClick={() => handleSelectOption(optIndex)}
                           className={`w-full p-3.5 rounded-2xl border text-left text-xs sm:text-sm transition-all flex items-center justify-between cursor-pointer ${optClass}`}
@@ -755,7 +755,7 @@ export const GrammarHubView: React.FC = () => {
                 {currentExercise.type !== 'multiple_choice' && (
                   <div className="space-y-2">
                     <div className="relative">
-                      <input
+                      <input data-ux-flow="grammar.learning"
                         type="text"
                         value={textAnswerInput}
                         onChange={(e) => setTextAnswerInput(e.target.value)}
@@ -827,7 +827,7 @@ export const GrammarHubView: React.FC = () => {
 
                 {/* Action Buttons */}
                 <div className="flex items-center justify-between pt-2">
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     onClick={() =>
                       openAITutorWithPrompt(
                         `Hãy giải thích cặn kẽ bài tập này cho tôi: "${currentExercise.question}" (Đáp án chuẩn: "${currentExercise.correctAnswer}"). Tại sao lại làm như vậy?`
@@ -841,7 +841,7 @@ export const GrammarHubView: React.FC = () => {
 
                   <div className="flex gap-2">
                     {!isAnswerSubmitted ? (
-                      <button
+                      <button data-ux-flow="grammar.learning"
                         onClick={handleSubmitAnswer}
                         disabled={
                           isAiEvaluating ||
@@ -864,7 +864,7 @@ export const GrammarHubView: React.FC = () => {
                         )}
                       </button>
                     ) : (
-                      <button
+                      <button data-ux-flow="grammar.learning"
                         onClick={handleNextExercise}
                         className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-stone-900 dark:bg-stone-100 hover:bg-black dark:hover:bg-white text-white dark:text-stone-900 font-bold text-xs shadow-md cursor-pointer"
                       >
@@ -883,7 +883,7 @@ export const GrammarHubView: React.FC = () => {
         <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 space-y-6 shadow-sm">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="p-2 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400">
+              <span className="p-2 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-200">
                 <BrainCircuit className="w-6 h-6" />
               </span>
               <div>
@@ -899,7 +899,7 @@ export const GrammarHubView: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            <textarea
+            <textarea data-ux-flow="grammar.learning"
               rows={5}
               value={diagnosticInputText}
               onChange={(e) => setDiagnosticInputText(e.target.value)}
@@ -908,7 +908,7 @@ export const GrammarHubView: React.FC = () => {
             />
 
             <div className="flex justify-end gap-3">
-              <button
+              <button data-ux-flow="grammar.learning"
                 onClick={() =>
                   setDiagnosticInputText(
                     'Although governments invest in renewable energy, but fossil fuels remain dominant. The number of people who uses private cars are increasing rapidly. If authorities invested more in subways, cities will not suffer from pollution.'
@@ -918,7 +918,7 @@ export const GrammarHubView: React.FC = () => {
               >
                 Dán Mẫu Thử Nghiệm
               </button>
-              <button
+              <button data-ux-flow="grammar.learning"
                 onClick={handleRunDiagnosis}
                 disabled={isDiagnosing || !diagnosticInputText.trim()}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs shadow-md shadow-emerald-600/20 cursor-pointer"
@@ -989,7 +989,7 @@ export const GrammarHubView: React.FC = () => {
                           {err.category} ({err.severity})
                         </span>
                         {err.relatedTopicId && (
-                          <button
+                          <button data-ux-flow="grammar.learning"
                             onClick={() => {
                               setSelectedTopicId(err.relatedTopicId!);
                               setActiveTab('curriculum');
@@ -1036,7 +1036,7 @@ export const GrammarHubView: React.FC = () => {
                           {upg.enhancementType}
                         </span>
                         {upg.relatedTopicId && (
-                          <button
+                          <button data-ux-flow="grammar.learning"
                             onClick={() => {
                               setSelectedTopicId(upg.relatedTopicId!);
                               setActiveTab('curriculum');

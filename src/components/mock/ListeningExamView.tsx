@@ -226,7 +226,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-lg">
             {sections.map((sec, idx) => (
-              <button
+              <button data-ux-flow="mock.exam"
                 key={sec.sectionNumber}
                 onClick={() => {
                   onSelectSection(idx);
@@ -250,7 +250,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
 
           {/* Mode Switcher: Exam vs Dictation A-B */}
           <div className="hidden sm:flex items-center bg-slate-900 border border-slate-800 p-0.5 rounded-lg text-xs">
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => {
                 setActiveTabMode('exam');
                 stopAllAudio();
@@ -263,7 +263,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
             >
               Thi Thật (Exam)
             </button>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={() => {
                 setActiveTabMode('dictation');
                 stopAllAudio();
@@ -283,7 +283,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
         {/* Center: Audio Player Simulation with Speed & 5s Controls */}
         <div className="flex items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-3.5 py-1.5 rounded-xl shadow-inner">
           {/* Rewind 5s */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={handleRewind5s}
             title="Tua lại 5 giây (-5s)"
             className="p-1.5 text-slate-400 hover:text-sky-300 rounded hover:bg-slate-800"
@@ -292,7 +292,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
           </button>
 
           {/* Play / Pause Toggle */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={activeTabMode === 'dictation' ? () => playDictationSentence() : toggleAudio}
             className={`p-2 rounded-full transition-all ${
               isPlayingAudio
@@ -305,7 +305,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
           </button>
 
           {/* Forward 5s */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={handleForward5s}
             title="Tua tới 5 giây (+5s)"
             className="p-1.5 text-slate-400 hover:text-sky-300 rounded hover:bg-slate-800"
@@ -333,7 +333,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
           {/* Speed Selector (0.75x, 1.0x, 1.25x) */}
           <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-[11px] font-mono">
             {[0.75, 1.0, 1.25].map((spd) => (
-              <button
+              <button data-ux-flow="mock.exam"
                 key={spd}
                 onClick={() => setPlaybackSpeed(spd as any)}
                 className={`px-1.5 py-0.5 rounded ${playbackSpeed === spd ? 'bg-sky-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'}`}
@@ -343,7 +343,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
             ))}
           </div>
 
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setIsMuted(!isMuted)}
             className="p-1.5 text-slate-400 hover:text-slate-200 transition-colors"
           >
@@ -373,7 +373,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
                   </h2>
                 </div>
                 {/* A-B Loop Toggle */}
-                <button
+                <button data-ux-flow="mock.exam"
                   onClick={() => setIsAbLooping(!isAbLooping)}
                   className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
                     isAbLooping
@@ -392,14 +392,14 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
 
               {/* Play Audio Button for this sentence */}
               <div className="flex items-center gap-3 pt-1">
-                <button
+                <button data-ux-flow="mock.exam"
                   onClick={() => playDictationSentence(isAbLooping)}
                   className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all active:scale-95"
                 >
                   <Play className="w-4 h-4 fill-slate-950" />
                   <span>Phát Câu Này {isAbLooping ? '(Lặp lại liên tục)' : ''}</span>
                 </button>
-                <button
+                <button data-ux-flow="mock.exam"
                   onClick={stopAllAudio}
                   className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded-xl border border-slate-700"
                 >
@@ -412,7 +412,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
                 <label className="text-xs font-semibold text-slate-300 block">
                   Nhập câu văn bạn nghe được (tiếng Anh):
                 </label>
-                <textarea
+                <textarea data-ux-flow="mock.exam"
                   value={dictationInput}
                   onChange={(e) => setDictationInput(e.target.value)}
                   placeholder="Gõ toàn bộ câu bạn nghe được tại đây..."
@@ -423,7 +423,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
 
               {/* Actions & Accuracy Check */}
               <div className="flex items-center justify-between pt-2">
-                <button
+                <button data-ux-flow="mock.exam"
                   onClick={handleCheckDictation}
                   disabled={!dictationInput.trim()}
                   className="flex items-center gap-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all"
@@ -432,7 +432,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
                   <span>Kiểm Tra Độ Chính Xác</span>
                 </button>
 
-                <button
+                <button data-ux-flow="mock.exam"
                   onClick={handleNextDictationSegment}
                   className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-all"
                 >
@@ -595,7 +595,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
                                         : 'bg-slate-900/60 border-slate-800 hover:bg-slate-900 text-slate-300 hover:text-slate-100'
                                     }`}
                                   >
-                                    <input
+                                    <input data-ux-flow="mock.exam"
                                       type="radio"
                                       name={`question-${q.number}`}
                                       value={optionLetter}
@@ -616,7 +616,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
                               {q.options.map((opt) => {
                                 const isSelected = currentAns.toUpperCase() === opt.trim().toUpperCase();
                                 return (
-                                  <button
+                                  <button data-ux-flow="mock.exam"
                                     key={opt}
                                     onClick={() => onAnswerChange(q.number, opt)}
                                     className={`px-4 py-2 rounded-lg font-mono font-bold text-sm border transition-all ${
@@ -637,7 +637,7 @@ export const ListeningExamView: React.FC<ListeningExamViewProps> = ({
                           {/* 3. Gap Fill / Short Answer */}
                           {q.type === 'gap_fill' && (
                             <div className="flex items-center gap-2 max-w-md">
-                              <input
+                              <input data-ux-flow="mock.exam"
                                 type="text"
                                 value={currentAns}
                                 onChange={(e) => onAnswerChange(q.number, e.target.value)}

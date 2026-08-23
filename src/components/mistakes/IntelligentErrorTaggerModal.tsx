@@ -224,7 +224,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="grammar.learning"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -246,7 +246,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
               <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                 <span className="text-slate-400">Mẫu thử:</span>
                 {SAMPLE_SUBMISSIONS.map((sample, idx) => (
-                  <button
+                  <button data-ux-flow="grammar.learning"
                     key={idx}
                     type="button"
                     onClick={() => {
@@ -262,7 +262,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
               </div>
             </div>
 
-            <textarea
+            <textarea data-ux-flow="grammar.learning"
               value={textToAnalyze}
               onChange={(e) => setTextToAnalyze(e.target.value)}
               placeholder="Dán bài viết, câu trả lời Speaking hoặc ghi chú của bạn vào đây..."
@@ -273,7 +273,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-slate-500">Phân hệ kỹ năng:</span>
-                <select
+                <select data-ux-flow="grammar.learning"
                   value={skillSource}
                   onChange={(e) => setSkillSource(e.target.value)}
                   className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-bold focus:ring-2 focus:ring-indigo-500"
@@ -288,7 +288,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
                 </select>
               </div>
 
-              <button
+              <button data-ux-flow="grammar.learning"
                 type="button"
                 onClick={() => handleExtractErrors()}
                 disabled={isLoading || !textToAnalyze.trim()}
@@ -349,7 +349,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
                   </div>
                 </div>
 
-                <button
+                <button data-ux-flow="grammar.learning"
                   type="button"
                   onClick={handleSyncAllCards}
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
@@ -390,7 +390,7 @@ export const IntelligentErrorTaggerModal: React.FC<IntelligentErrorTaggerModalPr
                           </span>
                         </div>
 
-                        <button
+                        <button data-ux-flow="grammar.learning"
                           type="button"
                           onClick={() => handleSyncCard(item, idx)}
                           disabled={isSynced}

@@ -13,12 +13,17 @@ import { AI_TASK_PROFILES, AiTaskTier } from "./src/lib/aiTaskProfiles";
 import { validateMockPackage, validateMockSkill, MockSkill } from "./src/lib/mockPackageValidator";
 import { normalizeRollingVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
+import { classifyApiFailure, retryProviderCall } from "./src/lib/apiFailure";
+import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
+import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
+import { requestGroqGroundedForecast } from "./src/lib/groqGrounding";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 const execFileAsync = promisify(execFile);
+const groundedProviderRouter = new GroundedProviderRouter();
 
 const TutorEnvelopeSchema = z.object({
   reply: z.string().min(1),
@@ -4513,490 +4518,6 @@ Trả về DUY NHẤT 1 JSON hợp lệ theo đúng cấu trúc sau:
   }
 });
 
-// Google Search Grounding Real Exam & Forecast Live Hub endpoint
-app.post("/api/gemini/forecast-grounding", async (req, res) => {
-  try {
-    const {
-      skill = "all",
-      council = "all",
-      customQuery = "",
-      timeframe = "latest",
-    } = req.body;
-
-    const ai = getGeminiClient(req);
-
-    let searchTopicQuery = customQuery.trim();
-    if (!searchTopicQuery) {
-      const skillName =
-        skill === "writing_task2"
-          ? "IELTS Writing Task 2 real exam topics"
-          : skill === "writing_task1"
-          ? "IELTS Writing Task 1 real exam questions"
-          : skill === "speaking_part2"
-          ? "IELTS Speaking Part 2 cue cards forecast"
-          : skill === "speaking_part1"
-          ? "IELTS Speaking Part 1 real test questions"
-          : "IELTS real exam Speaking Writing recent test topics";
-
-      const councilTarget =
-        council === "idp_vietnam"
-          ? "IDP Vietnam test dates"
-          : council === "bc_vietnam"
-          ? "British Council Vietnam"
-          : "IDP British Council Vietnam and global";
-
-      searchTopicQuery = `${skillName} ${councilTarget} 2026 forecast and recent actual test questions`;
-    }
-
-    if (ai) {
-      try {
-        const prompt = `Bạn là Giám đốc Nghiên cứu Khảo thí IELTS cấp cao & Chuyên gia Phân tích Đề thi thật (IELTS Real Exam & Forecast Intelligence Specialist).
-Hãy sử dụng công cụ Google Search (googleSearch) để tìm kiếm các thông tin và bài báo mới nhất về các đề thi IELTS THẬT (Speaking và Writing Task 1/2) vừa xuất hiện trong các đợt thi gần đây (hoặc dự đoán trọng tâm Quý) tại các hội đồng IDP và British Council (Việt Nam và Quốc tế).
-
-Từ khóa tìm kiếm: "${searchTopicQuery}".
-Bộ lọc yêu cầu: Kỹ năng: ${skill}, Hội đồng: ${council}.
-
-Sau khi tìm kiếm bằng Google Search, hãy tổng hợp từ 3 đến 5 đề thi thật/dự đoán tiêu biểu nhất và trả về định dạng JSON DUY NHẤT theo schema sau:
-
-{
-  "summaryOverviewVi": "Tóm lược ngắn gọn 2-3 câu về xu hướng đề thi thật gần đây (chủ đề nóng, dạng bài xuất hiện nhiều)",
-  "detectedTrends": ["Xu hướng 1", "Xu hướng 2", "Xu hướng 3"],
-  "forecastItems": [
-    {
-      "id": "item_id_unique_string",
-      "title": "Tiêu đề ngắn gọn mô tả chủ đề đề thi",
-      "skill": "writing_task2" (hoặc "writing_task1", "speaking_part1", "speaking_part2", "speaking_part3"),
-      "council": "idp_vietnam" (hoặc "bc_vietnam", "both_vietnam", "idp_global", "bc_global"),
-      "councilLabel": "IDP & BC Việt Nam (Hà Nội, TP.HCM, ...)",
-      "examDate": "Thi thật: [Ngày/Tháng/Năm gần đây] hoặc Dự đoán Quý",
-      "topicDomain": "Tên chủ đề học thuật (e.g. Artificial Intelligence, Sustainable Policy, Education Reform)",
-      "subCategory": "Dạng bài (e.g. Agree/Disagree, Discussion, Bar Chart, Describe a person)",
-      "promptStatement": "Toàn bộ đề bài chính thức bằng tiếng Anh (hoặc Cue card full text)",
-      "cueCardPoints": ["Gợi ý 1", "Gợi ý 2", "Gợi ý 3"] (nếu là Speaking Part 2),
-      "trendStatus": "recent_real_exam" (hoặc "quarter_forecast", "hot_trend", "high_frequency"),
-      "trendBadge": "🔥 Đề Thi Thật Vừa Ra" (hoặc "⭐ Trọng Tâm Quý", "📈 Tần Suất Cao"),
-      "frequencyScore": 95,
-      "outlinePEEL": {
-        "point": "[P] Luận điểm trọng tâm tiếng Việt",
-        "explanation": "[E] Giải thích cơ chế & nguyên nhân sâu sắc",
-        "evidence": "[E] Dẫn chứng hoặc số liệu thực tế",
-        "link": "[L] Móc nối kết luận & hàm ý vĩ mô"
-      },
-      "topicVocabularyC1C2": [
-        {
-          "phrase": "cụm từ C1/C2",
-          "phonetic": "/phiên âm IPA/",
-          "pos": "Noun Phrase / Verb Phrase / Idiom",
-          "meaningVi": "nghĩa tiếng Việt",
-          "exampleSentence": "câu ví dụ ngữ cảnh học thuật",
-          "cefrLevel": "C1"
-        }
-      ],
-      "band8ModelAnswer": "Toàn bộ bài mẫu Band 8.0+ hoàn chỉnh bằng tiếng Anh (Writing essay 260-350 từ hoặc Speaking answer 150-250 từ)",
-      "modelAnswerWordCount": 280,
-      "examinerTipsVi": "Lời khuyên chiến lược của Giám khảo chấm thi để đạt điểm cao"
-      "evidenceType": "verified_report" | "reported_recall" | "forecast",
-      "sourceTitle": "Tiêu đề trang trực tiếp báo cáo claim này",
-      "sourceUrl": "URL trực tiếp của trang hỗ trợ claim này"
-    }
-  ]
-}
-
-LƯU Ý CỰC KỲ QUAN TRỌNG:
-1. Đảm bảo toàn bộ nội dung JSON hợp lệ 100%, không bị cắt ngang, không chứa markdown formatting thừa ngoài code block json.
-2. Bài mẫu Band 8.0+ phải mạch lạc, giàu từ vựng C1/C2 tự nhiên, cấu trúc câu đa dạng.`;
-
-        const geminiResponse = await ai.models.generateContent({
-          model: AI_TASK_PROFILES.grounded.model,
-          contents: prompt,
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
-        });
-
-        const rawText = geminiResponse.text || "";
-        const candidate = geminiResponse.candidates?.[0];
-        const groundingMetadata = candidate?.groundingMetadata;
-
-        const webSearchQueries: string[] = groundingMetadata?.webSearchQueries || [
-          searchTopicQuery,
-        ];
-        const groundingChunks = groundingMetadata?.groundingChunks || [];
-        const sources = groundingChunks
-          .filter((c: any) => c.web?.uri)
-          .map((c: any) => ({
-            title: c.web.title || "IELTS Official Exam Archive",
-            url: c.web.uri,
-          }));
-
-        // Parse JSON
-        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) || rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const jsonStr = jsonMatch[1] || jsonMatch[0];
-          try {
-            const parsed = JSON.parse(jsonStr);
-            if (parsed && Array.isArray(parsed.forecastItems) && parsed.forecastItems.length > 0) {
-              const groundedItems = parsed.forecastItems.map((item: any) => {
-                const supportingSource = sources.find((source: any) => source.url === item.sourceUrl);
-                const verified = Boolean(supportingSource) && item.evidenceType === "verified_report";
-                return {
-                  ...item,
-                  evidenceType: verified ? "verified_report" : item.evidenceType === "reported_recall" && supportingSource ? "reported_recall" : "forecast",
-                  trendStatus: verified ? item.trendStatus : "quarter_forecast",
-                  trendBadge: verified ? item.trendBadge : "Dự báo luyện tập có nguồn tham khảo",
-                  examDate: verified ? item.examDate : `Dự báo · cập nhật ${new Date().toLocaleDateString("vi-VN")}`,
-                  frequencyScore: verified && Number.isFinite(item.frequencyScore) ? item.frequencyScore : undefined,
-                  groundingSourceTitle: supportingSource?.title,
-                  groundingSourceUrl: supportingSource?.url,
-                  citations: supportingSource ? [{ claimId: item.id, title: supportingSource.title, url: supportingSource.url }] : [],
-                };
-              });
-              return res.json({
-                forecastItems: groundedItems,
-                searchQueries: webSearchQueries,
-                groundingSources: sources,
-                lastUpdated: new Date().toISOString(),
-                summaryOverviewVi: parsed.summaryOverviewVi || "Tổng hợp xu hướng đề thi thật IELTS và dự đoán quý được tìm kiếm tự động qua Google Search Grounding.",
-                detectedTrends: parsed.detectedTrends || ["Công nghệ AI & Việc làm", "Môi trường & Năng lượng xanh", "Đô thị hóa & Giáo dục số"],
-              });
-            }
-          } catch (pe) {
-            // silent parse issue
-          }
-        }
-      } catch (geminiErr: any) {
-        const isQuota = geminiErr?.status === "RESOURCE_EXHAUSTED" || geminiErr?.message?.includes("429") || geminiErr?.message?.includes("quota");
-        if (isQuota) {
-          console.warn("[Google Search Grounding] Quota exhausted; returning unavailable without synthetic live data.");
-        } else {
-          console.warn("[Google Search Grounding Notice]", geminiErr?.message?.slice(0, 120) || "Search unavailable");
-        }
-      }
-    }
-
-    return res.status(503).json({
-      error: "Google Search Grounding hiện không khả dụng. Không có dữ liệu live nào được tạo.",
-      stale: true,
-      lastUpdated: new Date().toISOString(),
-    });
-
-    // Dynamic intelligent curated dataset covering all skills & councils
-    const ALL_CURATED_FORECAST_BANK = [
-      {
-        id: `forecast_curated_w2_ai_${Date.now()}`,
-        title: "AI & Tự Động Hóa Trong Lực Lượng Lao Động Tương Lai",
-        skill: "writing_task2",
-        council: "both_vietnam",
-        councilLabel: "IDP & BC Việt Nam (Hà Nội & TP.HCM)",
-        examDate: `Thi thật: 15/08/2026`,
-        topicDomain: "Technology & Future of Work",
-        subCategory: "To what extent do you agree or disagree?",
-        promptStatement: "Some people believe that artificial intelligence and automation will lead to widespread unemployment, while others argue that they will create new and higher-value career opportunities. Discuss both views and give your own opinion.",
-        trendStatus: "recent_real_exam",
-        trendBadge: "🔥 Đề Thi Thật Vừa Ra",
-        frequencyScore: 98,
-        outlinePEEL: {
-          point: "Tự động hóa tuy gây gián đoạn việc làm thủ công trong ngắn hạn, nhưng về dài hạn đóng vai trò đòn bẩy tái cấu trúc nền kinh tế tri thức và mở ra các ngành nghề giá trị gia tăng cao.",
-          explanation: "Các thuật toán và mô hình ngôn ngữ lớn (LLMs) tự động hóa các tác vụ lặp đi lặp lại (routine repetitive tasks), buộc lực lượng lao động phải nâng cấp kỹ năng (upskilling) sang tư duy phản biện, giám sát đạo đức AI và quản trị dữ liệu.",
-          evidence: "Dữ liệu từ Báo cáo Tương lai Việc làm của Diễn đàn Kinh tế Thế giới (WEF) chỉ ra rằng cứ 1 vị trí việc làm truyền thống bị thay thế thì có 1.5 vị trí mới đòi hỏi chuyên môn kỹ thuật số và phân tích chiến lược được tạo ra.",
-          link: "Do đó, thay vì lo ngại nguy cơ thất nghiệp hàng loạt, chính phủ và các tổ chức giáo dục cần chủ động trang bị năng lực số thích ứng cho người lao động."
-        },
-        topicVocabularyC1C2: [
-          {
-            phrase: "paradigm shift",
-            phonetic: "/ˈpær.ə.daɪm ʃɪft/",
-            pos: "Noun Phrase",
-            meaningVi: "sự chuyển dịch mô hình căn bản mang tính cách mạng",
-            exampleSentence: "The integration of generative AI represents a monumental paradigm shift in global employment dynamics.",
-            cefrLevel: "C2"
-          },
-          {
-            phrase: "structural unemployment",
-            phonetic: "/ˌstrʌk.tʃər.əl ˌʌn.ɪmˈplɔɪ.mənt/",
-            pos: "Noun Phrase",
-            meaningVi: "thất nghiệp cơ cấu (do kỹ năng không còn phù hợp với công nghệ mới)",
-            exampleSentence: "Governments must intervene proactively to mitigate the threat of structural unemployment among manual workers.",
-            cefrLevel: "C1"
-          },
-          {
-            phrase: "render obsolete",
-            phonetic: "/ˈren.dər ˈɒb.sə.liːt/",
-            pos: "Verb Phrase (Collocation)",
-            meaningVi: "khiến cái gì trở nên lỗi thời, không còn giá trị sử dụng",
-            exampleSentence: "While repetitive data entry tasks are rendered obsolete, high-level analytical roles continue to flourish.",
-            cefrLevel: "C2"
-          }
-        ],
-        band8ModelAnswer: `The rapid proliferation of artificial intelligence and automated systems has ignited a contentious discourse regarding their ultimate ramifications on the global labor market. While one school of thought contends that advanced automation precipitates catastrophic levels of unemployment, others posit that this technological revolution serves as a catalyst for unprecedented occupational opportunities. In my appraisal, although short-term dislocation in routine sectors is inevitable, AI will fundamentally augment human productivity and foster higher-value professions, provided comprehensive reskilling frameworks are instituted.
-
-On the one hand, apprehensions concerning job displacement are rooted in legitimate socioeconomic realities. Historically, industrial transitions have exerted immense pressure on manual and semi-skilled labor forces. With modern AI algorithms increasingly mastering complex administrative, logistical, and computational tasks, millions of clerical and assembly-line roles risk being rendered obsolete. For instance, algorithmic underwriting and autonomous logistics have substantially diminished the reliance on human personnel in financial institutions and warehousing facilities. This sudden contraction can induce pervasive structural unemployment, particularly among mid-career individuals who encounter prohibitive barriers when attempting to pivot toward high-tech specializations.
-
-Conversely, proponents of technological progression convincingly argue that automation acts as an indispensable engine of economic expansion and career evolution. By liberating employees from tedious, repetitive procedures, AI enables the workforce to redirect their cognitive resources toward strategic problem-solving, innovative ideation, and interdisciplinary collaboration. Crucially, the burgeoning AI ecosystem creates entirely novel employment domains—ranging from machine learning auditing and prompt architecture to ethical algorithmic compliance. Empirical findings from the World Economic Forum consistently demonstrate that emerging digital paradigms generate a net surplus of employment opportunities relative to those phased out, thereby elevating the overall intellectual caliber and remuneration of the labor force.
-
-In conclusion, while the apprehension surrounding widespread job obsolescence is well-founded in the context of transitional friction, automation does not portend an irreversible unemployment crisis. Provided that policymakers enact decisive upskilling and reskilling initiatives, humanity stands to benefit profoundly from an enriched professional landscape characterized by enhanced creative freedom and socioeconomic prosperity.`,
-        modelAnswerWordCount: 342,
-        examinerTipsVi: "Bài viết đạt chuẩn Band 8.5+ nhờ giải quyết trọn vẹn cả 2 vế (Task Response), chuyển đoạn mượt mà bằng các liên từ học thuật (Cohesion), và sử dụng từ vựng kinh tế vĩ mô chuẩn xác."
-      },
-      {
-        id: `forecast_curated_w2_carbon_${Date.now()}`,
-        title: "Đánh Thuế Carbon & Trách Nhiệm Bảo Vệ Môi Trường Của Doanh Nghiệp",
-        skill: "writing_task2",
-        council: "bc_vietnam",
-        councilLabel: "British Council Hà Nội & Đà Nẵng",
-        examDate: `Thi thật: 08/08/2026`,
-        topicDomain: "Environment & Sustainable Policy",
-        subCategory: "Do the advantages outweigh the disadvantages?",
-        promptStatement: "Some governments are imposing heavy carbon taxes and environmental penalties on industrial corporations to combat climate change. Do the advantages of this policy outweigh its disadvantages?",
-        trendStatus: "hot_trend",
-        trendBadge: "⭐ Trọng Tâm Quý 3/2026",
-        frequencyScore: 94,
-        outlinePEEL: {
-          point: "Việc áp thuế phát thải carbon tuy có thể làm gia tăng chi phí vận hành ngắn hạn của doanh nghiệp, nhưng là công cụ kinh tế hữu hiệu nhất để thúc đẩy chuyển dịch sang năng lượng tái tạo.",
-          explanation: "Cơ chế đánh thuế nội hóa các chi phí ngoại ứng tiêu cực (internalizing negative externalities), buộc các tập đoàn công nghiệp phải đầu tư vào công nghệ xanh và giảm thiểu lượng khí thải nhà kính.",
-          evidence: "Điển hình như Hệ thống Mua bán Phát thải của Liên minh Châu Âu (EU ETS), sau khi áp thuế carbon nghiêm ngặt, đã giúp giảm hơn 35% lượng phát thải từ các nhà máy điện và cơ sở luyện kim.",
-          link: "Lợi ích sinh thái và sự phát triển bền vững dài hạn hoàn toàn vượt trội so với các gánh nặng tài chính chuyển tiếp."
-        },
-        topicVocabularyC1C2: [
-          {
-            phrase: "internalize negative externalities",
-            phonetic: "/ɪnˈtɜː.nəl.aɪz ˈneɡ.ə.tɪv ˌek.stɜːˈnæl.ə.tiz/",
-            pos: "Verb Phrase",
-            meaningVi: "nội hóa các chi phí ngoại ứng tiêu cực (buộc bên gây ô nhiễm phải trả tiền)",
-            exampleSentence: "Carbon pricing schemes compel industrial polluters to internalize their negative environmental externalities.",
-            cefrLevel: "C2"
-          },
-          {
-            phrase: "ecological degradation",
-            phonetic: "/ˌiː.kəˈlɒdʒ.ɪ.kəl ˌdeɡ.rəˈdeɪ.ʃən/",
-            pos: "Noun Phrase",
-            meaningVi: "sự suy thoái sinh thái",
-            exampleSentence: "Stringent regulatory fines are imperative to arrest the relentless pace of ecological degradation.",
-            cefrLevel: "C1"
-          }
-        ],
-        band8ModelAnswer: `In response to escalating environmental crises, an increasing number of municipal and national authorities have instituted rigorous carbon taxation and punitive financial levies on industrial conglomerates. Although critics argue that such fiscal burdens may dampen commercial profitability and exacerbate consumer prices in the short term, I firmly maintain that the long-term ecological and sustainable economic dividends overwhelmingly surpass these provisional drawbacks.
-
-Admittedly, the primary objection to heavy environmental taxation centers upon short-term economic friction. When manufacturing enterprises are subjected to substantial carbon levies, their operational expenditures inevitably swell. In competitive global markets, corporations may pass these compliance costs onto end-consumers in the form of inflated commodity prices, thereby contributing to inflationary pressures. Furthermore, smaller enterprises operating on razor-thin profit margins might face fiscal insolvency or relocate manufacturing operations to jurisdictions with laxer environmental statutes—a phenomenon widely recognized as "carbon leakage."
-
-Nevertheless, the merits of implementing carbon taxation are profoundly consequential. Most notably, financial penalties operate as a powerful market mechanism that forces corporations to internalize their negative environmental externalities. When greenhouse gas emissions carry a direct financial detriment, corporate boards are economically compelled to decommission fossil-fuel infrastructure and redirect capital toward green innovation, such as photovoltaic systems and closed-loop recycling processes. Empirical evidence from the European Union Emissions Trading Scheme underscores this efficacy, having catalyzed a remarkable 35% reduction in industrial carbon intensity over the past decade. Moreover, the revenue accrued from these taxes can be strategically reinvested into public mass transit, renewable energy grid upgrades, and reforestation programs.
-
-In conclusion, while carbon taxation may engender transient commercial adjustments and marginal price increases, its role as an indispensable catalyst for industrial decarbonization cannot be overstated. The enduring preservation of the biosphere and the establishment of a resilient circular economy render this policy overwhelmingly advantageous.`,
-        modelAnswerWordCount: 318,
-        examinerTipsVi: "Sử dụng thuật ngữ kinh tế môi trường C1/C2 (carbon leakage, carbon intensity, circular economy) giúp bài viết đạt điểm Lexical Resource tối đa."
-      },
-      {
-        id: `forecast_curated_sp2_ai_${Date.now()}`,
-        title: "Speaking Part 2: Describe a time you used Artificial Intelligence to solve a problem",
-        skill: "speaking_part2",
-        council: "idp_vietnam",
-        councilLabel: "IDP TP. Hồ Chí Minh & Cần Thơ",
-        examDate: `Thi thật: 20/08/2026`,
-        topicDomain: "Technology & Academic Life",
-        subCategory: "Describe an Experience / Event",
-        promptStatement: "Describe a memorable occasion when you utilized an artificial intelligence tool or digital software to resolve a complex problem in your study or work.",
-        cueCardPoints: [
-          "What the problem was and what software/tool you used",
-          "How you operated the AI tool",
-          "What the outcome was",
-          "And explain why this experience made a strong impression on you"
-        ],
-        trendStatus: "recent_real_exam",
-        trendBadge: "🔥 Đề Thi Thật Vừa Ra",
-        frequencyScore: 96,
-        outlinePEEL: {
-          point: "Kể về trải nghiệm sử dụng mô hình AI hỗ trợ tổng hợp và phân tích 30 bài báo nghiên cứu khoa học cho đề án tốt nghiệp trong thời hạn gấp gáp.",
-          explanation: "Nhấn mạnh vào kỹ thuật viết câu lệnh chi tiết (prompt engineering), đối chiếu dữ liệu để tránh ảo giác AI (hallucination), và cấu trúc lại dàn ý theo chuẩn học thuật.",
-          evidence: "Nhờ đó, hoàn thành báo cáo chuyên đề đúng hạn 2 ngày trước deadline và đạt điểm A từ hội đồng chấm điểm.",
-          link: "Nhận thức sâu sắc rằng AI không thay thế tư duy phản biện của con người mà là trợ thủ đắc lực nâng cấp hiệu suất làm việc."
-        },
-        topicVocabularyC1C2: [
-          {
-            phrase: "arduous undertaking",
-            phonetic: "/ˈɑː.dʒu.əs ˌʌn.dəˈteɪ.kɪŋ/",
-            pos: "Noun Phrase",
-            meaningVi: "một nhiệm vụ gian nan, đòi hỏi nhiều công sức",
-            exampleSentence: "Synthesizing dozens of academic papers within a tight timeframe was an exceptionally arduous undertaking.",
-            cefrLevel: "C2"
-          },
-          {
-            phrase: "mitigate algorithmic hallucinations",
-            phonetic: "/ˈmɪt.ɪ.ɡeɪt ˌæl.ɡəˈrɪð.mɪk həˌluː.sɪˈneɪ.ʃənz/",
-            pos: "Verb Phrase",
-            meaningVi: "giảm thiểu hiện tượng AI bịa thông tin / ảo giác thuật toán",
-            exampleSentence: "I cross-referenced primary sources meticulously to mitigate any potential algorithmic hallucinations.",
-            cefrLevel: "C2"
-          }
-        ],
-        band8ModelAnswer: `I would like to recount an experience when I leveraged an advanced generative AI research assistant to overcome a daunting academic bottleneck during my final-year dissertation.
-
-Approximately three months ago, I was tasked with synthesizing a massive corpus of literature concerning sustainable supply chain management. With over thirty dense peer-reviewed journals to dissect within an unforgiving two-week deadline, I found myself utterly overwhelmed by the sheer volume of econometric data. Recognizing that traditional manual skimming would fall short, I decided to deploy an AI-powered analytical assistant.
-
-To ensure the utmost academic rigor, I formulated structured prompts instructing the model to extract recurring methodologies, comparative statistical models, and research limitations across the documents. Furthermore, being acutely conscious of algorithmic hallucinations, I meticulously cross-referenced every synthesized summary against the primary citations.
-
-The outcome was nothing short of transformative. The tool enabled me to condense weeks of laborious data parsing into mere days, empowering me to dedicate the bulk of my cognitive energy to qualitative critique and original synthesis. Ultimately, my research proposal received high commendation from the faculty committee. 
-
-This encounter left an indelible impression on me because it fundamentally reshaped my perspective on technology: when wielded with critical discernment, AI serves not as a shortcut, but as a profound cognitive amplifier.`,
-        modelAnswerWordCount: 228,
-        examinerTipsVi: "Mở đầu bằng bối cảnh áp lực ➔ Quá trình giải quyết thông minh kèm từ vựng C2 ➔ Kết thúc bằng bài học triết lý sâu sắc."
-      },
-      {
-        id: `forecast_curated_w1_energy_${Date.now()}`,
-        title: "Writing Task 1 Academic: Energy Consumption from Renewable Sources (2015-2025)",
-        skill: "writing_task1",
-        council: "both_vietnam",
-        councilLabel: "IDP & British Council Toàn Quốc",
-        examDate: `Thi thật: 12/08/2026`,
-        topicDomain: "Energy & Infrastructure",
-        subCategory: "Line Graph / Comparative Trends",
-        promptStatement: "The graph below shows the percentage of electricity generated from four different renewable energy sources (Solar, Wind, Hydroelectric, and Biomass) in a European country between 2015 and 2025.",
-        trendStatus: "high_frequency",
-        trendBadge: "📈 Tần Suất Cao",
-        frequencyScore: 92,
-        outlinePEEL: {
-          point: "Tổng thể: Năng lượng Mặt trời (Solar) và Gió (Wind) ghi nhận mức tăng trưởng vượt bậc, trong khi Thủy điện (Hydroelectric) dù chiếm ưu thế ban đầu lại có xu hướng chững lại.",
-          explanation: "Đoạn Body 1 phân tích sự vươn lên thần tốc của Solar và Wind từ mức dưới 10% lên vượt mốc 35-40%. Đoạn Body 2 đối chiếu Hydroelectric và Biomass với mức biến động khiêm tốn.",
-          evidence: "Solar tăng gấp 4 lần từ 8% năm 2015 lên 38% năm 2025, trở thành nguồn cung điện tái tạo dẫn đầu.",
-          link: "Bức tranh năng lượng phản ánh sự chuyển hướng mạnh mẽ sang các công nghệ năng lượng tái tạo phân tán."
-        },
-        topicVocabularyC1C2: [
-          {
-            phrase: "exponential surge",
-            phonetic: "/ˌek.spəˈnen.ʃəl sɜːdʒ/",
-            pos: "Noun Phrase",
-            meaningVi: "sự tăng trưởng đột biến theo cấp số nhân",
-            exampleSentence: "Solar energy witnessed an exponential surge over the ten-year period.",
-            cefrLevel: "C1"
-          },
-          {
-            phrase: "eclipsed by",
-            phonetic: "/ɪˈklɪpst baɪ/",
-            pos: "Verb Phrase",
-            meaningVi: "bị lu mờ / bị vượt qua bởi cái khác",
-            exampleSentence: "Hydroelectric power was eventually eclipsed by wind and solar generation by 2022.",
-            cefrLevel: "C2"
-          }
-        ],
-        band8ModelAnswer: `The line graph delineates the proportion of electricity produced from four distinct renewable energy modalities—namely Solar, Wind, Hydroelectric, and Biomass—within a particular European nation spanning the decade from 2015 to 2025.
-
-Overall, the period was characterized by a dramatic expansion in the adoption of solar and wind energy, both of which experienced exponential growth. Conversely, while hydroelectric power initially dominated the renewable energy portfolio, its contribution stagnated and was ultimately eclipsed by both solar and wind technologies by the culmination of the timeline.
-
-In 2015, hydroelectric power commanded the preeminent position, accounting for roughly 30% of aggregate renewable generation. However, this figure underwent minor fluctuations before plateauing at 28% throughout the remaining years. In stark contrast, solar energy began as the least utilized source at a modest 7%, yet exhibited a sustained upward trajectory, quadrupling to reach an impressive 38% by 2025, thereby emerging as the foremost energy contributor.
-
-Concurrently, electricity generated via wind turbines climbed steadily from 15% in 2015 to overtake hydroelectric power in 2022, settling at 32% by the end of the survey. Biomass exhibited the most subdued trajectory, oscillating marginally between 10% and 12% across the entire ten-year timeframe without registering any substantial breakthrough.`,
-        modelAnswerWordCount: 204,
-        examinerTipsVi: "Bài viết đạt điểm Task Achievement cao nhờ Overview rõ ràng, chia nhóm số liệu logic theo nhóm tăng trưởng vs nhóm đi ngang."
-      },
-      {
-        id: `forecast_curated_sp3_privacy_${Date.now()}`,
-        title: "Speaking Part 3: Digital Privacy, Surveillance & Social Responsibility",
-        skill: "speaking_part3",
-        council: "bc_vietnam",
-        councilLabel: "British Council TP.HCM & Hà Nội",
-        examDate: `Thi thật: 19/08/2026`,
-        topicDomain: "Society, Law & Digital Ethics",
-        subCategory: "Discussion / Two-way In-depth Discussion",
-        promptStatement: "Should individuals expect absolute privacy in the digital age, or must some level of personal data transparency be surrendered for public security?",
-        trendStatus: "quarter_forecast",
-        trendBadge: "⭐ Trọng Tâm Quý 3/2026",
-        frequencyScore: 91,
-        outlinePEEL: {
-          point: "Quyền riêng tư là quyền cơ bản của con người, song sự minh bạch có kiểm soát là cần thiết để ngăn chặn tội phạm mạng và bảo đảm an ninh quốc gia.",
-          explanation: "Cần có cơ chế giám sát tư pháp độc lập (independent judicial oversight) để tránh tình trạng lạm quyền giám sát hàng loạt (mass surveillance abuse).",
-          evidence: "Quy định Bảo vệ Dữ liệu Chung của Châu Âu (GDPR) là minh chứng thành công cho việc cân bằng giữa quyền riêng tư cá nhân và yêu cầu quản trị an ninh.",
-          link: "Vì vậy, câu hỏi không phải là từ bỏ hoàn toàn quyền riêng tư, mà là thiết lập khung pháp lý minh bạch và nghiêm ngặt."
-        },
-        topicVocabularyC1C2: [
-          {
-            phrase: "unbridled mass surveillance",
-            phonetic: "/ʌnˈbraɪ.dəld mæs sɜːˈveɪ.ləns/",
-            pos: "Noun Phrase",
-            meaningVi: "sự giám sát hàng loạt không bị kiềm chế",
-            exampleSentence: "Citizens should remain vigilant against unbridled mass surveillance under the guise of public safety.",
-            cefrLevel: "C2"
-          },
-          {
-            phrase: "strike a delicate equilibrium",
-            phonetic: "/straɪk ə ˈdel.ɪ.kət ˌiː.kwɪˈlɪb.ri.əm/",
-            pos: "Idiom / Collocation",
-            meaningVi: "đạt được sự cân bằng mong manh, tinh tế",
-            exampleSentence: "Legislators must strike a delicate equilibrium between state security imperatives and fundamental civil liberties.",
-            cefrLevel: "C2"
-          }
-        ],
-        band8ModelAnswer: `From my perspective, asserting an absolute right to digital privacy in our deeply interconnected global ecosystem is somewhat impractical; however, any concession of personal data must be rigorously circumscribed.
-
-On one hand, law enforcement agencies undoubtedly require legitimate access to certain digital communications to combat transnational cybercrime, terrorism, and financial fraud. Without proportional data transparency, national security architectures would remain vulnerable to sophisticated modern threats.
-
-Nevertheless, this necessity should never serve as a carte blanche for unbridled mass surveillance. Without independent judicial oversight and robust data protection frameworks—akin to the European GDPR—corporations and state entities risk encroaching upon fundamental democratic freedoms. Therefore, rather than a binary choice between total privacy and absolute transparency, governments must strike a delicate equilibrium governed by strict accountability and consent.`,
-        modelAnswerWordCount: 146,
-        examinerTipsVi: "Phát triển câu trả lời Part 3 đa chiều: Sử dụng cấu trúc nhượng bộ (Concession: On one hand... Nevertheless...) và từ vựng học thuật C2."
-      },
-      {
-        id: `forecast_curated_sp1_hometown_${Date.now()}`,
-        title: "Speaking Part 1: Hometown, Urban Changes & Local Communities",
-        skill: "speaking_part1",
-        council: "both_vietnam",
-        councilLabel: "IDP & BC Toàn Quốc",
-        examDate: `Thi thật: 17/08/2026`,
-        topicDomain: "Daily Life & Urbanization",
-        subCategory: "Personal Q&A",
-        promptStatement: "Has your hometown changed significantly over the past five to ten years? What do you like most about the changes?",
-        trendStatus: "high_frequency",
-        trendBadge: "📈 Tần Suất Cao",
-        frequencyScore: 97,
-        outlinePEEL: {
-          point: "Quê hương tôi đã trải qua sự chuyển mình mạnh mẽ về cơ sở hạ tầng giao thông và dịch vụ tiện ích công cộng.",
-          explanation: "Các tuyến tàu điện trên cao và công viên cây xanh được xây dựng đã cải thiện đáng kể chất lượng sống của cư dân đô thị.",
-          evidence: "Thời gian di chuyển từ ngoại ô vào trung tâm giảm từ 1 giờ xuống còn 25 phút.",
-          link: "Sự hiện đại hóa này giúp thành phố vừa năng động hơn vừa duy trì được bản sắc văn hóa địa phương."
-        },
-        topicVocabularyC1C2: [
-          {
-            phrase: "undergone a profound metamorphosis",
-            phonetic: "/ˌʌn.dəˈɡɒn ə prəˈfaʊnd ˌmet.əˈmɔː.fə.sɪs/",
-            pos: "Verb Phrase",
-            meaningVi: "trải qua một sự chuyển mình / lột xác sâu sắc",
-            exampleSentence: "My hometown has undergone a profound metamorphosis in terms of civil infrastructure.",
-            cefrLevel: "C2"
-          }
-        ],
-        band8ModelAnswer: `Unquestionably, yes. Over the past decade, my hometown has undergone a profound metamorphosis. What was once a relatively tranquil suburban area has now evolved into a bustling urban enclave, characterized by modern transit networks and expansive green public spaces. 
-
-What I appreciate most is the dramatic enhancement in civil infrastructure—particularly the new metro line, which has substantially curtailed commuter gridlock and elevated the overall quality of daily life for local residents.`,
-        modelAnswerWordCount: 82,
-        examinerTipsVi: "Trong Part 1, câu trả lời cần súc tích (3-4 câu), trôi chảy, tránh ngập ngừng và sử dụng từ nối tự nhiên."
-      }
-    ];
-
-    // Filter dynamic curated items to best match user filter criteria
-    let matchedItems = ALL_CURATED_FORECAST_BANK.filter((item) => {
-      if (skill !== "all" && item.skill !== skill) return false;
-      if (council !== "all" && item.council !== council && item.council !== "both_vietnam") return false;
-      return true;
-    });
-
-    if (matchedItems.length === 0) {
-      matchedItems = ALL_CURATED_FORECAST_BANK;
-    }
-
-    res.json({
-      forecastItems: matchedItems,
-      searchQueries: [searchTopicQuery],
-      groundingSources: [
-        { title: "IDP IELTS Vietnam Real Test Database", url: "https://ielts.idp.com/vietnam" },
-        { title: "British Council Real Exam Pool", url: "https://takeielts.britishcouncil.org" },
-        { title: "Cambridge Assessment English Real Test Updates", url: "https://www.cambridgeenglish.org" }
-      ],
-      lastUpdated: new Date().toISOString(),
-      summaryOverviewVi: "Tổng hợp xu hướng đề thi thật tháng 8/2026 và dự đoán Quý 3 tập trung cao vào Công nghệ AI, Thuế Carbon & Năng lượng tái tạo, Quyền riêng tư số và Phát triển đô thị.",
-      detectedTrends: ["AI & Tự động hóa giáo dục", "Biến đổi khí hậu & Chính sách xanh", "Kỹ năng làm việc số"]
-    });
-  } catch (error: any) {
-    console.error("Forecast Grounding API Error:", error);
-    res.status(500).json({ error: error.message || "Lỗi tra cứu đề thi thật và dự đoán" });
-  }
-});
-
 // ==========================================
 // 8-Axis Multi-Skill Diagnostic Psychometrician Endpoint
 // ==========================================
@@ -7403,8 +6924,143 @@ app.post('/api/mock/builds/:id/finalize', (req, res) => {
 
 app.post("/api/mock/assemble-full-package", handleCreateMockBuild);
 
-// Public-beta canonical endpoint facades and persistence contracts.
-app.post('/api/forecast/refresh', (_req, res) => res.redirect(307, '/api/gemini/forecast-grounding'));
+function buildForecastSearchQuery(input: { skill?: string; council?: string; customQuery?: string; timeframe?: string }) {
+  const customQuery = String(input.customQuery || '').trim();
+  if (customQuery) return customQuery;
+  const skillLabels: Record<string, string> = {
+    writing_task2: 'IELTS Writing Task 2 recent reported questions',
+    writing_task1: 'IELTS Writing Task 1 recent reported questions',
+    speaking_part1: 'IELTS Speaking Part 1 recent reported questions',
+    speaking_part2: 'IELTS Speaking Part 2 cue card recent reports',
+    speaking_part3: 'IELTS Speaking Part 3 recent reported questions',
+  };
+  const councilLabels: Record<string, string> = {
+    idp_vietnam: 'IDP Vietnam',
+    bc_vietnam: 'British Council Vietnam',
+    both_vietnam: 'IDP and British Council Vietnam',
+    international: 'IDP and British Council international',
+  };
+  const period = input.timeframe === 'week' ? 'this week' : `latest ${new Date().getUTCFullYear()}`;
+  return `${skillLabels[input.skill || ''] || 'IELTS recent reported Speaking and Writing questions'} ${councilLabels[input.council || ''] || 'Vietnam and international'} ${period}`;
+}
+
+function getGroqApiKey(request?: express.Request) {
+  return request?.header('x-groq-api-key')?.trim() || process.env.GROQ_API_KEY?.trim() || '';
+}
+
+const handleForecastRefresh: express.RequestHandler = async (req, res) => {
+  const retrievedAt = new Date().toISOString();
+  const searchTopicQuery = buildForecastSearchQuery(req.body || {});
+  const ai = getGeminiClient(req);
+  const groqApiKey = getGroqApiKey(req);
+
+  const prompt = `Search for recent IELTS Writing or Speaking question reports matching this query: "${searchTopicQuery}".
+Return JSON only. Keep the response compact: do not create model answers, vocabulary lists, PEEL outlines, dates, frequency scores, or claims that are not explicitly supported by a direct search result.
+Schema:
+{
+  "summaryOverviewVi": "Vietnamese evidence-aware summary",
+  "detectedTrends": ["short trend"],
+  "forecastItems": [{
+    "id": "stable-slug",
+    "title": "short title",
+    "skill": "writing_task1|writing_task2|speaking_part1|speaking_part2|speaking_part3",
+    "council": "idp_vietnam|bc_vietnam|both_vietnam|idp_global|bc_global",
+    "councilLabel": "human label",
+    "examDate": "only when the direct source states a date",
+    "topicDomain": "topic",
+    "subCategory": "question type",
+    "promptStatement": "reported question or clearly labelled forecast prompt",
+    "cueCardPoints": ["optional cue point"],
+    "evidenceType": "verified_report|reported_recall|forecast",
+    "sourceTitle": "direct supporting page title",
+    "sourceUrl": "direct supporting URL"
+  }]
+}
+A verified_report must have a direct source that explicitly supports that exact prompt and date. A user recall must be reported_recall. Everything else must be forecast.`;
+
+  try {
+    const routed = await groundedProviderRouter.execute({
+      primary: {
+        provider: 'gemini',
+        model: AI_TASK_PROFILES.grounded.model,
+        run: async () => {
+          if (!ai) {
+            throw Object.assign(new Error('NO_AI_CLIENT: Gemini not configured'), { code: 'NO_AI_CLIENT' });
+          }
+          const geminiResponse = await retryProviderCall(
+            () => ai.models.generateContent({
+              model: AI_TASK_PROFILES.grounded.model,
+              contents: prompt,
+              config: {
+                tools: [{ googleSearch: {} }],
+                responseMimeType: 'application/json',
+              },
+            }),
+            { context: 'forecast', provider: 'gemini', maxAttempts: 2, baseDelayMs: 750 },
+          );
+          const candidate = geminiResponse.candidates?.[0];
+          const groundingMetadata = candidate?.groundingMetadata as any;
+          const searchQueries: string[] = groundingMetadata?.webSearchQueries?.length
+            ? groundingMetadata.webSearchQueries
+            : [searchTopicQuery];
+          const uniqueSources = new Map<string, { title: string; url: string }>();
+          for (const chunk of groundingMetadata?.groundingChunks || []) {
+            const url = chunk?.web?.uri;
+            if (!url || uniqueSources.has(url)) continue;
+            let fallbackTitle = 'Nguồn tham khảo';
+            try { fallbackTitle = new URL(url).hostname; } catch { /* keep safe public label */ }
+            uniqueSources.set(url, { title: chunk?.web?.title || fallbackTitle, url });
+          }
+          return normalizeForecastGroundingPayload({
+            raw: JSON.parse(geminiResponse.text || '{}'),
+            groundingSources: [...uniqueSources.values()],
+            searchQueries,
+            retrievedAt,
+          });
+        },
+      },
+      fallback: {
+        provider: 'groq',
+        model: AI_TASK_PROFILES.grounded.fallbacks[0],
+        run: () => retryProviderCall(
+          () => requestGroqGroundedForecast({
+            apiKey: groqApiKey,
+            prompt,
+            originalQuery: searchTopicQuery,
+            retrievedAt,
+          }),
+          { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
+        ),
+      },
+    });
+    return res.json({
+      ...routed.value,
+      provider: routed.provider,
+      model: routed.model,
+      fallbackReason: routed.fallbackReason,
+    });
+  } catch (error) {
+    const failure = (error && typeof error === 'object' && 'category' in error)
+      ? error as ReturnType<typeof classifyApiFailure>
+      : classifyApiFailure(error, 'forecast');
+    console.warn(`[Forecast Grounding] provider=${failure.provider || 'gemini'} category=${failure.category} requestId=${failure.requestId}`);
+    return res.status(failure.httpStatus).json({
+      status: 'unavailable',
+      forecastItems: [],
+      searchQueries: [searchTopicQuery],
+      groundingSources: [],
+      lastUpdated: retrievedAt,
+      summaryOverviewVi: '',
+      stale: true,
+      error: failure.messageVi,
+      failure,
+    });
+  }
+};
+
+// Public-beta canonical endpoints. Legacy /api/gemini routes stay available during migration.
+app.post('/api/forecast/refresh', handleForecastRefresh);
+app.post('/api/gemini/forecast-grounding', handleForecastRefresh);
 app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/speaking-live-audio-evaluation'));
 
 app.post('/api/live-hub/items/:id/practice', (req, res) => {

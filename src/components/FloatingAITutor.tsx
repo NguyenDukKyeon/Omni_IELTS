@@ -139,7 +139,7 @@ export const FloatingAITutor: React.FC = () => {
     <>
       {/* Floating Button (always visible across all screens) */}
       {!isAITutorOpen && (
-        <button
+        <button data-ux-flow="tutor.chat"
           id="floating-ai-tutor-trigger"
           onClick={() => setIsAITutorOpen(true)}
           className="fixed bottom-16 md:bottom-6 right-4 sm:right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full bg-slate-900 dark:bg-blue-600 text-white font-bold text-sm shadow-xl shadow-slate-900/25 dark:shadow-blue-600/30 hover:scale-105 active:scale-95 transition-all duration-200 group border border-white/20 cursor-pointer"
@@ -190,7 +190,7 @@ export const FloatingAITutor: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1">
-              <button
+              <button data-ux-flow="tutor.chat"
                 id="ai-tutor-expand-btn"
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="p-1.5 rounded-xl hover:bg-white/20 text-white/90 hover:text-white transition-colors cursor-pointer"
@@ -198,7 +198,7 @@ export const FloatingAITutor: React.FC = () => {
               >
                 {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
               </button>
-              <button
+              <button data-ux-flow="tutor.chat"
                 id="ai-tutor-close-btn"
                 onClick={() => setIsAITutorOpen(false)}
                 className="p-1.5 rounded-xl hover:bg-white/20 text-white/90 hover:text-white transition-colors cursor-pointer"
@@ -253,7 +253,7 @@ export const FloatingAITutor: React.FC = () => {
                     {/* Audio TTS button for assistant */}
                     {isAssistant && (
                       <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                        <button
+                        <button data-ux-flow="tutor.chat"
                           onClick={() => playTextToSpeech(msg.content)}
                           className="flex items-center gap-1 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
                           title="Đọc to phát âm bằng tiếng Anh chuẩn"
@@ -276,7 +276,7 @@ export const FloatingAITutor: React.FC = () => {
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {msg.suggestedFollowUps.map((chip, idx) => (
-                            <button
+                            <button data-ux-flow="tutor.chat"
                               key={idx}
                               onClick={() => handleChipClick(chip)}
                               className="text-left text-[11px] px-2.5 py-1 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors cursor-pointer"
@@ -295,7 +295,7 @@ export const FloatingAITutor: React.FC = () => {
                         </summary>
                         <div className="mt-2 space-y-1.5">
                           {msg.citations.map((citation) => (
-                            <a
+                            <a data-ux-flow="tutor.chat"
                               key={`${citation.claimId}-${citation.url}`}
                               href={citation.url}
                               target="_blank"
@@ -338,7 +338,7 @@ export const FloatingAITutor: React.FC = () => {
               Hỏi nhanh:
             </span>
             {quickChips.map((chip, i) => (
-              <button
+              <button data-ux-flow="tutor.chat"
                 key={i}
                 onClick={() => handleChipClick(chip)}
                 disabled={isTutorLoading}
@@ -350,11 +350,11 @@ export const FloatingAITutor: React.FC = () => {
           </div>
 
           {/* Input Form */}
-          <form
+          <form data-ux-flow="tutor.chat"
             onSubmit={handleSend}
             className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-2 shrink-0"
           >
-            <button
+            <button data-ux-flow="tutor.chat"
               type="button"
               onClick={() => setResearchMode((enabled) => !enabled)}
               aria-pressed={researchMode}
@@ -364,7 +364,7 @@ export const FloatingAITutor: React.FC = () => {
               <Search className="h-3.5 w-3.5" />
               Tra cứu dẫn chứng
             </button>
-            <input
+            <input data-ux-flow="tutor.chat"
               ref={inputRef}
               type="text"
               value={inputText}
@@ -373,7 +373,7 @@ export const FloatingAITutor: React.FC = () => {
               disabled={isTutorLoading}
               className="flex-1 px-3.5 py-2.5 text-xs sm:text-sm rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-            <button
+            <button data-ux-flow="tutor.chat"
               type="submit"
               disabled={!inputText.trim() || isTutorLoading}
               className="p-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white transition-all shrink-0 cursor-pointer"

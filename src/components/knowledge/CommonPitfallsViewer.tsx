@@ -72,7 +72,7 @@ export const CommonPitfallsViewer: React.FC = () => {
         {/* Search */}
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
+          <input data-ux-flow="knowledge.learn"
             type="text"
             placeholder="Tìm kiếm bẫy khảo thí, lỗi sai hay gặp..."
             value={searchQuery}
@@ -83,7 +83,7 @@ export const CommonPitfallsViewer: React.FC = () => {
 
         {/* Skill Filter Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs font-semibold">
-          <button
+          <button data-ux-flow="knowledge.learn"
             onClick={() => setSkillFilter('all')}
             className={`px-3 py-2 rounded-xl transition-all cursor-pointer ${
               skillFilter === 'all'
@@ -93,7 +93,7 @@ export const CommonPitfallsViewer: React.FC = () => {
           >
             Tất cả bẫy ({COMMON_PITFALLS_DATA.length})
           </button>
-          <button
+          <button data-ux-flow="knowledge.learn"
             onClick={() => setSkillFilter('listening')}
             className={`px-3 py-2 rounded-xl transition-all cursor-pointer ${
               skillFilter === 'listening'
@@ -103,7 +103,7 @@ export const CommonPitfallsViewer: React.FC = () => {
           >
             Listening
           </button>
-          <button
+          <button data-ux-flow="knowledge.learn"
             onClick={() => setSkillFilter('reading')}
             className={`px-3 py-2 rounded-xl transition-all cursor-pointer ${
               skillFilter === 'reading'
@@ -113,7 +113,7 @@ export const CommonPitfallsViewer: React.FC = () => {
           >
             Reading
           </button>
-          <button
+          <button data-ux-flow="knowledge.learn"
             onClick={() => setSkillFilter('writing')}
             className={`px-3 py-2 rounded-xl transition-all cursor-pointer ${
               skillFilter === 'writing'
@@ -123,7 +123,7 @@ export const CommonPitfallsViewer: React.FC = () => {
           >
             Writing
           </button>
-          <button
+          <button data-ux-flow="knowledge.learn"
             onClick={() => setSkillFilter('speaking')}
             className={`px-3 py-2 rounded-xl transition-all cursor-pointer ${
               skillFilter === 'speaking'
@@ -219,7 +219,7 @@ export const CommonPitfallsViewer: React.FC = () => {
                 <span className="text-[11px] text-slate-500">
                   {isMastered ? 'Đã ghi nhớ bí quyết' : 'Cần chú ý khi luyện tập'}
                 </span>
-                <button
+                <button data-ux-flow="knowledge.learn"
                   onClick={() => toggleMastered(trap.id, trap.trapTitle)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                     isMastered

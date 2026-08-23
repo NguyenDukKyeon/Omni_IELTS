@@ -9,10 +9,13 @@ export interface TutorResponse {
 }
 
 export function getGeminiRequestHeaders(): Record<string, string> {
-  const apiKey = typeof window !== 'undefined' ? sessionStorage.getItem('omni_gemini_api_key') : null;
-  return apiKey
-    ? { 'Content-Type': 'application/json', 'x-gemini-api-key': apiKey }
-    : { 'Content-Type': 'application/json' };
+  const geminiApiKey = typeof window !== 'undefined' ? sessionStorage.getItem('omni_gemini_api_key') : null;
+  const groqApiKey = typeof window !== 'undefined' ? sessionStorage.getItem('omni_groq_api_key') : null;
+  return {
+    'Content-Type': 'application/json',
+    ...(geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : {}),
+    ...(groqApiKey ? { 'x-groq-api-key': groqApiKey } : {}),
+  };
 }
 
 export async function askAITutor(

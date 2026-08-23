@@ -164,7 +164,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
               </p>
             </div>
           </div>
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-white/20 text-white/80 hover:text-white transition-colors"
           >
@@ -174,7 +174,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
 
         {/* Tab Navigation */}
         <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center gap-2 text-xs">
-          <button
+          <button data-ux-flow="mock.exam"
             type="button"
             onClick={() => setActiveTab('assemble')}
             className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 ${
@@ -186,7 +186,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
             <Layers className="w-3.5 h-3.5" />
             <span>Lắp Ráp Bộ Đề 4 Kỹ Năng Mới</span>
           </button>
-          <button
+          <button data-ux-flow="mock.exam"
             type="button"
             onClick={() => setActiveTab('synthesize')}
             className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 ${
@@ -220,7 +220,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                     <span className="font-bold text-slate-700 dark:text-slate-300">Band mục tiêu:</span>
                     <div className="flex gap-1">
                       {[6.0, 6.5, 7.0, 7.5, 8.0].map((b) => (
-                        <button
+                        <button data-ux-flow="mock.exam"
                           key={b}
                           type="button"
                           onClick={() => setTargetBand(b)}
@@ -281,7 +281,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                 </div>
 
                 <div className="flex justify-end">
-                  <button
+                  <button data-ux-flow="mock.exam"
                     type="button"
                     onClick={handleAssemble}
                     disabled={isAssembling}
@@ -322,7 +322,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                       <p className="text-xs text-slate-300">Mã đề: {assembledPackage.testId}</p>
                     </div>
 
-                    <button
+                    <button data-ux-flow="mock.exam"
                       type="button"
                       onClick={() => {
                         if (!assembledPackage.fullPackage || !assembledPackage.validation?.ready) {
@@ -394,7 +394,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                       <label className="block font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                         {skillKey}:
                       </label>
-                      <input
+                      <input data-ux-flow="mock.exam"
                         type="number"
                         step="0.5"
                         min="0"
@@ -413,7 +413,7 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                 </div>
 
                 <div className="flex justify-end">
-                  <button
+                  <button data-ux-flow="mock.exam"
                     type="button"
                     onClick={handleSynthesize}
                     disabled={isSynthesizing}

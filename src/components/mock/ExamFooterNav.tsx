@@ -60,7 +60,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
           {sectionOffsets && sectionOffsets.length > 1 ? (
             <div className={`flex items-center gap-1 border p-1 rounded-lg ${colorScheme === 'high_contrast' ? 'bg-black border-yellow-500' : 'bg-slate-900 border-slate-800'}`}>
               {sectionOffsets.map((sec, idx) => (
-                <button
+                <button data-ux-flow="mock.exam"
                   key={sec.sectionNumber}
                   onClick={() => onSelectSection?.(idx)}
                   className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
@@ -82,7 +82,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
           )}
 
           {/* Flag question button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => onToggleFlag(currentQuestionNumber)}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
               isCurrentFlagged
@@ -108,7 +108,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
             const isCurrent = qNum === currentQuestionNumber;
 
             return (
-              <button
+              <button data-ux-flow="mock.exam"
                 key={qNum}
                 onClick={() => onSelectQuestion(qNum)}
                 className={`relative w-7 h-7 rounded text-xs font-mono font-bold transition-all flex items-center justify-center shrink-0 ${
@@ -137,7 +137,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
         {/* Right: Review Overview Grid Button & Prev / Next Arrows */}
         <div className="flex items-center gap-2">
           {/* Review Grid Overview Modal Button */}
-          <button
+          <button data-ux-flow="mock.exam"
             onClick={() => setShowReviewGrid(true)}
             className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-semibold transition-colors ${
               colorScheme === 'high_contrast'
@@ -153,7 +153,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
 
           {/* Navigation Arrows */}
           <div className="flex items-center gap-1">
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={handlePrev}
               disabled={currentQuestionNumber <= 1}
               className={`p-1.5 rounded-lg border transition-colors disabled:opacity-40 ${
@@ -168,7 +168,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
             <span className="text-xs font-mono font-bold px-1 min-w-[36px] text-center">
               {currentQuestionNumber}/{totalQuestions}
             </span>
-            <button
+            <button data-ux-flow="mock.exam"
               onClick={handleNext}
               disabled={currentQuestionNumber >= totalQuestions}
               className={`p-1.5 rounded-lg border transition-colors disabled:opacity-40 ${
@@ -198,7 +198,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
                   Đã làm {answeredCount}/{totalQuestions} câu • Đang gắn cờ {flaggedCount} câu
                 </p>
               </div>
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setShowReviewGrid(false)}
                 className="text-slate-400 hover:text-white text-base"
               >
@@ -238,7 +238,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
                 const isCurrent = qNum === currentQuestionNumber;
 
                 return (
-                  <button
+                  <button data-ux-flow="mock.exam"
                     key={qNum}
                     onClick={() => {
                       onSelectQuestion(qNum);
@@ -265,7 +265,7 @@ export const ExamFooterNav: React.FC<ExamFooterNavProps> = ({
             </div>
 
             <div className="flex justify-end pt-2">
-              <button
+              <button data-ux-flow="mock.exam"
                 onClick={() => setShowReviewGrid(false)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors"
               >

@@ -103,7 +103,7 @@ export const MediaVocabDrawer: React.FC<MediaVocabDrawerProps> = ({
                     )}
                   </div>
 
-                  <button
+                  <button data-ux-flow="media.learning"
                     onClick={() => playTextToSpeech(item.word)}
                     className="p-1.5 rounded-lg text-stone-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950 transition-colors cursor-pointer"
                     title="Nghe phát âm"
@@ -150,7 +150,7 @@ export const MediaVocabDrawer: React.FC<MediaVocabDrawerProps> = ({
               </div>
 
               <div className="pt-2 border-t border-stone-100 dark:border-stone-700/60 flex justify-end">
-                <button
+                <button data-ux-flow="media.learning"
                   onClick={() => handleSaveToSRS(item)}
                   disabled={saved}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${

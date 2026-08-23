@@ -635,7 +635,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
           <div className="hidden lg:block w-72">
             <VoicePicker useCase="examiner" compact />
           </div>
-          <button
+          <button data-ux-flow="app.shared"
             onClick={onBackToPractice}
             className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1 transition-all"
           >
@@ -659,7 +659,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
             </div>
           )}
 
-          <button
+          <button data-ux-flow="app.shared"
             onClick={() => {
               setIsVoiceMuted(!isVoiceMuted);
               if (!isVoiceMuted && stopSpeechRef.current) {
@@ -708,7 +708,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               {EXAMINER_PROFILES.map((examiner, idx) => {
                 const isSelected = selectedExaminerIndex === idx;
                 return (
-                  <button
+                  <button data-ux-flow="app.shared"
                     key={examiner.id}
                     onClick={() => setSelectedExaminerIndex(idx)}
                     className={`p-5 rounded-2xl border text-left transition-all relative overflow-hidden flex items-start gap-4 ${
@@ -774,7 +774,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
 
           {/* Action CTA */}
           <div className="text-center pt-2">
-            <button
+            <button data-ux-flow="app.shared"
               onClick={handleStartExam}
               className="px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-indigo-600 to-indigo-700 hover:from-indigo-600 hover:to-indigo-800 text-white font-black text-base shadow-xl hover:shadow-indigo-500/25 transition-all flex items-center gap-3 mx-auto"
             >
@@ -866,7 +866,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
 
               {/* Replay Question CTA */}
               <div className="flex justify-end">
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={() => speakText(`${currentExaminerReply} ${currentQuestion}`)}
                   className="text-xs text-indigo-300 hover:text-white flex items-center gap-1.5 transition-all"
                 >
@@ -897,7 +897,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
 
               {/* Realtime Live Speech Box */}
               <div className="relative">
-                <textarea
+                <textarea data-ux-flow="app.shared"
                   value={candidateTranscript + (interimText ? ` ${interimText}` : '')}
                   onChange={(e) => setCandidateTranscript(e.target.value)}
                   placeholder="Bấm nút Microphone bên dưới và bắt đầu nói bằng tiếng Anh, hoặc có thể gõ trực tiếp câu trả lời của bạn vào đây..."
@@ -913,7 +913,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
 
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={toggleRecording}
                   className={`px-5 py-3 rounded-2xl font-bold text-xs flex items-center gap-2 transition-all shadow-sm ${
                     isRecording
@@ -934,7 +934,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   )}
                 </button>
 
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={handleNextTurn}
                   disabled={isCallingAi}
                   className="px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-sm ml-auto"
@@ -1067,7 +1067,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               </div>
 
               {testStage === 'part2_prep' && (
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={handleSkipPrep}
                   className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-2"
                 >
@@ -1092,7 +1092,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                 <span className="text-[11px] text-slate-400">Ghi từ khóa C1/C2 & cấu trúc</span>
               </div>
 
-              <textarea
+              <textarea data-ux-flow="app.shared"
                 value={part2Notes}
                 onChange={(e) => setPart2Notes(e.target.value)}
                 placeholder="- Introduction: Botanical park in downtown&#10;- Features: lush foliage, tranquil ambiance&#10;- Impact: mental rejuvenation, social cohesion"
@@ -1117,7 +1117,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                 <span className="text-xs font-bold text-slate-500">Đã nói: {turnSecondsElapsed}s</span>
               </div>
 
-              <textarea
+              <textarea data-ux-flow="app.shared"
                 value={candidateTranscript + (interimText ? ` ${interimText}` : '')}
                 onChange={(e) => setCandidateTranscript(e.target.value)}
                 disabled={testStage === 'part2_prep'}
@@ -1131,7 +1131,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               />
 
               <div className="flex items-center justify-between gap-3 pt-2">
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={toggleRecording}
                   disabled={testStage === 'part2_prep'}
                   className={`px-5 py-3 rounded-2xl font-bold text-xs flex items-center gap-2 transition-all shadow-sm disabled:opacity-50 ${
@@ -1144,7 +1144,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                   <span>{isRecording ? 'DỪNG NÓI' : 'BẬT MIC ĐỂ NÓI PART 2'}</span>
                 </button>
 
-                <button
+                <button data-ux-flow="app.shared"
                   onClick={handleNextTurn}
                   disabled={testStage === 'part2_prep' || isCallingAi}
                   className="px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-sm"
@@ -1440,7 +1440,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
                         <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-mono font-bold text-[10px]">
                           {err.errorCategory}
                         </span>
-                        <button
+                        <button data-ux-flow="app.shared"
                           type="button"
                           onClick={() =>
                             handleSyncMistake(
@@ -1478,7 +1478,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
 
           {/* Bottom Action CTAs */}
           <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
-            <button
+            <button data-ux-flow="app.shared"
               onClick={() => {
                 setTestStage('welcome');
                 setLiveAudioReport(null);
@@ -1491,7 +1491,7 @@ export const SpeakingExaminerRoom: React.FC<SpeakingExaminerRoomProps> = ({ onBa
               <span>THI LẠI VỚI ĐỀ MỚI & GIÁM KHẢO DR. JONATHAN VANCE</span>
             </button>
 
-            <button
+            <button data-ux-flow="app.shared"
               onClick={() =>
                 openAITutorWithPrompt(
                   `Tôi vừa hoàn thành buổi thi Speaking 1:1 Giám khảo Dr. Jonathan Vance với điểm Overall Band ${

@@ -398,7 +398,7 @@ export const SpeakingQuestionModule: React.FC = () => {
       {/* Top Speaking Mode Switcher Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
         <div className="grid grid-cols-2 w-full sm:w-auto gap-1">
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => setSpeakingMode('virtual_room')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
               speakingMode === 'virtual_room'
@@ -410,7 +410,7 @@ export const SpeakingQuestionModule: React.FC = () => {
             <span>Phòng Thi 1:1 Giám Khảo Khảo Thí AI</span>
           </button>
 
-          <button
+          <button data-ux-flow="practice.skills"
             onClick={() => setSpeakingMode('drill')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
               speakingMode === 'drill'
@@ -450,7 +450,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                 </p>
               </div>
 
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={() => handleGenerateNew(selectedPart)}
                 disabled={isGenerating}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
@@ -469,7 +469,7 @@ export const SpeakingQuestionModule: React.FC = () => {
               {SPEAKING_PARTS.map((p) => {
                 const isSelected = selectedPart === p.part;
                 return (
-                  <button
+                  <button data-ux-flow="practice.skills"
                     key={p.part}
                     onClick={() => handleSelectPart(p.part)}
                     className={`text-left p-4 rounded-xl border transition-all text-xs flex flex-col justify-between ${
@@ -515,7 +515,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                     <span className="text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
                       IELTS Candidate Task Card (Cue Card)
                     </span>
-                    <button
+                    <button data-ux-flow="practice.skills"
                       onClick={() => handlePlayExaminerQuestion(prompt.cueCard!.prompt)}
                       className="px-2.5 py-1 rounded-lg bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-xs font-bold flex items-center gap-1 hover:opacity-80"
                     >
@@ -555,7 +555,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                         {formatTimer(prepSeconds)}
                       </span>
                       {!isPrepping && prepSeconds === 60 && (
-                        <button
+                        <button data-ux-flow="practice.skills"
                           onClick={handleStartPrepTimer}
                           className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold"
                         >
@@ -565,7 +565,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                     </div>
                   </div>
 
-                  <textarea
+                  <textarea data-ux-flow="practice.skills"
                     value={prepNotes}
                     onChange={(e) => setPrepNotes(e.target.value)}
                     placeholder="Ghi chú nhanh các từ khóa / collocations trong 1 phút chuẩn bị..."
@@ -596,7 +596,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                       <span className="font-bold text-indigo-600 dark:text-indigo-400">
                         Câu {idx + 1}:
                       </span>
-                      <button
+                      <button data-ux-flow="practice.skills"
                         onClick={(e) => {
                           e.stopPropagation();
                           handlePlayExaminerQuestion(q.questionText);
@@ -649,7 +649,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                 <span>Transcript bài nói (tự động nhận diện từ microphone):</span>
                 <span className="text-[11px]">{liveTranscript.split(/\s+/).filter(Boolean).length} từ</span>
               </div>
-              <textarea
+              <textarea data-ux-flow="practice.skills"
                 value={liveTranscript}
                 onChange={(e) => setLiveTranscript(e.target.value)}
                 placeholder="Bấm nút 'Bắt đầu nói' bên dưới để thu âm, hoặc nhập trực tiếp transcript câu trả lời của bạn tại đây..."
@@ -661,14 +661,14 @@ export const SpeakingQuestionModule: React.FC = () => {
             {/* Recording Controls & Submit */}
             <div className="flex items-center gap-3 pt-2">
               {!isRecording ? (
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={handleStartRecording}
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all"
                 >
                   <Mic className="w-4 h-4" /> Bắt đầu nói (Thu âm)
                 </button>
               ) : (
-                <button
+                <button data-ux-flow="practice.skills"
                   onClick={handleStopRecording}
                   className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all animate-pulse"
                 >
@@ -676,7 +676,7 @@ export const SpeakingQuestionModule: React.FC = () => {
                 </button>
               )}
 
-              <button
+              <button data-ux-flow="practice.skills"
                 onClick={handleEvaluateSpeaking}
                 disabled={isEvaluating || !liveTranscript.trim() || liveTranscript.length < 10 || !recordedAudio}
                 className="px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
