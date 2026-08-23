@@ -33,30 +33,12 @@ import { MockOrchestratorModal } from '../components/mock/MockOrchestratorModal'
 import { XP_REWARDS } from '../services/gamification';
 import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
 import { getGeminiRequestHeaders } from '../services/aiTutor';
+import { persistInitialMockAttempt, PersistedMockAttemptSnapshot } from '../lib/mockAttemptPersistence';
+import { savePrivateArtifactIfAuthenticated } from '../services/supabase';
 
 type ExamPhase = 'idle' | 'in_progress' | 'evaluating' | 'report_view';
 
-type ActiveMockSnapshot = {
-  package: FullMockTestPackage;
-  attemptId: string;
-  currentSkill: MockExamSkill;
-  currentQuestionNumber: number;
-  activeSubIndex: number;
-  timeRemainingSeconds: number;
-  totalTimeSpentSeconds: number;
-  listeningAnswers: Record<number, string>;
-  readingAnswers: Record<number, string>;
-  writingAnswers: { task1: string; task2: string };
-  speakingAnswers: {
-    part1Answers: Array<{ question: string; transcript: string }>;
-    part2Transcript: string;
-    part2Notes: string;
-    part3Answers: Array<{ question: string; transcript: string }>;
-  };
-  flaggedListening: number[];
-  flaggedReading: number[];
-  savedAt: string;
-};
+type ActiveMockSnapshot = PersistedMockAttemptSnapshot;
 
 function readActiveMockSnapshot(): ActiveMockSnapshot | null {
   try {
@@ -66,6 +48,7 @@ function readActiveMockSnapshot(): ActiveMockSnapshot | null {
     if (!raw?.package) return null;
     return {
       package: raw.package,
+      mockBuildId: raw.mockBuildId || raw.package.id,
       attemptId: raw.attemptId || `attempt_${raw.package.id}_${Date.now()}`,
       currentSkill: raw.currentSkill || raw.startSkill || 'listening',
       currentQuestionNumber: raw.currentQuestionNumber || 1,
@@ -157,6 +140,7 @@ export const MockTestView: React.FC = () => {
     const timer = window.setTimeout(() => {
       const snapshot: ActiveMockSnapshot = {
         package: selectedTestPackage,
+        mockBuildId: selectedTestPackage.id,
         attemptId: mockAttemptId,
         currentSkill,
         currentQuestionNumber,
@@ -204,8 +188,20 @@ export const MockTestView: React.FC = () => {
   }, [examPhase, isTimerPaused, timeRemainingSeconds]);
 
   // Start Full Test
-  const handleStartExam = (testPkg: FullMockTestPackage, startSkill: MockExamSkill = 'listening') => {
+  const handleStartExam = (testPkg: FullMockTestPackage, startSkill: MockExamSkill = 'listening'): boolean => {
     const nextAttemptId = `attempt_${testPkg.id}_${Date.now()}`;
+    let initialSnapshot: ActiveMockSnapshot;
+    try {
+      initialSnapshot = persistInitialMockAttempt(localStorage, testPkg, startSkill, nextAttemptId);
+    } catch (error) {
+      console.warn('Không thể lưu Mock attempt trước khi vào phòng thi:', error);
+      return false;
+    }
+    setResumeSnapshot(initialSnapshot);
+    void savePrivateArtifactIfAuthenticated('mock_attempt', initialSnapshot, {
+      mockBuildId: testPkg.id,
+      attemptId: nextAttemptId,
+    }).catch(() => false);
     setSelectedTestPackage(testPkg);
     setMockAttemptId(nextAttemptId);
     setCurrentSkill(startSkill);
@@ -230,6 +226,7 @@ export const MockTestView: React.FC = () => {
     setTimeForSkill(startSkill);
     setIsTimerPaused(false);
     setExamPhase('in_progress');
+    return true;
   };
 
   const handleResumeExam = () => {

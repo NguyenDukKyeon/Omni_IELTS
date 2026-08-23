@@ -35,7 +35,7 @@ import { XP_REWARDS } from '../../services/gamification';
 interface MockOrchestratorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onStartExam?: (pkg: FullMockTestPackage) => void;
+  onStartExam?: (pkg: FullMockTestPackage) => boolean;
 }
 
 export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
@@ -105,7 +105,6 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
       setAssembledPackage(data);
       awardXP(XP_REWARDS.EXERCISE_COMPLETED, 'Lắp ráp bộ đề thi 4 kỹ năng với Mock Test Orchestrator');
     } catch (err: any) {
-      console.error('Assemble failed:', err);
       setAssembleError(err?.message || 'Không thể lắp ráp đề thi từ gemini-3.1-pro.');
     } finally {
       setIsAssembling(false);
@@ -304,6 +303,16 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                   <div>
                     <p className="font-bold">Lỗi lắp ráp đề thi</p>
                     <p className="mt-0.5 text-rose-700 dark:text-rose-300">{assembleError}</p>
+                    <button
+                      data-ux-flow="mock.exam"
+                      type="button"
+                      onClick={handleAssemble}
+                      disabled={isAssembling}
+                      className="mt-3 px-3 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white font-bold inline-flex items-center gap-2"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${isAssembling ? 'animate-spin' : ''}`} />
+                      <span>Thử lại đúng phần bị lỗi</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -333,7 +342,11 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                           setAssembleError('Phòng thi chưa được kết nối với Orchestrator.');
                           return;
                         }
-                        onStartExam(assembledPackage.fullPackage);
+                        const persisted = onStartExam(assembledPackage.fullPackage);
+                        if (!persisted) {
+                          setAssembleError('Không thể lưu đề và lượt thi trên thiết bị này. Hãy kiểm tra quyền lưu trữ của trình duyệt rồi thử lại.');
+                          return;
+                        }
                         onClose();
                       }}
                       className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer whitespace-nowrap"

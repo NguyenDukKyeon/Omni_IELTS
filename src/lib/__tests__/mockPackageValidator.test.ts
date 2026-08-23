@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { validateMockPackage, validateMockSkill } from '../mockPackageValidator';
+import {
+  normalizeMockSkill,
+  validateMockPackage,
+  validateMockSkill,
+  validateSpeakingPart,
+} from '../mockPackageValidator';
+
+const question = (number: number, sectionIndex = 0) => ({
+  id: `q_${number}`,
+  number,
+  sectionIndex,
+  type: 'gap_fill',
+  prompt: `Question ${number}`,
+  correctAnswer: `answer ${number}`,
+  explanationVi: `Giải thích ${number}`,
+});
+
+const validSpeaking = {
+  examinerName: 'Omni Examiner',
+  examinerAvatar: '',
+  part1: { topic: 'Study', questions: ['What do you study?'] },
+  part2: {
+    cueCard: {
+      topic: 'A useful object',
+      prompt: 'Describe a useful object you own.',
+      bulletPoints: ['what it is', 'how you use it'],
+      prepTimeSeconds: 60,
+      speakTimeSeconds: 120,
+    },
+  },
+  part3: { topic: 'Technology', questions: ['How does technology change daily life?'] },
+};
 
 describe('validateMockPackage', () => {
   it('rejects summary-only assembler output that cannot enter the exam room', () => {
@@ -23,12 +54,61 @@ describe('validateMockPackage', () => {
     const listening = {
       title: 'Listening',
       audioTranscript: 'A complete transcript',
-      sections: [{ questions: Array.from({ length: 40 }, (_, index) => ({ id: `l${index}` })) }],
+      sections: Array.from({ length: 4 }, (_, sectionIndex) => ({
+        sectionNumber: sectionIndex + 1,
+        title: `Section ${sectionIndex + 1}`,
+        context: 'Academic conversation',
+        audioScriptExcerpt: 'A complete transcript',
+        instructionsVi: 'Điền đáp án.',
+        questions: Array.from({ length: 10 }, (_, index) => question(sectionIndex * 10 + index + 1, sectionIndex)),
+      })),
     };
 
     expect(validateMockSkill('listening', listening).ready).toBe(true);
     expect(validateMockSkill('reading', { passages: [{ questions: [] }] }).ready).toBe(false);
     expect(validateMockSkill('writing', { task1: { prompt: 'Task 1' }, task2: {} }).errors)
       .toContain('Writing phải có đúng Task 1 và Task 2.');
+  });
+
+  it('normalizes only the safe topics alias before validating a Speaking part', () => {
+    const normalized = normalizeMockSkill('speaking', {
+      ...validSpeaking,
+      part1: { topics: ['Study'], questions: ['What do you study?'] },
+      part3: { topics: 'Technology', questions: ['How does technology change daily life?'] },
+    }) as typeof validSpeaking;
+
+    expect(normalized.part1.topic).toBe('Study');
+    expect(normalized.part3.topic).toBe('Technology');
+    expect(validateMockSkill('speaking', normalized).ready).toBe(true);
+  });
+
+  it.each(['part1', 'part2', 'part3'] as const)('reports the exact missing Speaking %s', (part) => {
+    const broken = structuredClone(validSpeaking) as Record<string, unknown>;
+    delete broken[part];
+
+    const result = validateMockSkill('speaking', broken);
+
+    expect(result.ready).toBe(false);
+    expect(result.errors.join(' ')).toContain(`Speaking ${part}`);
+  });
+
+  it('rejects schema-invalid Speaking content instead of accepting a truthy placeholder', () => {
+    const result = validateSpeakingPart('part2', {
+      cueCard: {
+        topic: 'Travel',
+        prompt: true,
+        bulletPoints: 'where you went',
+        prepTimeSeconds: '60',
+        speakTimeSeconds: 120,
+      },
+    });
+
+    expect(result.ready).toBe(false);
+    expect(result.code).toBe('schema_invalid');
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('prompt'),
+      expect.stringContaining('bulletPoints'),
+      expect.stringContaining('prepTimeSeconds'),
+    ]));
   });
 });
