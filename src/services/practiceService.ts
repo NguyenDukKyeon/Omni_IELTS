@@ -42,6 +42,7 @@ import { validateMockPackage } from '../lib/mockPackageValidator';
 import { playVoiceText } from './voiceService';
 import { getGeminiRequestHeaders } from './aiTutor';
 import { ApiResponseError } from '../lib/apiFailure';
+import { savePrivateArtifactIfAuthenticated } from './supabase';
 
 export async function generateReadingPracticeApi(
   type: ReadingQuestionType,
@@ -388,35 +389,104 @@ export async function assembleFullMockPackageApi(
   params: MockAssemblerInput,
   onProgress?: (skill: 'listening' | 'reading' | 'writing' | 'speaking' | 'finalize', state: 'building' | 'ready') => void,
 ): Promise<MockAssemblerPackage> {
-  const createResponse = await fetch('/api/mock/builds', {
-    method: 'POST',
-    headers: getGeminiRequestHeaders(),
-    body: JSON.stringify(params),
-  });
-  if (!createResponse.ok) {
-    const errData = await createResponse.json().catch(() => ({}));
-    throw new Error(errData.error || `Không thể khởi tạo Mock Build (HTTP ${createResponse.status}).`);
-  }
-  const build = await createResponse.json() as { id: string };
-  localStorage.setItem('omni_pending_mock_build', JSON.stringify({ id: build.id, createdAt: new Date().toISOString() }));
+  type PendingMockBuild = {
+    id: string;
+    createdAt: string;
+    params: MockAssemblerInput;
+    skillData: Partial<Record<'listening' | 'reading' | 'writing' | 'speaking', unknown>>;
+    speakingParts?: Record<string, unknown>;
+    lastFailedSkill?: 'listening' | 'reading' | 'writing' | 'speaking';
+    failedParts?: string[];
+  };
+  const readPending = (): PendingMockBuild | null => {
+    try {
+      const raw = localStorage.getItem('omni_pending_mock_build');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  const writePending = (pending: PendingMockBuild) => localStorage.setItem('omni_pending_mock_build', JSON.stringify(pending));
 
-  for (const skill of ['listening', 'reading', 'writing', 'speaking'] as const) {
-    onProgress?.(skill, 'building');
-    const skillResponse = await fetch(`/api/mock/builds/${encodeURIComponent(build.id)}/skills/${skill}/generate`, {
+  let pending = readPending();
+  if (pending) {
+    pending = {
+      ...pending,
+      params: pending.params || params,
+      skillData: pending.skillData || {},
+    };
+  }
+  let buildState: { id: string; skillStates?: Record<string, string> } | null = null;
+  if (pending?.id) {
+    const statusResponse = await fetch(`/api/mock/builds/${encodeURIComponent(pending.id)}`, {
+      headers: getGeminiRequestHeaders(),
+    }).catch(() => null);
+    if (statusResponse?.ok) buildState = await statusResponse.json();
+  }
+
+  if (!pending || !buildState) {
+    const createResponse = await fetch('/api/mock/builds', {
       method: 'POST',
       headers: getGeminiRequestHeaders(),
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        ...params,
+        resumeSkills: pending?.skillData || {},
+        resumeSpeakingParts: pending?.speakingParts || {},
+      }),
+    });
+    if (!createResponse.ok) {
+      const errData = await createResponse.json().catch(() => ({}));
+      throw new Error(errData.error || `Không thể khởi tạo Mock Build (HTTP ${createResponse.status}).`);
+    }
+    buildState = await createResponse.json() as { id: string; skillStates?: Record<string, string> };
+    pending = {
+      id: buildState.id,
+      createdAt: pending?.createdAt || new Date().toISOString(),
+      params,
+      skillData: pending?.skillData || {},
+      speakingParts: pending?.speakingParts,
+      lastFailedSkill: pending?.lastFailedSkill,
+      failedParts: pending?.failedParts,
+    };
+    writePending(pending);
+  }
+
+  for (const skill of ['listening', 'reading', 'writing', 'speaking'] as const) {
+    if (buildState.skillStates?.[skill] === 'ready') {
+      onProgress?.(skill, 'ready');
+      continue;
+    }
+    onProgress?.(skill, 'building');
+    const shouldRetry = pending.lastFailedSkill === skill;
+    const endpoint = shouldRetry
+      ? `/api/mock/builds/${encodeURIComponent(pending.id)}/retry`
+      : `/api/mock/builds/${encodeURIComponent(pending.id)}/skills/${skill}/generate`;
+    const skillResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: getGeminiRequestHeaders(),
+      body: JSON.stringify(shouldRetry ? { skill } : {}),
     });
     if (!skillResponse.ok) {
       const error = await skillResponse.json().catch(() => ({}));
+      pending.lastFailedSkill = skill;
+      pending.failedParts = Array.isArray(error.failedParts) ? error.failedParts : [];
+      if (error.partial && typeof error.partial === 'object') pending.speakingParts = error.partial;
+      writePending(pending);
       const detail = Array.isArray(error.validation?.errors) ? ` ${error.validation.errors.join(' ')}` : '';
-      throw new Error(`${error.error || `Không thể tạo phần ${skill}.`}${detail}`);
+      const failedPartLabel = pending.failedParts.length ? ` (${pending.failedParts.join(', ')})` : '';
+      throw new Error(`${error.error || `Không thể tạo phần ${skill}.`}${failedPartLabel}${detail}`);
     }
+    const skillResult = await skillResponse.json().catch(() => ({}));
+    if (skillResult.data) pending.skillData[skill] = skillResult.data;
+    pending.lastFailedSkill = undefined;
+    pending.failedParts = undefined;
+    if (skill === 'speaking') pending.speakingParts = undefined;
+    writePending(pending);
     onProgress?.(skill, 'ready');
   }
 
   onProgress?.('finalize', 'building');
-  const finalizeResponse = await fetch(`/api/mock/builds/${encodeURIComponent(build.id)}/finalize`, {
+  const finalizeResponse = await fetch(`/api/mock/builds/${encodeURIComponent(pending.id)}/finalize`, {
     method: 'POST',
     headers: getGeminiRequestHeaders(),
     body: JSON.stringify({}),
@@ -431,6 +501,11 @@ export async function assembleFullMockPackageApi(
     throw new Error(`Bộ đề chưa sẵn sàng: ${validation.errors.join(' ')}`);
   }
   onProgress?.('finalize', 'ready');
+  await savePrivateArtifactIfAuthenticated('mock_package', data.fullPackage, {
+    mockBuildId: data.mockBuildId,
+    promptVersion: data.promptVersion,
+    sourceUrl: params.sourceItem?.groundingSourceUrl,
+  }).catch(() => false);
   localStorage.removeItem('omni_pending_mock_build');
   return data;
 }

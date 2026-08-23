@@ -9,13 +9,21 @@ import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { z } from "zod";
 import { AI_TASK_PROFILES, AiTaskTier } from "./src/lib/aiTaskProfiles";
-import { validateMockPackage, validateMockSkill, MockSkill } from "./src/lib/mockPackageValidator";
+import {
+  normalizeMockSkill,
+  validateMockPackage,
+  validateMockSkill,
+  validateSpeakingPart,
+  MockSkill,
+  MockSpeakingPart,
+} from "./src/lib/mockPackageValidator";
 import { alignTranscriptSentences, normalizeAndAlignVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
 import { classifyApiFailure, retryProviderCall } from "./src/lib/apiFailure";
 import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
 import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
+import { MockBuildEvent, MockBuildState, transitionMockBuildState } from "./src/lib/mockBuildMachine";
 import { requestGroqGroundedForecast } from "./src/lib/groqGrounding";
 import {
   buildYtDlpRuntimeArgs,
@@ -7040,15 +7048,41 @@ Create the complete package now. Required root keys: id, code, title, subtitle, 
 type ServerMockBuild = {
   id: string;
   createdAt: string;
+  updatedAt: string;
   input: any;
   skills: Partial<Record<MockSkill, any>>;
-  status: 'draft' | 'building' | 'ready' | 'failed';
+  speakingParts: Partial<Record<MockSpeakingPart, any>>;
+  attempts: Partial<Record<MockSkill | MockSpeakingPart, number>>;
+  status: MockBuildState;
   errors: Partial<Record<MockSkill, string[]>>;
 };
 
 const mockBuilds = new Map<string, ServerMockBuild>();
+const MOCK_BUILD_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_ACTIVE_MOCK_BUILDS = 50;
 
 const MOCK_SKILLS: MockSkill[] = ['listening', 'reading', 'writing', 'speaking'];
+const MOCK_SPEAKING_PARTS: MockSpeakingPart[] = ['part1', 'part2', 'part3'];
+
+function touchMockBuild(build: ServerMockBuild) {
+  build.updatedAt = new Date().toISOString();
+}
+
+function moveMockBuild(build: ServerMockBuild, event: MockBuildEvent) {
+  build.status = transitionMockBuildState(build.status, event);
+  touchMockBuild(build);
+}
+
+function pruneMockBuilds(now = Date.now()) {
+  for (const [id, build] of mockBuilds) {
+    if (now - Date.parse(build.updatedAt) > MOCK_BUILD_TTL_MS) mockBuilds.delete(id);
+  }
+  if (mockBuilds.size <= MAX_ACTIVE_MOCK_BUILDS) return;
+  const oldest = [...mockBuilds.values()]
+    .sort((left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt))
+    .slice(0, mockBuilds.size - MAX_ACTIVE_MOCK_BUILDS);
+  for (const build of oldest) mockBuilds.delete(build.id);
+}
 
 function mockSkillInstructions(skill: MockSkill, build: ServerMockBuild): string {
   const sourceItem = build.input.sourceItem;
@@ -7061,26 +7095,262 @@ function mockSkillInstructions(skill: MockSkill, build: ServerMockBuild): string
         evidenceType: sourceItem.evidenceType,
       })}`
     : 'There is no imported source item.';
-  const questionContract = `Every objective question must include id, number, sectionIndex, type, prompt, correctAnswer and explanationVi. Number questions continuously.`;
+  const questionContract = `Every objective question must include id, number, sectionIndex, type, prompt, correctAnswer and explanationVi. Number questions continuously. type must be exactly one of multiple_choice, gap_fill, true_false_not_given, yes_no_not_given, matching_headings, matching_features, map_labelling, sentence_completion. Use zero-based sectionIndex: 0-3 for Listening and 0-2 for Reading.`;
 
   const contracts: Record<MockSkill, string> = {
     listening: `Return only a Listening object with title, a complete audioTranscript, and exactly 4 sections. Across sections there must be exactly 40 questions numbered 1-40. Each section needs sectionNumber, title, context, audioScriptExcerpt, instructionsVi and questions. ${questionContract}`,
     reading: `Return only a Reading object with title and exactly 3 passages. Across passages there must be exactly 40 questions numbered 1-40. Each passage needs passageNumber, title, subtitle, wordCount, paragraphs [{label,text}] and questions. ${questionContract}`,
-    writing: `Return only a Writing object with title, task1 and task2. task1 needs category, prompt, chartData when applicable, minWords=150 and suggestedMinutes=20. task2 needs category, prompt, minWords=250 and suggestedMinutes=40. Do not copy a copyrighted official test.` ,
-    speaking: `Return only a Speaking object with examinerName, examinerAvatar, part1, part2 and part3. part1 and part3 need topics and question arrays. part2.cueCard needs topic, prompt, bulletPoints, prepTimeSeconds=60 and speakTimeSeconds=120.`,
+    writing: `Return only a Writing object with title, task1 and task2. task1.category must be exactly one of "Bar Chart", "Line Graph", "Pie Chart", "Table", "Process", "Map"; include prompt, chartData when applicable, minWords=150 and suggestedMinutes=20. task2.category must be exactly one of "Opinion Essay", "Discussion Essay", "Problem-Solution", "Advantages-Disadvantages"; include prompt, minWords=250 and suggestedMinutes=40. Do not copy a copyrighted official test.` ,
+    speaking: `Speaking is generated one Part at a time by the staged builder.`,
   };
 
   return `You create one section of an AI-generated IELTS-style mock for target band ${build.input.targetBand || 7}. ${contracts[skill]} ${provenance} Return one JSON object only, without markdown. Never label the content official or Cambridge official.`;
 }
 
-async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill: MockSkill) {
+function mockSpeakingPartInstructions(part: MockSpeakingPart, build: ServerMockBuild): string {
+  const sourceItem = build.input.sourceItem;
+  const provenance = sourceItem?.skill === 'speaking'
+    ? `Preserve this reported prompt when it belongs in this Part: ${JSON.stringify({
+        title: sourceItem.title,
+        prompt: sourceItem.promptStatement,
+        sourceUrl: sourceItem.groundingSourceUrl,
+      })}`
+    : 'There is no imported Speaking prompt that must be preserved.';
+  const contracts: Record<MockSpeakingPart, string> = {
+    part1: 'Return {"topic": string, "questions": string[]} with 4-6 natural introductory questions.',
+    part2: 'Return {"cueCard":{"topic": string,"prompt": string,"bulletPoints": string[],"prepTimeSeconds":60,"speakTimeSeconds":120}} with 3-4 bullet points.',
+    part3: 'Return {"topic": string, "questions": string[]} with 4-6 abstract discussion questions connected to Part 2.',
+  };
+  return `Create IELTS Speaking ${part} for target band ${build.input.targetBand || 7}. ${contracts[part]} ${provenance} Return only this Part JSON object, never the whole Speaking test, without markdown.`;
+}
+
+const mockQuestionResponseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    id: { type: Type.STRING },
+    number: { type: Type.NUMBER },
+    sectionIndex: { type: Type.NUMBER },
+    type: {
+      type: Type.STRING,
+      enum: ['multiple_choice', 'gap_fill', 'true_false_not_given', 'yes_no_not_given', 'matching_headings', 'matching_features', 'map_labelling', 'sentence_completion'],
+    },
+    prompt: { type: Type.STRING },
+    options: { type: Type.ARRAY, items: { type: Type.STRING } },
+    correctAnswer: { type: Type.STRING },
+    acceptableAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
+    explanationVi: { type: Type.STRING },
+    locationHint: { type: Type.STRING },
+    trapWarning: { type: Type.STRING },
+  },
+  required: ['id', 'number', 'sectionIndex', 'type', 'prompt', 'correctAnswer', 'explanationVi'],
+};
+
+function mockSkillResponseSchema(skill: Exclude<MockSkill, 'speaking'>): any {
+  if (skill === 'listening') {
+    return {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING },
+        audioTranscript: { type: Type.STRING },
+        sections: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              sectionNumber: { type: Type.NUMBER }, title: { type: Type.STRING }, context: { type: Type.STRING },
+              audioScriptExcerpt: { type: Type.STRING }, instructionsVi: { type: Type.STRING },
+              questions: { type: Type.ARRAY, items: mockQuestionResponseSchema },
+            },
+            required: ['sectionNumber', 'title', 'context', 'audioScriptExcerpt', 'instructionsVi', 'questions'],
+          },
+        },
+      },
+      required: ['title', 'audioTranscript', 'sections'],
+    };
+  }
+  if (skill === 'reading') {
+    return {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING },
+        passages: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              passageNumber: { type: Type.NUMBER }, title: { type: Type.STRING }, subtitle: { type: Type.STRING }, wordCount: { type: Type.NUMBER },
+              paragraphs: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, text: { type: Type.STRING } }, required: ['label', 'text'] } },
+              headingsList: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, text: { type: Type.STRING } }, required: ['id', 'text'] } },
+              questions: { type: Type.ARRAY, items: mockQuestionResponseSchema },
+            },
+            required: ['passageNumber', 'title', 'subtitle', 'wordCount', 'paragraphs', 'questions'],
+          },
+        },
+      },
+      required: ['title', 'passages'],
+    };
+  }
+  return {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING },
+      task1: {
+        type: Type.OBJECT,
+        properties: {
+          category: { type: Type.STRING, enum: ['Bar Chart', 'Line Graph', 'Pie Chart', 'Table', 'Process', 'Map'] },
+          prompt: { type: Type.STRING }, minWords: { type: Type.NUMBER }, suggestedMinutes: { type: Type.NUMBER },
+        },
+        required: ['category', 'prompt', 'minWords', 'suggestedMinutes'],
+      },
+      task2: {
+        type: Type.OBJECT,
+        properties: {
+          category: { type: Type.STRING, enum: ['Opinion Essay', 'Discussion Essay', 'Problem-Solution', 'Advantages-Disadvantages'] },
+          prompt: { type: Type.STRING }, minWords: { type: Type.NUMBER }, suggestedMinutes: { type: Type.NUMBER },
+        },
+        required: ['category', 'prompt', 'minWords', 'suggestedMinutes'],
+      },
+    },
+    required: ['title', 'task1', 'task2'],
+  };
+}
+
+function speakingPartResponseSchema(part: MockSpeakingPart): any {
+  if (part === 'part2') {
+    return {
+      type: Type.OBJECT,
+      properties: {
+        cueCard: {
+          type: Type.OBJECT,
+          properties: {
+            topic: { type: Type.STRING },
+            prompt: { type: Type.STRING },
+            bulletPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+            prepTimeSeconds: { type: Type.NUMBER },
+            speakTimeSeconds: { type: Type.NUMBER },
+          },
+          required: ['topic', 'prompt', 'bulletPoints', 'prepTimeSeconds', 'speakTimeSeconds'],
+        },
+      },
+      required: ['cueCard'],
+    };
+  }
+  return {
+    type: Type.OBJECT,
+    properties: {
+      topic: { type: Type.STRING },
+      questions: { type: Type.ARRAY, items: { type: Type.STRING } },
+    },
+    required: ['topic', 'questions'],
+  };
+}
+
+type MockSkillGenerationResult = {
+  section: any | null;
+  validation: {
+    ready: boolean;
+    errors: string[];
+    count: number;
+    code?: 'schema_invalid' | 'count_invalid';
+  };
+  attempts: number;
+  failedParts: MockSpeakingPart[];
+  readyParts: MockSpeakingPart[];
+  partial?: Partial<Record<MockSpeakingPart, any>>;
+};
+
+async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild, part: MockSpeakingPart) {
+  const existing = validateSpeakingPart(part, build.speakingParts[part]);
+  if (existing.ready) return { part, data: existing.data, validation: existing, attempts: 0, reused: true };
+
+  let repair = '';
+  let lastErrors: string[] = existing.errors;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (attempt > 1 && build.status === 'generating') moveMockBuild(build, { type: 'REPAIR' });
+    build.attempts[part] = (build.attempts[part] || 0) + 1;
+    touchMockBuild(build);
+    const result = await callGeminiResiliently(ai, {
+      taskTier: 'deep',
+      contents: `${mockSpeakingPartInstructions(part, build)}${repair}`,
+      config: { responseMimeType: 'application/json', responseSchema: speakingPartResponseSchema(part) },
+      maxRetriesPerModel: 2,
+    });
+    if (!result.text) {
+      lastErrors = [result.error || 'AI_UNAVAILABLE'];
+      repair = ' The provider returned no usable JSON. Generate this Part again.';
+      continue;
+    }
+    try {
+      const candidate = JSON.parse(result.text);
+      const validation = validateSpeakingPart(part, candidate);
+      if (validation.ready) {
+        build.speakingParts[part] = validation.data;
+        touchMockBuild(build);
+        return { part, data: validation.data, validation, attempts: attempt, reused: false };
+      }
+      lastErrors = validation.errors;
+      repair = ` Previous ${part} failed schema validation: ${validation.errors.join(' ')} Return only a corrected ${part} object.`;
+    } catch {
+      lastErrors = [`Speaking ${part}: JSON không hợp lệ.`];
+      repair = ` Previous ${part} was invalid JSON. Return only one valid ${part} object.`;
+    }
+  }
+  return {
+    part,
+    data: null,
+    validation: { ready: false, code: 'schema_invalid' as const, errors: lastErrors },
+    attempts: 3,
+    reused: false,
+  };
+}
+
+async function generateMockSpeaking(ai: GoogleGenAI, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
+  const results = [];
+  for (const part of MOCK_SPEAKING_PARTS) {
+    const result = await generateMockSpeakingPart(ai, build, part);
+    results.push(result);
+    if (!result.validation.ready) break;
+  }
+  const failures = results.filter((result) => !result.validation.ready);
+  if (failures.length) {
+    const readyParts = MOCK_SPEAKING_PARTS.filter((part) => validateSpeakingPart(part, build.speakingParts[part]).ready);
+    return {
+      section: null,
+      partial: { ...build.speakingParts },
+      failedParts: failures.map((result) => result.part),
+      readyParts,
+      validation: {
+        ready: false,
+        code: 'schema_invalid' as const,
+        errors: failures.flatMap((result) => result.validation.errors),
+        count: readyParts.length,
+      },
+      attempts: results.reduce((total, result) => total + result.attempts, 0),
+    };
+  }
+  const section = normalizeMockSkill('speaking', {
+    examinerName: 'Omni AI Examiner',
+    examinerAvatar: '',
+    ...build.speakingParts,
+  });
+  const validation = validateMockSkill('speaking', section);
+  return { section, partial: build.speakingParts, failedParts: [], readyParts: MOCK_SPEAKING_PARTS, validation, attempts: results.reduce((total, result) => total + result.attempts, 0) };
+}
+
+async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill: MockSkill): Promise<MockSkillGenerationResult> {
+  if (skill === 'speaking') return generateMockSpeaking(ai, build);
   let repair = '';
   let lastErrors: string[] = [];
+  let lastCount = 0;
+  let lastCode: 'schema_invalid' | 'count_invalid' | undefined;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0 && build.status === 'generating') moveMockBuild(build, { type: 'REPAIR' });
+    build.attempts[skill] = (build.attempts[skill] || 0) + 1;
+    touchMockBuild(build);
     const result = await callGeminiResiliently(ai, {
       taskTier: 'deep',
       contents: `${mockSkillInstructions(skill, build)}${repair}`,
-      config: { responseMimeType: 'application/json' },
+      config: { responseMimeType: 'application/json', responseSchema: mockSkillResponseSchema(skill as Exclude<MockSkill, 'speaking'>) },
       maxRetriesPerModel: 2,
     });
     if (!result.text) {
@@ -7088,17 +7358,19 @@ async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill:
       continue;
     }
     try {
-      const section = JSON.parse(result.text);
+      const section = normalizeMockSkill(skill, JSON.parse(result.text));
       const validation = validateMockSkill(skill, section);
-      if (validation.ready) return { section, validation, attempts: attempt + 1 };
+      if (validation.ready) return { section, validation, attempts: attempt + 1, failedParts: [], readyParts: [] };
       lastErrors = validation.errors;
+      lastCount = validation.count;
+      lastCode = validation.code;
       repair = ` Previous output failed validation: ${validation.errors.join(' ')} Return the entire corrected ${skill} object.`;
     } catch (error: any) {
       lastErrors = [error?.message || 'INVALID_JSON'];
       repair = ' Previous output was invalid JSON. Return one complete valid JSON object.';
     }
   }
-  return { section: null, validation: { ready: false, errors: lastErrors, count: 0 }, attempts: 3 };
+  return { section: null, validation: { ready: false, errors: lastErrors, count: lastCount, code: lastCode }, attempts: 3, failedParts: [], readyParts: [] };
 }
 
 function assembleMockBuild(build: ServerMockBuild) {
@@ -7119,12 +7391,31 @@ function assembleMockBuild(build: ServerMockBuild) {
 }
 
 app.post('/api/mock/builds', (req, res) => {
+  pruneMockBuilds();
   const id = `mock_build_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+  const now = new Date().toISOString();
+  const resumeSkills = req.body?.resumeSkills && typeof req.body.resumeSkills === 'object' ? req.body.resumeSkills : {};
+  const resumeSpeakingParts = req.body?.resumeSpeakingParts && typeof req.body.resumeSpeakingParts === 'object'
+    ? req.body.resumeSpeakingParts
+    : {};
+  const validResumeSkills: Partial<Record<MockSkill, any>> = {};
+  for (const skill of MOCK_SKILLS) {
+    const normalized = normalizeMockSkill(skill, resumeSkills[skill]);
+    if (validateMockSkill(skill, normalized).ready) validResumeSkills[skill] = normalized;
+  }
+  const resumedSpeaking = validResumeSkills.speaking as any;
+  const validSpeakingParts = Object.fromEntries(MOCK_SPEAKING_PARTS.flatMap((part) => {
+    const parsed = validateSpeakingPart(part, resumedSpeaking?.[part] || resumeSpeakingParts[part]);
+    return parsed.ready ? [[part, parsed.data]] : [];
+  })) as Partial<Record<MockSpeakingPart, any>>;
   const build: ServerMockBuild = {
     id,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
     input: req.body || {},
-    skills: {},
+    skills: validResumeSkills,
+    speakingParts: validSpeakingParts,
+    attempts: {},
     status: 'draft',
     errors: {},
   };
@@ -7132,8 +7423,30 @@ app.post('/api/mock/builds', (req, res) => {
   return res.status(201).json({
     id,
     status: build.status,
-    skillStates: Object.fromEntries(MOCK_SKILLS.map(skill => [skill, 'pending'])),
+    skillStates: Object.fromEntries(MOCK_SKILLS.map(skill => [skill, validResumeSkills[skill] ? 'ready' : 'pending'])),
     createdAt: build.createdAt,
+  });
+});
+
+app.get('/api/mock/builds/:id', (req, res) => {
+  pruneMockBuilds();
+  const build = mockBuilds.get(req.params.id);
+  if (!build) return res.status(404).json({ error: 'Mock build không tồn tại hoặc đã hết phiên.', code: 'MOCK_BUILD_NOT_FOUND' });
+  touchMockBuild(build);
+  return res.json({
+    id: build.id,
+    status: build.status,
+    createdAt: build.createdAt,
+    updatedAt: build.updatedAt,
+    skillStates: Object.fromEntries(MOCK_SKILLS.map((skill) => [
+      skill,
+      build.skills[skill] ? 'ready' : build.errors[skill]?.length ? 'failed' : 'pending',
+    ])),
+    speaking: {
+      readyParts: MOCK_SPEAKING_PARTS.filter((part) => validateSpeakingPart(part, build.speakingParts[part]).ready),
+      errors: build.errors.speaking || [],
+    },
+    attempts: build.attempts,
   });
 });
 
@@ -7145,19 +7458,32 @@ app.post('/api/mock/builds/:id/skills/:skill/generate', async (req, res) => {
   const ai = getGeminiClient(req);
   if (!ai) return res.status(503).json({ error: 'Chưa cấu hình Gemini API key.' });
 
-  build.status = 'building';
+  if (build.status === 'failed') {
+    return res.status(409).json({ error: 'Kỹ năng đã lỗi; hãy dùng thao tác retry để giữ các phần đã đạt.', code: 'RETRY_REQUIRED' });
+  }
+  if (build.status === 'ready') return res.status(409).json({ error: 'Mock build đã hoàn tất.', code: 'BUILD_ALREADY_READY' });
+  if (build.status === 'generating' || build.status === 'repairing') {
+    return res.status(409).json({ error: 'Mock build đang được xử lý.', code: 'BUILD_BUSY' });
+  }
+  moveMockBuild(build, { type: 'START' });
   const generated = await generateMockSkill(ai, build, skill);
   if (!generated.section) {
-    build.status = 'failed';
+    moveMockBuild(build, { type: 'FAIL' });
     build.errors[skill] = generated.validation.errors;
+    touchMockBuild(build);
     return res.status(422).json({
       error: `Không thể tạo phần ${skill} đạt quality gate.`,
       skill,
+      code: generated.validation.code || 'schema_invalid',
       validation: generated.validation,
+      failedParts: generated.failedParts,
+      readyParts: generated.readyParts,
+      partial: generated.partial,
     });
   }
   build.skills[skill] = generated.section;
   delete build.errors[skill];
+  moveMockBuild(build, { type: 'VALIDATE' });
   return res.json({
     mockBuildId: build.id,
     skill,
@@ -7165,6 +7491,71 @@ app.post('/api/mock/builds/:id/skills/:skill/generate', async (req, res) => {
     data: generated.section,
     validation: generated.validation,
     attempts: generated.attempts,
+    readyParts: generated.readyParts,
+  });
+});
+
+app.post('/api/mock/builds/:id/retry', async (req, res) => {
+  const build = mockBuilds.get(req.params.id);
+  if (!build) return res.status(404).json({ error: 'Mock build không tồn tại hoặc đã hết phiên.', code: 'MOCK_BUILD_NOT_FOUND' });
+  const skill = req.body?.skill as MockSkill;
+  const part = req.body?.part as MockSpeakingPart | undefined;
+  if (!MOCK_SKILLS.includes(skill)) return res.status(400).json({ error: 'Kỹ năng không hợp lệ.', code: 'INVALID_SKILL' });
+  if (part && (skill !== 'speaking' || !MOCK_SPEAKING_PARTS.includes(part))) {
+    return res.status(400).json({ error: 'Speaking Part không hợp lệ.', code: 'INVALID_SPEAKING_PART' });
+  }
+  const ai = getGeminiClient(req);
+  if (!ai) return res.status(503).json({ error: 'Chưa cấu hình Gemini API key.', code: 'AUTH_MISSING' });
+
+  if (skill === 'speaking' && part) {
+    delete build.speakingParts[part];
+    delete build.skills.speaking;
+  } else if (skill === 'speaking') {
+    for (const speakingPart of MOCK_SPEAKING_PARTS) {
+      if (!validateSpeakingPart(speakingPart, build.speakingParts[speakingPart]).ready) delete build.speakingParts[speakingPart];
+    }
+    delete build.skills.speaking;
+  } else {
+    delete build.skills[skill];
+  }
+  delete build.errors[skill];
+  if (build.status === 'failed') moveMockBuild(build, { type: 'RETRY' });
+  else if (build.status === 'validating' || build.status === 'generating') moveMockBuild(build, { type: 'REPAIR' });
+  else if (build.status === 'draft') {
+    moveMockBuild(build, { type: 'START' });
+    moveMockBuild(build, { type: 'REPAIR' });
+  } else if (build.status === 'ready') {
+    return res.status(409).json({ error: 'Mock build đã hoàn tất.', code: 'BUILD_ALREADY_READY' });
+  }
+
+  const generated = await generateMockSkill(ai, build, skill);
+  if (!generated.section) {
+    moveMockBuild(build, { type: 'FAIL' });
+    build.errors[skill] = generated.validation.errors;
+    touchMockBuild(build);
+    return res.status(422).json({
+      error: `Phần ${skill}${part ? ` ${part}` : ''} vẫn chưa đạt quality gate.`,
+      skill,
+      part,
+      code: generated.validation.code || 'schema_invalid',
+      validation: generated.validation,
+      failedParts: generated.failedParts,
+      readyParts: generated.readyParts,
+      partial: generated.partial,
+    });
+  }
+  build.skills[skill] = generated.section;
+  delete build.errors[skill];
+  moveMockBuild(build, { type: 'VALIDATE' });
+  return res.json({
+    mockBuildId: build.id,
+    skill,
+    part,
+    state: 'ready',
+    data: generated.section,
+    validation: generated.validation,
+    attempts: generated.attempts,
+    readyParts: generated.readyParts,
   });
 });
 
@@ -7173,10 +7564,17 @@ app.post('/api/mock/builds/:id/finalize', (req, res) => {
   if (!build) return res.status(404).json({ error: 'Mock build không tồn tại hoặc đã hết phiên.' });
   const { fullPackage, validation } = assembleMockBuild(build);
   if (!validation.ready) {
-    build.status = 'failed';
+    if (build.status !== 'failed') moveMockBuild(build, { type: 'FAIL' });
     return res.status(422).json({ error: 'Bộ đề chưa đạt quality gate.', validation });
   }
-  build.status = 'ready';
+  if (build.status === 'draft') {
+    moveMockBuild(build, { type: 'START' });
+    moveMockBuild(build, { type: 'VALIDATE' });
+  } else if (build.status === 'generating' || build.status === 'repairing') {
+    moveMockBuild(build, { type: 'VALIDATE' });
+  }
+  if (build.status === 'failed') return res.status(409).json({ error: 'Mock build đang ở trạng thái lỗi; hãy retry kỹ năng lỗi.', code: 'RETRY_REQUIRED' });
+  if (build.status !== 'ready') moveMockBuild(build, { type: 'READY' });
   return res.json({
     promptVersion: 'mock-assembler-v3-staged',
     testId: fullPackage.id,

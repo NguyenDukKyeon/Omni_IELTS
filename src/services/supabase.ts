@@ -41,3 +41,22 @@ export async function syncPrivateSnapshot(payload: Record<string, unknown>): Pro
   }, { onConflict: 'user_id' });
   if (error) throw error;
 }
+
+export async function savePrivateArtifactIfAuthenticated(
+  artifactType: 'source' | 'transcript' | 'generated_audio' | 'mock_package' | 'mock_attempt',
+  content: unknown,
+  provenance: Record<string, unknown> = {},
+): Promise<boolean> {
+  if (!supabase) return false;
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) return false;
+  const { error } = await supabase.from('private_artifacts').insert({
+    user_id: user.id,
+    artifact_type: artifactType,
+    provenance,
+    content,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  return true;
+}

@@ -68,7 +68,9 @@ const fullPackage = {
   speaking,
 };
 
-async function mockStagedBuildApi(page: Page) {
+async function mockStagedBuildApi(page: Page, options: { failSpeakingOnce?: boolean } = {}) {
+  const readySkills = new Set<string>();
+  let speakingFailures = 0;
   await page.route('**/api/mock/builds', route => route.fulfill({
     status: 201,
     contentType: 'application/json',
@@ -76,10 +78,52 @@ async function mockStagedBuildApi(page: Page) {
   }));
   await page.route(/\/api\/mock\/builds\/mock_build_e2e\/skills\/(listening|reading|writing|speaking)\/generate$/, route => {
     const skill = route.request().url().match(/skills\/(\w+)\/generate/)?.[1] as keyof typeof fullPackage;
+    if (skill === 'speaking' && options.failSpeakingOnce && speakingFailures++ === 0) {
+      return route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'Không thể tạo phần speaking đạt quality gate.',
+          code: 'schema_invalid',
+          failedParts: ['part2'],
+          readyParts: ['part1', 'part3'],
+          partial: { part1: speaking.part1, part3: speaking.part3 },
+          validation: { ready: false, errors: ['Speaking part2.cueCard: Required.'], count: 2 },
+        }),
+      });
+    }
+    readySkills.add(skill);
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ mockBuildId: 'mock_build_e2e', skill, state: 'ready', data: fullPackage[skill], validation: { ready: true, errors: [] } }),
+    });
+  });
+  await page.route(/\/api\/mock\/builds\/mock_build_e2e$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'mock_build_e2e',
+      status: readySkills.size === 4 ? 'validating' : 'failed',
+      skillStates: Object.fromEntries(['listening', 'reading', 'writing', 'speaking'].map(skill => [
+        skill,
+        readySkills.has(skill) ? 'ready' : skill === 'speaking' && speakingFailures ? 'failed' : 'pending',
+      ])),
+    }),
+  }));
+  await page.route('**/api/mock/builds/mock_build_e2e/retry', route => {
+    readySkills.add('speaking');
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mockBuildId: 'mock_build_e2e',
+        skill: 'speaking',
+        state: 'ready',
+        data: speaking,
+        validation: { ready: true, errors: [], count: 3 },
+        readyParts: ['part1', 'part2', 'part3'],
+      }),
     });
   });
   await page.route('**/api/mock/builds/mock_build_e2e/finalize', route => route.fulfill({
@@ -116,8 +160,42 @@ test('staged Mock Orchestrator opens a validated package in the exam room', asyn
   await expect(page.getByText('AI-generated IELTS-style mock — E2E')).toBeVisible();
   await page.getByRole('button', { name: /Vào Phòng Thi Thử Ngay/ }).click();
 
+  const persistedAttempt = await page.evaluate(() => JSON.parse(localStorage.getItem('omni_active_mock_build') || 'null'));
+  expect(persistedAttempt).toMatchObject({
+    mockBuildId: 'mock_build_e2e',
+    attemptId: expect.stringContaining('attempt_mock_build_e2e_'),
+    currentSkill: 'listening',
+    package: { id: 'mock_build_e2e' },
+  });
+
   await expect(page.getByText('OMNI-E2E-01')).toBeVisible();
   await expect(page.getByText(/Listening Test — Section 1/i)).toBeVisible();
   await expect(page.getByText(/Question 1/).first()).toBeVisible();
   expect(runtimeErrors).toEqual([]);
+});
+
+test.describe('controlled Mock repair failure', () => {
+  test.use({ expectedConsoleErrors: ['status of 422 (Unprocessable Entity)'] });
+
+  test('Mock Orchestrator preserves valid Speaking parts and retries only the failed build step', async ({ page }) => {
+    await mockStagedBuildApi(page, { failSpeakingOnce: true });
+
+    await page.goto('/');
+    await navigateToModule(page, 'mock_test');
+    await page.getByRole('button', { name: /Mở Mock Test Orchestrator/ }).click();
+    await page.getByRole('button', { name: 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)', exact: true }).click();
+
+    await expect(page.getByText(/Speaking part2\.cueCard/)).toBeVisible();
+    const pendingBeforeRetry = await page.evaluate(() => JSON.parse(localStorage.getItem('omni_pending_mock_build') || 'null'));
+    expect(pendingBeforeRetry).toMatchObject({
+      id: 'mock_build_e2e',
+      lastFailedSkill: 'speaking',
+      failedParts: ['part2'],
+      speakingParts: { part1: speaking.part1, part3: speaking.part3 },
+    });
+
+    await page.getByRole('button', { name: /Thử lại đúng phần bị lỗi/ }).click();
+    await expect(page.getByText('Bộ Đề Đã Lắp Ráp Thành Công')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Vào Phòng Thi Thử Ngay/ })).toBeEnabled();
+  });
 });
