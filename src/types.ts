@@ -1637,4 +1637,34 @@ export interface GrammarCurriculumResult {
   exercises: GrammarCurriculumExercise[];
 }
 
+// ==========================================
+// Audio Transcription & Segmentation Types (media-transcribe-v1)
+// ==========================================
+
+export interface AudioTranscribeSegment {
+  startSec: number;
+  endSec: number;
+  speaker: string;
+  text: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface AudioTranscribeVocabItem {
+  word: string;
+  meaningVi: string;
+}
+
+export interface AudioTranscribeResult {
+  promptVersion: string; // "media-transcribe-v1"
+  segments: AudioTranscribeSegment[];
+  detectedVocabulary: AudioTranscribeVocabItem[];
+}
+
+export interface AudioTranscribeInput {
+  audioBase64?: string;
+  mimeType?: string;
+  audioUrl?: string;
+  topicContext?: string;
+}
+
 
