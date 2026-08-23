@@ -11,6 +11,7 @@ describe('AI task profiles', () => {
     expect(getFallbackModels('tts')).not.toContain(AI_TASK_PROFILES.instant.model);
     expect(getFallbackModels('grounded')).toEqual([
       'gemini-3.6-flash',
+      'gemini-3.5-flash',
       'gemini-3.5-flash-lite',
       'groq/compound-mini',
       'groq/compound',
