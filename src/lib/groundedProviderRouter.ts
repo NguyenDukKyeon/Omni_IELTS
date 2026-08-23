@@ -10,6 +10,11 @@ type ProviderAttempt<T> = {
 type RouterOptions = {
   now?: () => number;
   dailyResetAt?: (now: number) => number;
+  onAttemptFailure?: (attempt: {
+    provider: AiProvider;
+    model: string;
+    category: ApiFailureCategory;
+  }) => void;
 };
 
 const FALLBACK_CATEGORIES = new Set<ApiFailureCategory>([
@@ -81,11 +86,13 @@ export function nextGeminiDailyResetAt(now: number = Date.now()) {
 export class GroundedProviderRouter {
   private readonly now: () => number;
   private readonly dailyResetAt: (now: number) => number;
+  private readonly onAttemptFailure?: RouterOptions['onAttemptFailure'];
   private readonly blockedUntil = new Map<string, number>();
 
   constructor(options: RouterOptions = {}) {
     this.now = options.now || Date.now;
     this.dailyResetAt = options.dailyResetAt || nextGeminiDailyResetAt;
+    this.onAttemptFailure = options.onAttemptFailure;
   }
 
   async execute<T>(input: {
@@ -129,13 +136,21 @@ export class GroundedProviderRouter {
         } catch (error) {
           failure = classifyApiFailure(error, 'forecast', attempt.provider);
           if (failure.category === 'quota_exhausted') {
-            this.blockedUntil.set(circuitKey, this.dailyResetAt(this.now()));
+            const providerResetAt = failure.retryAfterMs
+              ? this.now() + failure.retryAfterMs
+              : this.dailyResetAt(this.now());
+            this.blockedUntil.set(circuitKey, providerResetAt);
           }
         }
       }
 
       if (index === 0) primaryFailure = failure;
       lastFailure = failure;
+      this.onAttemptFailure?.({
+        provider: attempt.provider,
+        model: attempt.model,
+        category: failure.category,
+      });
       if (!FALLBACK_CATEGORIES.has(failure.category)) throw failure;
     }
 
