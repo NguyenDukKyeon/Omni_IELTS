@@ -4,6 +4,7 @@ dotenv.config({ quiet: true });
 
 const enabled = process.env.WEB_AI_BRIDGE_ENABLED === 'true';
 const bridgeKey = process.env.WEB_AI_BRIDGE_API_KEY?.trim();
+const publicModel = process.env.WEB_AI_BRIDGE_MODEL?.trim() || 'gemini-3.1-pro';
 const appBaseUrl = (process.env.OMNI_CANARY_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
 
 if (!enabled || !bridgeKey) {
@@ -26,8 +27,10 @@ async function verifyArtifact(artifact) {
     || payload.status !== 'ok'
     || payload.lane !== 'web_bridge'
     || payload.sessionStatus !== 'authenticated'
-    || payload.model !== 'gemini-3.1-pro'
-    || payload.resolvedModel !== 'gemini-pro'
+    || payload.model !== publicModel
+    || payload.thinkingMode !== 'extended'
+    || payload.attemptedModels?.[0] !== 'gemini-flash'
+    || !['gemini-flash', 'gemini-pro'].includes(payload.resolvedModel)
     || payload.itemCount < 2
   ) {
     const category = typeof payload.category === 'string' ? payload.category : `http_${response.status}`;
@@ -38,6 +41,8 @@ async function verifyArtifact(artifact) {
     lane: payload.lane,
     model: payload.model,
     resolvedModel: payload.resolvedModel,
+    thinkingMode: payload.thinkingMode,
+    attemptedModels: payload.attemptedModels,
     sessionStatus: payload.sessionStatus,
     itemCount: payload.itemCount,
   };

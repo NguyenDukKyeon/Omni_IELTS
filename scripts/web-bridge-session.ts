@@ -48,7 +48,7 @@ function configureEnv(sessionPath: string, envPath = resolve(process.cwd(), '.en
   upsert(lines, 'WEB_AI_BRIDGE_KIND', 'gemini-web2api');
   upsert(lines, 'WEB_AI_BRIDGE_BASE_URL', 'http://gemini-web2api:8081/v1');
   upsert(lines, 'WEB_AI_BRIDGE_API_KEY', hasKey ? '' : randomBytes(32).toString('hex'), true);
-  upsert(lines, 'WEB_AI_BRIDGE_MODEL', 'gemini-3.1-pro');
+  upsert(lines, 'WEB_AI_BRIDGE_MODEL', 'gemini-3.1-pro', true);
   upsert(lines, 'WEB_AI_BRIDGE_PRIORITY', 'prefer_deep');
   upsert(lines, 'WEB_AI_BRIDGE_COOKIE_HOST_PATH', sessionPath.replace(/\\/g, '/'));
   writeFileSync(envPath, `${lines.join(newline)}${newline}`, { encoding: 'utf8', mode: 0o600 });

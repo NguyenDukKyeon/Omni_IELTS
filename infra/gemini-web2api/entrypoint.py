@@ -5,6 +5,7 @@ import secrets
 import time
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
@@ -24,7 +25,9 @@ logger.remove()
 COOKIE_FILE = Path("/run/secrets/gemini-cookie.json")
 API_KEY = os.environ.get("WEB_AI_BRIDGE_API_KEY", "").strip()
 PUBLIC_MODEL = os.environ.get("WEB_AI_BRIDGE_MODEL", "gemini-3.1-pro").strip()
-RESOLVED_MODEL = "gemini-pro"
+PRIMARY_MODEL = os.environ.get("WEB_AI_BRIDGE_PRIMARY_MODEL", "gemini-flash").strip()
+FALLBACK_MODEL = os.environ.get("WEB_AI_BRIDGE_FALLBACK_MODEL", "gemini-pro").strip()
+MODEL_CHAIN = tuple(dict.fromkeys(model for model in (PRIMARY_MODEL, FALLBACK_MODEL) if model))
 
 try:
     REQUEST_TIMEOUT_SEC = max(
@@ -33,6 +36,14 @@ try:
     )
 except ValueError:
     REQUEST_TIMEOUT_SEC = 75
+
+try:
+    MODEL_ATTEMPT_TIMEOUT_SEC = max(
+        10,
+        min(60, int(os.environ.get("WEB_AI_BRIDGE_MODEL_ATTEMPT_TIMEOUT_SEC", "40"))),
+    )
+except ValueError:
+    MODEL_ATTEMPT_TIMEOUT_SEC = 40
 
 if not API_KEY:
     raise SystemExit("auth_missing")
@@ -47,6 +58,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
+    reasoning_effort: Literal["standard", "high"] = "standard"
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -81,6 +93,16 @@ def load_session() -> tuple[str, str]:
     return secure_1psid, secure_1psidts
 
 
+def has_available_model(client: GeminiClient) -> bool:
+    for model_name in MODEL_CHAIN:
+        try:
+            if client.resolve_model(model_name).is_available:
+                return True
+        except ModelInvalidError:
+            continue
+    return False
+
+
 async def get_client() -> GeminiClient:
     global _client, _cookie_mtime_ns
     async with _client_lock:
@@ -101,13 +123,12 @@ async def get_client() -> GeminiClient:
                 auto_refresh=False,
                 verbose=False,
             )
-            resolved = candidate.resolve_model(RESOLVED_MODEL)
-            if not resolved.is_available:
-                raise ModelInvalidError("pro_unavailable")
+            if not has_available_model(candidate):
+                raise ModelInvalidError("model_chain_unavailable")
         except AuthError:
             raise HTTPException(status_code=401, detail="auth_missing") from None
         except ModelInvalidError:
-            raise HTTPException(status_code=503, detail="pro_unavailable") from None
+            raise HTTPException(status_code=503, detail="model_chain_unavailable") from None
         except Exception:
             raise HTTPException(status_code=503, detail="provider_unavailable") from None
         _client = candidate
@@ -125,13 +146,19 @@ async def list_models(authorization: str | None = Header(default=None)):
     client = await get_client()
     models = [
         {
-            "id": PUBLIC_MODEL if model.model_name == RESOLVED_MODEL else model.model_name,
+            "id": model.model_name,
             "object": "model",
             "owned_by": "gemini_web_authenticated",
         }
         for model in (client.list_models() or [])
         if model.is_available
     ]
+    if PUBLIC_MODEL not in {model["id"] for model in models}:
+        models.insert(0, {
+            "id": PUBLIC_MODEL,
+            "object": "model",
+            "owned_by": "omni_ielts_web_bridge",
+        })
     return {"object": "list", "data": models}
 
 
@@ -143,18 +170,48 @@ async def chat_completions(
     require_api_key(authorization)
     if request.stream:
         raise HTTPException(status_code=400, detail="stream_not_supported")
-    if request.model not in {PUBLIC_MODEL, RESOLVED_MODEL}:
+    if request.model not in {PUBLIC_MODEL, *MODEL_CHAIN}:
         raise HTTPException(status_code=400, detail="model_not_supported")
     client = await get_client()
-    resolved = client.resolve_model(RESOLVED_MODEL)
+    attempted_models: list[str] = []
+    selected_model = ""
+    output = None
+    last_error: Exception | None = None
     try:
         async with asyncio.timeout(REQUEST_TIMEOUT_SEC):
             async with _generation_lock:
-                output = await client.generate_content(
-                    prompt_from_messages(request.messages),
-                    model=resolved,
-                    temporary=True,
-                )
+                for model_name in MODEL_CHAIN:
+                    attempted_models.append(model_name)
+                    try:
+                        resolved = client.resolve_model(model_name)
+                        if not resolved.is_available:
+                            raise ModelInvalidError("model_unavailable")
+                        async with asyncio.timeout(MODEL_ATTEMPT_TIMEOUT_SEC):
+                            output = await client.generate_content(
+                                prompt_from_messages(request.messages),
+                                model=resolved,
+                                temporary=True,
+                                extended_thinking=request.reasoning_effort == "high",
+                            )
+                        if not str(output.text or "").strip():
+                            raise RuntimeError("empty_response")
+                        selected_model = resolved.model_name
+                        break
+                    except AuthError:
+                        raise
+                    except (
+                        UsageLimitExceededError,
+                        TemporarilyBlockedError,
+                        GeminiTimeoutError,
+                        TimeoutError,
+                        ModelInvalidError,
+                        RuntimeError,
+                    ) as error:
+                        last_error = error
+                if output is None or not selected_model:
+                    if last_error is not None:
+                        raise last_error
+                    raise RuntimeError("empty_response")
     except AuthError:
         raise HTTPException(status_code=401, detail="auth_missing") from None
     except (UsageLimitExceededError, TemporarilyBlockedError):
@@ -171,7 +228,12 @@ async def chat_completions(
         "object": "chat.completion",
         "created": int(time.time()),
         "model": PUBLIC_MODEL,
-        "omni": {"authenticated": True, "resolved_model": resolved.model_name},
+        "omni": {
+            "authenticated": True,
+            "resolved_model": selected_model,
+            "thinking_mode": "extended" if request.reasoning_effort == "high" else "standard",
+            "attempted_models": attempted_models,
+        },
         "choices": [{
             "index": 0,
             "message": {"role": "assistant", "content": text},
