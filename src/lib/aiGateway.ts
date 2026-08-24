@@ -897,14 +897,26 @@ export class WebBridgeGatewayClient implements AiGatewayClient {
     const payload = await this.requestJson(route, {
       model: this.model,
       messages,
+      reasoning_effort: route.modelAlias === AI_TASK_PROFILES.deep.modelAlias ? 'high' : 'standard',
       stream: false,
     });
     const text = normalizeWebBridgeText(payload?.choices?.[0]?.message?.content, structured);
     const bridgeMetadata = {
       authenticated: payload?.omni?.authenticated === true,
       resolvedModel: String(payload?.omni?.resolved_model || ''),
+      thinkingMode: String(payload?.omni?.thinking_mode || ''),
+      attemptedModels: Array.isArray(payload?.omni?.attempted_models)
+        ? payload.omni.attempted_models.map((model: unknown) => String(model))
+        : [],
     };
-    if (!bridgeMetadata.authenticated || bridgeMetadata.resolvedModel !== 'gemini-pro') {
+    const validModelChain = bridgeMetadata.attemptedModels[0] === 'gemini-flash'
+      && ['gemini-flash', 'gemini-pro'].includes(bridgeMetadata.resolvedModel);
+    const extendedThinkingRequired = route.modelAlias === AI_TASK_PROFILES.deep.modelAlias;
+    if (
+      !bridgeMetadata.authenticated
+      || !validModelChain
+      || (extendedThinkingRequired && bridgeMetadata.thinkingMode !== 'extended')
+    ) {
       throw new AiGatewayError({ category: 'auth_invalid', status: 401, provider: 'gemini_web' });
     }
     return {

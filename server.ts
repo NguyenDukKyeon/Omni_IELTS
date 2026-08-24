@@ -372,7 +372,12 @@ async function callOfficialProvidersResiliently(
 
 async function generateWithDeepWebBridge(options: ResilientAiOptions): Promise<{
   text: string;
-  bridgeMetadata: { authenticated: true; resolvedModel: 'gemini-pro' };
+  bridgeMetadata: {
+    authenticated: true;
+    resolvedModel: 'gemini-flash' | 'gemini-pro';
+    thinkingMode: 'extended';
+    attemptedModels: string[];
+  };
 }> {
   return runWebBridgeSerial(async () => {
     const attemptStartedAt = Date.now();
@@ -384,7 +389,12 @@ async function generateWithDeepWebBridge(options: ResilientAiOptions): Promise<{
         route,
         buildGeminiGatewayRequestBody(options.contents, options.config),
       );
-      if (!response?.bridgeMetadata?.authenticated || response.bridgeMetadata.resolvedModel !== 'gemini-pro') {
+      if (
+        !response?.bridgeMetadata?.authenticated
+        || !['gemini-flash', 'gemini-pro'].includes(response.bridgeMetadata.resolvedModel)
+        || response.bridgeMetadata.thinkingMode !== 'extended'
+        || response.bridgeMetadata.attemptedModels?.[0] !== 'gemini-flash'
+      ) {
         throw { category: 'auth_invalid', status: 401 };
       }
       const text = String(response?.text || '').trim();
@@ -401,7 +411,7 @@ async function generateWithDeepWebBridge(options: ResilientAiOptions): Promise<{
       recordGatewayAttempt({
         lane: 'web_bridge',
         provider: 'gemini_web',
-        model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.1-pro',
+        model: response.bridgeMetadata.resolvedModel,
         capability: 'text',
         keyAlias: 'web-bridge-local',
         latencyMs: Date.now() - attemptStartedAt,
@@ -410,7 +420,7 @@ async function generateWithDeepWebBridge(options: ResilientAiOptions): Promise<{
       });
       return {
         text,
-        bridgeMetadata: { authenticated: true, resolvedModel: 'gemini-pro' },
+        bridgeMetadata: response.bridgeMetadata,
       };
     } catch (error) {
       const bridgeFailure = classifyApiFailure(error, 'ai', 'gemini_web');
@@ -433,7 +443,7 @@ async function generateWithDeepWebBridge(options: ResilientAiOptions): Promise<{
   });
 }
 
-// Deep tasks prefer the authenticated local Pro lane. Every other capability stays on official providers.
+// Deep tasks prefer the authenticated local Flash-first lane. Every other capability stays on official providers.
 async function callGeminiResiliently(
   ai: GoogleGenAI | null,
   options: ResilientAiOptions,
@@ -595,6 +605,8 @@ app.post('/api/internal/ai/canary/text', async (req, res) => {
       sessionStatus: 'authenticated',
       model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.1-pro',
       resolvedModel: result.bridgeMetadata.resolvedModel,
+      thinkingMode: result.bridgeMetadata.thinkingMode,
+      attemptedModels: result.bridgeMetadata.attemptedModels,
       artifact,
       itemCount,
     });

@@ -1,4 +1,4 @@
-# Gemini Web Pro bridge dependency
+# Gemini Web bridge dependency
 
 This local-only bridge uses [`HanaokaYuzu/Gemini-API`](https://github.com/HanaokaYuzu/Gemini-API), pinned to commit `955746dad14dae37c18bd766f34c8cd397ad50d4`.
 

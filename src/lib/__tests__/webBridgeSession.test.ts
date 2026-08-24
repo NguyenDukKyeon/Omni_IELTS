@@ -9,7 +9,7 @@ import {
   shouldPreferWebBridgeForTier,
 } from '../webBridgeSession';
 
-describe('Gemini Web Pro local session', () => {
+describe('Gemini Web local session', () => {
   it('keeps only the Gemini authentication cookie allowlist', () => {
     const selected = selectGeminiSessionCookies([
       { name: 'SAPISID', value: 'sapisid-secret', domain: '.google.com', expires: 4_000_000_000 },
@@ -95,7 +95,7 @@ describe('Gemini Web Pro local session', () => {
     expect(peak).toBe(1);
   });
 
-  it('runs authenticated Web Pro before the official lane for deep work', async () => {
+  it('runs the authenticated Web lane before the official lane for deep work', async () => {
     const order: string[] = [];
     const result = await executeWithPreferredWebBridge({
       tier: 'deep',
@@ -127,7 +127,7 @@ describe('Gemini Web Pro local session', () => {
     expect(probes).toBe(1);
   });
 
-  it('does not probe Web Pro for non-deep work or a login-required session', async () => {
+  it('does not probe Gemini Web for non-deep work or a login-required session', async () => {
     let probes = 0;
     const probe = async () => {
       probes += 1;
@@ -151,7 +151,7 @@ describe('Gemini Web Pro local session', () => {
     expect(probes).toBe(0);
   });
 
-  it('falls from an unavailable deep Web Pro lane to the official providers', async () => {
+  it('falls from an unavailable deep Web lane to the official providers', async () => {
     const order: string[] = [];
     const result = await executeWithPreferredWebBridge({
       tier: 'deep',
@@ -168,7 +168,7 @@ describe('Gemini Web Pro local session', () => {
     expect(order).toEqual(['web', 'official']);
   });
 
-  it('never touches Web Pro for non-deep tiers', async () => {
+  it('never touches Gemini Web for non-deep tiers', async () => {
     const order: string[] = [];
     const result = await executeWithPreferredWebBridge({
       tier: 'balanced',

@@ -350,7 +350,12 @@ describe('Web Bridge private fallback client', () => {
   it('converts a structured text request to the local OpenAI-compatible endpoint', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       model: 'gemini-3.1-pro',
-      omni: { authenticated: true, resolved_model: 'gemini-pro' },
+      omni: {
+        authenticated: true,
+        resolved_model: 'gemini-flash',
+        thinking_mode: 'extended',
+        attempted_models: ['gemini-flash'],
+      },
       choices: [{ message: { content: '```json\n{"cards":[]}\n```' } }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const client = new WebBridgeGatewayClient({
@@ -370,7 +375,12 @@ describe('Web Bridge private fallback client', () => {
     });
 
     expect(response.candidates[0].content.parts[0].text).toBe('{"cards":[]}');
-    expect(response.bridgeMetadata).toEqual({ authenticated: true, resolvedModel: 'gemini-pro' });
+    expect(response.bridgeMetadata).toEqual({
+      authenticated: true,
+      resolvedModel: 'gemini-flash',
+      thinkingMode: 'extended',
+      attemptedModels: ['gemini-flash'],
+    });
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://127.0.0.1:18081/v1/chat/completions',
       expect.objectContaining({
@@ -380,8 +390,59 @@ describe('Web Bridge private fallback client', () => {
     );
     const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
     expect(body.model).toBe('gemini-3.6-flash');
+    expect(body.reasoning_effort).toBe('high');
     expect(body.messages.at(-1).content).toContain('Create cards');
     expect(JSON.stringify(body.messages)).toContain('valid JSON');
+  });
+
+  it('accepts Pro only when the bridge reports Flash was attempted first', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      model: 'gemini-3.1-pro',
+      omni: {
+        authenticated: true,
+        resolved_model: 'gemini-pro',
+        thinking_mode: 'extended',
+        attempted_models: ['gemini-flash', 'gemini-pro'],
+      },
+      choices: [{ message: { content: '{"cards":[]}' } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const client = new WebBridgeGatewayClient({
+      baseUrl: 'http://127.0.0.1:18081/v1',
+      apiKey: 'local-key',
+      kind: 'gemini-web2api',
+      fetchImpl,
+    });
+
+    const response = await client.generateGemini(getGatewayRoutes('deep')[0], {
+      contents: [{ role: 'user', parts: [{ text: 'Create cards' }] }],
+      generationConfig: { responseMimeType: 'application/json' },
+    });
+
+    expect(response.bridgeMetadata.resolvedModel).toBe('gemini-pro');
+    expect(response.bridgeMetadata.attemptedModels).toEqual(['gemini-flash', 'gemini-pro']);
+  });
+
+  it('rejects a deep bridge response that did not use extended thinking', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      omni: {
+        authenticated: true,
+        resolved_model: 'gemini-flash',
+        thinking_mode: 'standard',
+        attempted_models: ['gemini-flash'],
+      },
+      choices: [{ message: { content: '{"cards":[]}' } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const client = new WebBridgeGatewayClient({
+      baseUrl: 'http://127.0.0.1:18081/v1',
+      apiKey: 'local-key',
+      kind: 'gemini-web2api',
+      fetchImpl,
+    });
+
+    await expect(client.generateGemini(getGatewayRoutes('deep')[0], {
+      contents: [{ role: 'user', parts: [{ text: 'Create cards' }] }],
+      generationConfig: { responseMimeType: 'application/json' },
+    })).rejects.toMatchObject({ category: 'auth_invalid' });
   });
 
   it('rejects fenced JSON with trailing prose instead of accepting a partial artifact', async () => {
