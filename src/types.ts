@@ -790,6 +790,7 @@ export interface MockResult {
   readingRawScore?: number; // e.g. 33/40
   completedDate: string;
   timeSpentMinutes: number;
+  provenance?: FullMockTestPackage['provenance'];
   breakdown: string[];
   strengths?: string[];
   weaknesses?: string[];
@@ -849,6 +850,7 @@ export interface FullMockTestPackage {
   difficulty: 'IELTS-style Standard' | 'Hard (Band 7.5 - 8.5+)' | 'Diagnostic Standard';
   description: string;
   estimatedMinutes: number; // ~170 mins
+  provenance?: LiveHubArtifactProvenance & { sourceArtifactId?: string };
   // 1. Listening
   listening: {
     title: string;
@@ -1276,18 +1278,59 @@ export interface RealExamForecastItem {
 
 export interface ForecastGroundingResponse {
   status: 'fresh' | 'stale' | 'unavailable';
-  provider?: 'gemini' | 'groq';
+  cacheStatus?: 'hit' | 'miss' | 'stale';
+  provider?: 'gemini' | 'groq' | 'brave';
+  gatewayLane?: 'bifrost';
   model?: string;
   fallbackReason?: ApiFailureCategory;
   forecastItems: RealExamForecastItem[];
   searchQueries: string[];
-  groundingSources: Array<{ title: string; url: string }>;
+  groundingSources: Array<{ title: string; url: string; snippet?: string; publishedAt?: string }>;
   lastUpdated: string;
   summaryOverviewVi: string;
   detectedTrends?: string[];
   stale?: boolean;
   error?: string;
   failure?: ApiFailure;
+}
+
+export interface LiveHubArtifactProvenance {
+  sourceItemId: string;
+  evidenceType: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice';
+  sourceTitle?: string | null;
+  sourceUrl?: string | null;
+  citationUrls?: string[];
+  retrievedAt?: string | null;
+}
+
+export interface LiveHubPracticeArtifact {
+  id: string;
+  kind: 'derived_practice';
+  skill: RealExamSkillType;
+  prompt: string;
+  sourceItem: RealExamForecastItem;
+  provenance: LiveHubArtifactProvenance;
+  createdAt: string;
+}
+
+export interface LiveHubMockArtifact {
+  id: string;
+  kind: 'derived_mock_section';
+  skill: RealExamSkillType;
+  sourceItem: RealExamForecastItem;
+  requiresPreview: boolean;
+  provenance: LiveHubArtifactProvenance;
+  createdAt: string;
+}
+
+export interface LiveHubMockBuildResponse {
+  artifact: LiveHubMockArtifact;
+  mockBuild: {
+    id: string;
+    status: 'draft' | 'generating' | 'validating' | 'repairing' | 'ready' | 'failed';
+    skillStates: Record<'listening' | 'reading' | 'writing' | 'speaking', 'pending' | 'ready'>;
+    createdAt: string;
+  };
 }
 
 // ==========================================
@@ -1867,6 +1910,8 @@ export interface MockAssemblerInput {
   recentPromptIds?: string[];
   learnerProfile?: LearnerProfileWeighting;
   sourceItem?: RealExamForecastItem;
+  sourceArtifactId?: string;
+  provenance?: LiveHubArtifactProvenance;
 }
 
 export interface MockAssemblerPackage {
@@ -1919,11 +1964,22 @@ export interface MockAssemblerPackage {
 
 export interface AiTaskProfile {
   tier: 'instant' | 'balanced' | 'deep' | 'grounded' | 'audio_eval' | 'tts';
+  provider: 'gemini' | 'groq' | 'nvidia_nim' | 'openrouter';
   model: string;
+  modelAlias: string;
+  capability: 'text' | 'search' | 'audio-input' | 'audio-output';
+  costClass: 'free' | 'metered' | 'paid';
   thinkingLevel?: 'low' | 'high';
   tools: Array<'googleSearch'>;
   timeoutMs: number;
   fallbackModels: string[];
+  fallbackChain: Array<{
+    provider: 'gemini' | 'groq' | 'nvidia_nim' | 'openrouter';
+    model: string;
+    modelAlias: string;
+    capability: 'text' | 'search' | 'audio-input' | 'audio-output';
+    costClass: 'free' | 'metered' | 'paid';
+  }>;
   validator?: string;
 }
 
@@ -1952,10 +2008,12 @@ export type ApiFailureCategory =
   | 'network_failed'
   | 'schema_invalid'
   | 'no_results'
+  | 'gateway_unavailable'
+  | 'all_providers_exhausted'
   | 'unknown';
 
 export interface ApiFailure {
-  provider?: 'gemini' | 'groq';
+  provider?: 'gemini' | 'gemini_web' | 'groq' | 'brave' | 'nvidia_nim' | 'openrouter' | 'bifrost';
   category: ApiFailureCategory;
   httpStatus: number;
   retryable: boolean;

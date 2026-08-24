@@ -31,9 +31,23 @@ function datedForecastLabel(retrievedAt: string) {
   return `Dự báo · cập nhật ${day}/${month}/${value.getUTCFullYear()}`;
 }
 
+function normalizedEvidenceText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function sourceSupportsExactPrompt(
+  source: { snippet?: string } | undefined,
+  promptStatement: string,
+) {
+  if (!source?.snippet) return false;
+  const prompt = normalizedEvidenceText(promptStatement);
+  const snippet = normalizedEvidenceText(source.snippet);
+  return prompt.length >= 12 && snippet.includes(prompt);
+}
+
 export function normalizeForecastGroundingPayload(input: {
   raw: unknown;
-  groundingSources: Array<{ title: string; url: string }>;
+  groundingSources: Array<{ title: string; url: string; snippet?: string; publishedAt?: string }>;
   searchQueries: string[];
   retrievedAt?: string;
 }): ForecastGroundingResponse {
@@ -47,17 +61,24 @@ export function normalizeForecastGroundingPayload(input: {
   if (parsed.data.forecastItems.length === 0) {
     throw Object.assign(new Error('NO_RESULTS: Forecast search returned no usable items'), { code: 'NO_RESULTS' });
   }
+  if (input.groundingSources.length === 0) {
+    throw Object.assign(new Error('NO_RESULTS: Grounded provider returned no supporting sources'), { code: 'NO_RESULTS' });
+  }
 
   const retrievedAt = input.retrievedAt || new Date().toISOString();
   const sourceByUrl = new Map(input.groundingSources.map((source) => [source.url, source]));
-  const forecastItems: RealExamForecastItem[] = parsed.data.forecastItems.map((item) => {
+  const forecastItems: RealExamForecastItem[] = parsed.data.forecastItems.flatMap((item) => {
     const supportingSource = item.sourceUrl ? sourceByUrl.get(item.sourceUrl) : undefined;
-    const isVerified = item.evidenceType === 'verified_report' && Boolean(supportingSource);
-    const isReportedRecall = item.evidenceType === 'reported_recall' && Boolean(supportingSource);
+    if (!supportingSource) return [];
+    const isVerified = item.evidenceType === 'verified_report'
+      && sourceSupportsExactPrompt(supportingSource, item.promptStatement);
+    const isReportedRecall = (item.evidenceType === 'reported_recall' || item.evidenceType === 'verified_report')
+      && Boolean(supportingSource)
+      && !isVerified;
     const evidenceType = isVerified ? 'verified_report' : isReportedRecall ? 'reported_recall' : 'forecast';
-    const sourceSupported = isVerified || isReportedRecall;
+    const sourceSupported = isVerified || item.evidenceType === 'reported_recall';
 
-    return {
+    return [{
       id: item.id,
       title: item.title,
       skill: item.skill,
@@ -79,11 +100,19 @@ export function normalizeForecastGroundingPayload(input: {
       groundingSourceUrl: supportingSource?.url,
       evidenceType,
       citations: supportingSource
-        ? [{ claimId: item.id, title: supportingSource.title, url: supportingSource.url }]
+        ? [{
+            claimId: item.id,
+            title: supportingSource.title,
+            url: supportingSource.url,
+            snippet: supportingSource.snippet,
+          }]
         : [],
       enrichmentStatus: 'not_requested',
-    };
+    }];
   });
+  if (forecastItems.length === 0) {
+    throw Object.assign(new Error('NO_RESULTS: Forecast items had no directly matching sources'), { code: 'NO_RESULTS' });
+  }
 
   return {
     status: 'fresh',

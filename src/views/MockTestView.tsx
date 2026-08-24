@@ -76,6 +76,7 @@ export const MockTestView: React.FC = () => {
     updateProfile,
     awardXP,
     setIsExamModeActive,
+    setActiveModule,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'available' | 'live_hub' | 'progress' | 'history'>('available');
@@ -89,6 +90,12 @@ export const MockTestView: React.FC = () => {
   const [activeSubIndex, setActiveSubIndex] = useState<number>(0); // Section or Passage index
   const [textSize, setTextSize] = useState<'normal' | 'large' | 'xlarge'>('normal');
   const [colorScheme, setColorScheme] = useState<ExamColorScheme>('standard');
+
+  useEffect(() => {
+    if (sessionStorage.getItem('omni_open_mock_orchestrator') !== '1') return;
+    sessionStorage.removeItem('omni_open_mock_orchestrator');
+    setIsOrchestratorOpen(true);
+  }, []);
 
   // Timers
   const [timeRemainingSeconds, setTimeRemainingSeconds] = useState<number>(2400); // 40 mins Listening default
@@ -801,9 +808,23 @@ export const MockTestView: React.FC = () => {
             <ForecastLiveHub
               usageContext="mock"
               onSelectPromptForPractice={(item) => {
-                sessionStorage.setItem('omni_pending_mock_source', JSON.stringify(item));
-                setIsOrchestratorOpen(true);
+                const storageKey = item.skill.startsWith('writing') ? 'omni_pending_writing_prompt' : 'omni_pending_speaking_prompt';
+                sessionStorage.setItem(storageKey, JSON.stringify(item.skill.startsWith('writing') ? {
+                  id: item.id,
+                  promptStatement: item.promptStatement,
+                  title: item.title,
+                  category: item.subCategory || 'Opinion Essay',
+                  taskType: item.skill === 'writing_task1' ? 'task1_academic' : 'task2_essay',
+                } : {
+                  id: item.id,
+                  promptStatement: item.promptStatement,
+                  title: item.title,
+                  cueCardPoints: item.cueCardPoints,
+                  part: item.skill,
+                }));
+                setActiveModule('practice');
               }}
+              onMockBuildReady={() => setIsOrchestratorOpen(true)}
             />
           )}
 

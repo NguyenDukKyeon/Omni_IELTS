@@ -3,7 +3,9 @@ import {
   normalizeMockSkill,
   validateMockPackage,
   validateMockSkill,
+  validateListeningSection,
   validateSpeakingPart,
+  validateMockSourcePreservation,
 } from '../mockPackageValidator';
 
 const question = (number: number, sectionIndex = 0) => ({
@@ -33,6 +35,27 @@ const validSpeaking = {
 };
 
 describe('validateMockPackage', () => {
+  it('accepts only a complete ten-question Listening section with its assigned number range', () => {
+    const section = {
+      sectionNumber: 2,
+      title: 'Section 2',
+      context: 'A workplace conversation',
+      audioScriptExcerpt: 'A complete script containing all ten answers.',
+      instructionsVi: 'Nghe và trả lời câu hỏi 11 đến 20.',
+      questions: Array.from({ length: 10 }, (_, index) => question(index + 11, 1)),
+    };
+
+    expect(validateListeningSection(2, section)).toMatchObject({ ready: true, count: 10 });
+    expect(validateListeningSection(2, {
+      ...section,
+      questions: section.questions.map((item, index) => index === 9 ? { ...item, number: 21 } : item),
+    })).toMatchObject({ ready: false, count: 10, code: 'count_invalid' });
+    expect(validateListeningSection(2, {
+      ...section,
+      questions: section.questions.slice(0, 9),
+    })).toMatchObject({ ready: false, count: 9, code: 'count_invalid' });
+  });
+
   it('rejects summary-only assembler output that cannot enter the exam room', () => {
     const result = validateMockPackage({
       id: 'summary',
@@ -110,5 +133,20 @@ describe('validateMockPackage', () => {
       expect.stringContaining('bulletPoints'),
       expect.stringContaining('prepTimeSeconds'),
     ]));
+  });
+
+  it('requires a Live Hub source prompt to remain verbatim in its target Mock section', () => {
+    const source = {
+      id: 'source-writing',
+      skill: 'writing_task2',
+      promptStatement: 'Discuss whether university education should be free.',
+    } as any;
+
+    expect(validateMockSourcePreservation('writing', {
+      task2: { prompt: source.promptStatement },
+    }, source)).toEqual([]);
+    expect(validateMockSourcePreservation('writing', {
+      task2: { prompt: 'A rewritten prompt with a different meaning.' },
+    }, source)).toEqual([expect.stringContaining('giữ nguyên nguyên văn')]);
   });
 });

@@ -67,6 +67,42 @@ describe('GroundedProviderRouter', () => {
     expect(fallback).toHaveBeenCalledTimes(1);
   });
 
+  it('uses Brave only after the Gemini and Groq grounded lanes fail', async () => {
+    const gemini = vi.fn().mockRejectedValue({ status: 429, message: 'Daily quota exhausted' });
+    const groq = vi.fn().mockRejectedValue({ code: 'NO_RESULTS', message: 'NO_RESULTS' });
+    const brave = vi.fn().mockResolvedValue({ sources: [{ url: 'https://example.org/source' }] });
+    const router = new GroundedProviderRouter();
+
+    const result = await router.execute({
+      primary: { provider: 'gemini', model: 'gemini-grounded', run: gemini },
+      fallbacks: [
+        { provider: 'groq', model: 'groq/compound-mini', run: groq },
+        { provider: 'brave', model: 'brave-web-search', run: brave },
+      ],
+    });
+
+    expect(result.provider).toBe('brave');
+    expect(brave).toHaveBeenCalledOnce();
+  });
+
+  it('tries the next grounded provider when Gemini returns no cited results', async () => {
+    const fallback = vi.fn().mockResolvedValue({ forecastItems: [{ id: 'sourced-groq-item' }] });
+    const router = new GroundedProviderRouter();
+
+    const result = await router.execute({
+      primary: {
+        provider: 'gemini',
+        model: 'gemini-grounded',
+        run: vi.fn().mockRejectedValue({ category: 'no_results', status: 404 }),
+      },
+      fallback: { provider: 'groq', model: 'groq/compound-mini', run: fallback },
+    });
+
+    expect(result.provider).toBe('groq');
+    expect(result.fallbackReason).toBe('no_results');
+    expect(fallback).toHaveBeenCalledOnce();
+  });
+
   it('tries another grounded Gemini model before Groq and isolates circuit state per model', async () => {
     const primary = vi.fn().mockRejectedValue({ status: 429, message: 'Daily quota exhausted' });
     const gemini36Fallback = vi.fn().mockRejectedValue({ status: 429, message: 'Daily quota exhausted' });

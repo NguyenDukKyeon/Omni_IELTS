@@ -13,10 +13,18 @@ test('a real grounded provider returns a fresh sourced Forecast snapshot', async
 
   expect(response.ok(), JSON.stringify(body)).toBe(true);
   expect(body.status).toBe('fresh');
-  expect(['gemini', 'groq']).toContain(body.provider);
+  expect(['gemini', 'groq', 'brave']).toContain(body.provider);
   if (body.fallbackReason) {
-    expect(body.provider).toBe('groq');
+    expect([
+      'auth_invalid',
+      'rate_limited',
+      'quota_exhausted',
+      'provider_overloaded',
+      'network_failed',
+      'schema_invalid',
+    ]).toContain(body.fallbackReason);
   }
+  expect(body.model).toBeTruthy();
   expect(body.forecastItems?.length).toBeGreaterThan(0);
   expect(body.groundingSources?.length).toBeGreaterThan(0);
   for (const item of body.forecastItems) {

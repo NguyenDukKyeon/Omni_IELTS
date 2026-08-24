@@ -13,6 +13,8 @@ import {
   normalizeMockSkill,
   validateMockPackage,
   validateMockSkill,
+  validateListeningSection,
+  validateMockSourcePreservation,
   validateSpeakingPart,
   MockSkill,
   MockSpeakingPart,
@@ -21,10 +23,38 @@ import { alignTranscriptSentences, normalizeAndAlignVtt, NormalizedTranscriptSeg
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
 import { classifyApiFailure, retryProviderCall } from "./src/lib/apiFailure";
 import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
+import {
+  requestGatewayGroundedForecast,
+  requestGatewayGroqForecastEvidence,
+  extractGeminiGroundingSources,
+  shouldUseDirectGroundedProvider,
+} from "./src/lib/gatewayGrounding";
+import { buildForecastSearchQueries, runForecastQueryVariants } from "./src/lib/forecastSearchQueries";
+import { requestBraveForecastEvidence } from "./src/lib/braveSearch";
+import {
+  orderForecastProviderAttempts,
+  synthesizeForecastFromEvidence,
+  type ForecastEvidenceBundle,
+} from "./src/lib/forecastEvidence";
+import { ForecastServerCache } from "./src/lib/forecastServerCache";
 import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
+import {
+  BifrostGatewayClient,
+  WebBridgeGatewayClient,
+  buildGeminiGatewayRequestBody,
+  createGeminiGatewayFacade,
+  describeGatewayCapabilities,
+  executeWithWebBridgeFallback,
+  generateTextWithGateway,
+  getGatewayRoutes,
+  isWebBridgeCanaryAuthorized,
+  type AiGatewayAttempt,
+  type AiGatewayRoute,
+  type WebBridgeKind,
+} from "./src/lib/aiGateway";
 import { MockBuildEvent, MockBuildState, transitionMockBuildState } from "./src/lib/mockBuildMachine";
-import { requestGroqGroundedForecast } from "./src/lib/groqGrounding";
+import { requestGroqForecastEvidence, type GroqGroundedModel } from "./src/lib/groqGrounding";
 import {
   buildYtDlpRuntimeArgs,
   classifyMediaImportFailure,
@@ -35,7 +65,7 @@ import {
 } from "./src/lib/mediaImport";
 import type { MediaCapabilities, MediaImportJob, MediaImportPhase, MediaSession } from "./src/types";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const app = express();
 const PORT = 3000;
@@ -62,6 +92,57 @@ const TutorEnvelopeSchema = z.object({
 });
 
 const aiLatencySamples = new Map<AiTaskTier, number[]>();
+const aiGatewayAttempts: AiGatewayAttempt[] = [];
+const gatewayCapabilities = describeGatewayCapabilities(process.env);
+const aiGatewayClient = gatewayCapabilities.enabled
+  ? new BifrostGatewayClient({
+      baseUrl: process.env.AI_GATEWAY_BASE_URL || '',
+      virtualKey: process.env.BIFROST_VIRTUAL_KEY || '',
+    })
+  : null;
+const webBridgeLane = gatewayCapabilities.lanes.find((lane) => lane.lane === 'web_bridge');
+const configuredOfficialLaneBudgetMs = Number(process.env.WEB_AI_BRIDGE_PRIMARY_TIMEOUT_MS || 20_000);
+const officialLaneBudgetMs = webBridgeLane?.enabled
+  ? Math.min(60_000, Math.max(5_000, Number.isFinite(configuredOfficialLaneBudgetMs) ? configuredOfficialLaneBudgetMs : 20_000))
+  : undefined;
+const webBridgeGatewayClient = webBridgeLane?.enabled
+  ? new WebBridgeGatewayClient({
+      baseUrl: process.env.WEB_AI_BRIDGE_BASE_URL || '',
+      apiKey: process.env.WEB_AI_BRIDGE_API_KEY || '',
+      model: process.env.WEB_AI_BRIDGE_MODEL,
+      kind: (process.env.WEB_AI_BRIDGE_KIND || 'gemini-web2api') as WebBridgeKind,
+    })
+  : null;
+let gatewayHealthCache = { checkedAt: 0, healthy: false };
+let webBridgeHealthCache = { checkedAt: 0, healthy: false };
+
+function recordGatewayAttempt(attempt: AiGatewayAttempt) {
+  aiGatewayAttempts.push({ ...attempt, keyAlias: attempt.keyAlias || 'bifrost-managed' });
+  if (aiGatewayAttempts.length > 200) aiGatewayAttempts.splice(0, aiGatewayAttempts.length - 200);
+}
+
+async function getHealthyGatewayClient() {
+  if (!aiGatewayClient) return null;
+  const now = Date.now();
+  if (now - gatewayHealthCache.checkedAt > 5_000) {
+    gatewayHealthCache = { checkedAt: now, healthy: await aiGatewayClient.health() };
+  }
+  return gatewayHealthCache.healthy ? aiGatewayClient : null;
+}
+
+async function getHealthyWebBridgeClient() {
+  if (!webBridgeGatewayClient) return null;
+  const now = Date.now();
+  if (now - webBridgeHealthCache.checkedAt > 5_000) {
+    webBridgeHealthCache = { checkedAt: now, healthy: await webBridgeGatewayClient.health() };
+  }
+  return webBridgeHealthCache.healthy ? webBridgeGatewayClient : null;
+}
+const gatewayGeminiFacade = createGeminiGatewayFacade({
+  getClient: getHealthyGatewayClient,
+  recordAttempt: recordGatewayAttempt,
+  maxRequestDurationMs: officialLaneBudgetMs,
+}) as unknown as GoogleGenAI;
 function recordAiLatency(tier: AiTaskTier, durationMs: number) {
   const samples = [...(aiLatencySamples.get(tier) || []), durationMs].slice(-200);
   aiLatencySamples.set(tier, samples);
@@ -77,7 +158,12 @@ app.use(express.json({ limit: "15mb" }));
 // Initialize GoogleGenAI client lazily or safely with User-Agent telemetry
 function getGeminiClient(request?: express.Request): GoogleGenAI | null {
   const requestKey = request?.header("x-gemini-api-key")?.trim();
+  if (!requestKey && gatewayCapabilities.enabled) return gatewayGeminiFacade;
   const apiKey = requestKey || process.env.GEMINI_API_KEY;
+  return createDirectGeminiClient(apiKey);
+}
+
+function createDirectGeminiClient(apiKey?: string): GoogleGenAI | null {
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
@@ -102,22 +188,22 @@ async function callGeminiResiliently(
     retryDelayMs?: number;
   }
 ): Promise<{ text: string | null; error?: string }> {
-  if (!ai) return { text: null, error: "NO_AI_CLIENT" };
-
   const profile = AI_TASK_PROFILES[options.taskTier || "balanced"];
   const primary = options.primaryModel || profile.model;
   const fallbacks = options.fallbackModels || profile.fallbacks;
-  const modelsToTry = [primary, ...fallbacks.filter((m) => m !== primary)];
-  const maxRetries = options.maxRetriesPerModel ?? 2;
+  const gatewayManaged = Boolean((ai as any)?.__omniGatewayFacade);
+  const modelsToTry = gatewayManaged ? [primary] : [primary, ...fallbacks.filter((m) => m !== primary)];
+  const maxRetries = gatewayManaged ? 1 : (options.maxRetriesPerModel ?? 2);
   const initialDelay = options.retryDelayMs ?? 800;
 
   let lastError: any = null;
 
-  for (const model of modelsToTry) {
+  for (const model of ai ? modelsToTry : []) {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const startedAt = Date.now();
         const config = { ...(options.config || {}) };
+        if (gatewayManaged && profile.capability === 'text') config.__omniTaskTier = profile.tier;
         if (model.startsWith("gemini-3.7")) {
           delete config.temperature;
           delete config.topP;
@@ -162,9 +248,8 @@ async function callGeminiResiliently(
           break; // Don't delay retry the same model if quota is exhausted, move to next model
         }
 
-        console.warn(
-          `[Gemini Resilient] Model ${model} attempt ${attempt + 1}/${maxRetries} failed (transient: ${isTransient}): ${errMsg.slice(0, 120)}`
-        );
+        const failure = classifyApiFailure(err, 'ai', 'gemini');
+        console.warn(`[Gemini Resilient] model=${model} attempt=${attempt + 1}/${maxRetries} transient=${isTransient} category=${failure.category} requestId=${failure.requestId}`);
 
         if (attempt < maxRetries - 1 && isTransient) {
           const waitTime = initialDelay * Math.pow(1.5, attempt);
@@ -174,7 +259,91 @@ async function callGeminiResiliently(
     }
   }
 
-  return { text: null, error: lastError?.message || "ALL_MODELS_FAILED" };
+  if (profile.capability === 'text' && !gatewayManaged) {
+    const gateway = await getHealthyGatewayClient();
+    if (gateway) {
+      try {
+        const startedAt = Date.now();
+        const result = await generateTextWithGateway({
+          tier: profile.tier as Extract<AiTaskTier, 'instant' | 'balanced' | 'deep'>,
+          contents: options.contents,
+          config: options.config,
+          client: gateway,
+          onAttempt: recordGatewayAttempt,
+          skipProviders: (ai as any)?.__omniGatewayFacade ? ['gemini'] : [],
+        });
+        const durationMs = Date.now() - startedAt;
+        recordAiLatency(profile.tier, durationMs);
+        console.info(`[AI latency] tier=${profile.tier} provider=${result.provider} model=${result.model} ms=${durationMs}`);
+        return { text: result.text };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  let failure = lastError
+    ? classifyApiFailure(lastError, 'ai', aiGatewayClient ? 'bifrost' : 'gemini')
+    : classifyApiFailure(
+        { category: aiGatewayClient ? 'gateway_unavailable' : 'auth_missing', status: 503 },
+        'ai',
+        aiGatewayClient ? 'bifrost' : 'gemini',
+      );
+  if (profile.capability === 'text' && webBridgeLane?.enabled) {
+    try {
+      const startedAt = Date.now();
+      const laneResult = await executeWithWebBridgeFallback({
+        capability: 'text',
+        enabled: true,
+        primary: async () => { throw failure; },
+        secondary: async () => {
+          const client = await getHealthyWebBridgeClient();
+          if (!client) throw { category: 'gateway_unavailable', status: 503 };
+          const route = getGatewayRoutes(profile.tier)[0];
+          const attemptStartedAt = Date.now();
+          try {
+            const response = await client.generateGemini(
+              route,
+              buildGeminiGatewayRequestBody(options.contents, options.config),
+            );
+            const text = String(response?.text || '').trim();
+            if (!text) throw { category: 'schema_invalid', status: 502 };
+            recordGatewayAttempt({
+              lane: 'web_bridge',
+              provider: 'gemini_web',
+              model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
+              capability: 'text',
+              keyAlias: 'web-bridge-local',
+              latencyMs: Date.now() - attemptStartedAt,
+              circuitState: 'closed',
+              requestId: `web_bridge_${crypto.randomUUID()}`,
+            });
+            return { text };
+          } catch (error) {
+            const bridgeFailure = classifyApiFailure(error, 'ai', 'gemini_web');
+            recordGatewayAttempt({
+              lane: 'web_bridge',
+              provider: 'gemini_web',
+              model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
+              capability: 'text',
+              keyAlias: 'web-bridge-local',
+              latencyMs: Date.now() - attemptStartedAt,
+              failureCategory: bridgeFailure.category,
+              circuitState: bridgeFailure.category === 'quota_exhausted' || bridgeFailure.category === 'rate_limited' ? 'open' : 'closed',
+              retryAfterMs: bridgeFailure.retryAfterMs,
+              requestId: bridgeFailure.requestId,
+            });
+            throw error;
+          }
+        },
+      });
+      recordAiLatency(profile.tier, Date.now() - startedAt);
+      return { text: laneResult.value.text };
+    } catch (error) {
+      failure = classifyApiFailure(error, 'ai', 'gemini_web');
+    }
+  }
+  return { text: null, error: failure.category };
 }
 
 // Health check endpoint
@@ -187,7 +356,163 @@ app.get('/api/ai/metrics', (_req, res) => {
     const samples = aiLatencySamples.get(tier as AiTaskTier) || [];
     return [tier, { samples: samples.length, p50Ms: percentile(samples, 0.5), p95Ms: percentile(samples, 0.95) }];
   }));
-  return res.json({ tiers, measuredAt: new Date().toISOString() });
+  const lanes = Object.fromEntries((['bifrost', 'web_bridge'] as const).map((lane) => {
+    const attempts = aiGatewayAttempts.filter((attempt) => attempt.lane === lane);
+    const failureCategories = attempts.reduce<Record<string, number>>((counts, attempt) => {
+      if (attempt.failureCategory) counts[attempt.failureCategory] = (counts[attempt.failureCategory] || 0) + 1;
+      return counts;
+    }, {});
+    return [lane, {
+      attempts: attempts.length,
+      successes: attempts.filter((attempt) => !attempt.failureCategory).length,
+      p50Ms: percentile(attempts.map((attempt) => attempt.latencyMs), 0.5),
+      p95Ms: percentile(attempts.map((attempt) => attempt.latencyMs), 0.95),
+      failureCategories,
+    }];
+  }));
+  return res.json({ tiers, lanes, gatewayAttempts: aiGatewayAttempts.slice(-50), measuredAt: new Date().toISOString() });
+});
+const configuredForecastCacheTtlMs = Number(process.env.FORECAST_CACHE_TTL_MS || 6 * 60 * 60 * 1_000);
+const forecastServerCache = new ForecastServerCache({
+  filePath: process.env.FORECAST_CACHE_PATH || path.join(process.cwd(), '.data', 'forecast-snapshots.json'),
+  ttlMs: Math.min(
+    24 * 60 * 60 * 1_000,
+    Math.max(60_000, Number.isFinite(configuredForecastCacheTtlMs) ? configuredForecastCacheTtlMs : 6 * 60 * 60 * 1_000),
+  ),
+  maxEntries: Number(process.env.FORECAST_CACHE_MAX_ENTRIES || 100),
+});
+
+const WebBridgeVocabularyCanarySchema = z.object({
+  cards: z.array(z.object({
+    term: z.string().min(1),
+    definition: z.string().min(1),
+    example: z.string().min(1),
+  })).min(2).max(3),
+});
+
+const WebBridgeMockSectionCanarySchema = z.object({
+  title: z.string().min(1),
+  questions: z.array(z.object({
+    id: z.string().min(1),
+    prompt: z.string().min(1),
+    answer: z.string().min(1),
+  })).min(2).max(3),
+});
+
+function logSafeAiError(label: string, error: unknown) {
+  const provider = error && typeof error === 'object' && 'provider' in error
+    ? String((error as { provider?: string }).provider || 'gemini')
+    : 'gemini';
+  const safeProvider = ['gemini', 'gemini_web', 'groq', 'brave', 'nvidia_nim', 'openrouter', 'bifrost'].includes(provider)
+    ? provider as 'gemini' | 'gemini_web' | 'groq' | 'brave' | 'nvidia_nim' | 'openrouter' | 'bifrost'
+    : 'gemini';
+  const failure = classifyApiFailure(error, 'ai', safeProvider);
+  console.error(`[${label}] provider=${failure.provider || safeProvider} category=${failure.category} requestId=${failure.requestId}`);
+  return failure;
+}
+
+app.get('/api/ai/capabilities', (_req, res) => {
+  return res.json({
+    ...describeGatewayCapabilities(process.env),
+    searchProviders: [
+      { provider: 'gemini', configured: Boolean(process.env.GEMINI_API_KEY?.trim()), citationMode: 'grounding_metadata' },
+      { provider: 'groq', configured: Boolean(process.env.GROQ_API_KEY?.trim()), citationMode: 'executed_tools' },
+      { provider: 'brave', configured: Boolean(process.env.BRAVE_SEARCH_API_KEY?.trim()), citationMode: 'search_results' },
+    ],
+  });
+});
+
+app.get('/api/ai/health', async (_req, res) => {
+  const bifrostStatus = !aiGatewayClient
+    ? 'disabled'
+    : await getHealthyGatewayClient() ? 'healthy' : 'unavailable';
+  const webBridgeStatus = !webBridgeGatewayClient
+    ? webBridgeLane?.status === 'auth_missing' ? 'auth_missing' : 'disabled'
+    : await getHealthyWebBridgeClient() ? 'healthy' : 'unavailable';
+  return res.json({
+    status: bifrostStatus,
+    checkedAt: new Date().toISOString(),
+    lanes: {
+      bifrost: { status: bifrostStatus },
+      web_bridge: {
+        status: webBridgeStatus,
+        scope: 'private_dev',
+        kind: process.env.WEB_AI_BRIDGE_KIND || 'gemini-web2api',
+      },
+    },
+  });
+});
+
+app.post('/api/internal/ai/canary/text', async (req, res) => {
+  if (!isWebBridgeCanaryAuthorized(req.header('x-omni-web-bridge-key'), process.env)) {
+    return res.sendStatus(404);
+  }
+
+  const artifact = req.body?.artifact;
+  const schema = artifact === 'vocabulary'
+    ? WebBridgeVocabularyCanarySchema
+    : artifact === 'mock_section'
+      ? WebBridgeMockSectionCanarySchema
+      : null;
+  if (!schema) return res.status(400).json({ status: 'invalid_input' });
+
+  const prompt = artifact === 'vocabulary'
+    ? 'Create exactly 2 intermediate IELTS vocabulary cards. Return JSON only: {"cards":[{"term":"...","definition":"...","example":"..."}]}.'
+    : 'Create exactly 2 IELTS Reading short-answer questions for a short academic practice section. Return JSON only: {"title":"...","questions":[{"id":"q1","prompt":"...","answer":"..."}]}.';
+  const startedAt = Date.now();
+
+  try {
+    const result = await executeWithWebBridgeFallback({
+      capability: 'text',
+      enabled: true,
+      primary: async () => {
+        throw { category: 'gateway_unavailable', status: 503 };
+      },
+      secondary: async () => {
+        const client = await getHealthyWebBridgeClient();
+        if (!client) throw { category: 'gateway_unavailable', status: 503 };
+        const route = getGatewayRoutes('balanced')[0];
+        return client.generateGemini(route, buildGeminiGatewayRequestBody(prompt, {
+          responseMimeType: 'application/json',
+        }));
+      },
+    });
+    const parsedJson = JSON.parse(String(result.value?.text || ''));
+    const validated = schema.safeParse(parsedJson);
+    if (!validated.success) throw { category: 'schema_invalid', status: 502 };
+    const itemCount = artifact === 'vocabulary'
+      ? (validated.data as z.infer<typeof WebBridgeVocabularyCanarySchema>).cards.length
+      : (validated.data as z.infer<typeof WebBridgeMockSectionCanarySchema>).questions.length;
+    recordGatewayAttempt({
+      lane: 'web_bridge',
+      provider: 'gemini_web',
+      model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
+      capability: 'text',
+      keyAlias: 'web-bridge-local',
+      latencyMs: Date.now() - startedAt,
+      circuitState: 'closed',
+      requestId: `web_bridge_canary_${crypto.randomUUID()}`,
+    });
+    return res.json({ status: 'ok', lane: result.lane, artifact, itemCount });
+  } catch (error) {
+    const failure = classifyApiFailure(error, 'ai', 'gemini_web');
+    recordGatewayAttempt({
+      lane: 'web_bridge',
+      provider: 'gemini_web',
+      model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
+      capability: 'text',
+      keyAlias: 'web-bridge-local',
+      latencyMs: Date.now() - startedAt,
+      failureCategory: failure.category,
+      circuitState: 'closed',
+      requestId: failure.requestId,
+    });
+    return res.status(failure.httpStatus >= 400 ? failure.httpStatus : 503).json({
+      status: 'unavailable',
+      category: failure.category,
+      requestId: failure.requestId,
+    });
+  }
 });
 
 const handleTutorRespond: express.RequestHandler = async (req, res) => {
@@ -245,7 +570,7 @@ const handleTutorRespond: express.RequestHandler = async (req, res) => {
     if (!envelope.success) return res.status(502).json({ error: 'AI Tutor response không hợp lệ.', status: 'unavailable' });
     return res.json(envelope.data);
   } catch (error: any) {
-    console.error("Tutor respond error:", error);
+    logSafeAiError("Tutor respond error:", error);
     return res.status(503).json({ error: error?.message || "AI Tutor unavailable", status: "unavailable" });
   }
 };
@@ -322,7 +647,7 @@ Câu hỏi của học viên: ${userLastMessage}`;
       ]
     });
   } catch (error: any) {
-    console.error("Tutor API Error:", error);
+    logSafeAiError("Tutor API Error:", error);
     res.json({
       reply: "Tôi đang tạm thời bận xử lý dữ liệu. Bạn có thể hỏi lại sau giây lát hoặc thử tra cứu trong kho từ vựng và ngữ pháp!",
       suggestedFollowUps: [
@@ -410,7 +735,7 @@ app.post("/api/fetch-url", async (req, res) => {
       url: targetUrl
     });
   } catch (error: any) {
-    console.error("Fetch URL Error:", error);
+    logSafeAiError("Fetch URL Error:", error);
     res.status(500).json({ error: error.message || "Lỗi khi trích xuất nội dung từ URL" });
   }
 });
@@ -874,7 +1199,7 @@ Hãy trả về duy nhất 1 JSON hợp lệ theo đúng cấu trúc sau:
       ]
     });
   } catch (error: any) {
-    console.error("Analyze Source Error:", error);
+    logSafeAiError("Analyze Source Error:", error);
     res.status(500).json({ error: error.message || "Lỗi phân tích nguồn học liệu" });
   }
 });
@@ -1003,7 +1328,7 @@ Trả về kết quả dưới dạng JSON:
       ]
     });
   } catch (error: any) {
-    console.error("Evaluate Writing Error:", error);
+    logSafeAiError("Evaluate Writing Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm bài Writing" });
   }
 });
@@ -1068,7 +1393,7 @@ Return JSON only: {"cards":[{"word":"...","phonetic":"/.../","pos":"...","defini
 
     return res.json({ topicId: topic.id, tier: tier.id, cards: parsed.data.cards });
   } catch (error: any) {
-    console.error('Adaptive vocab generation error:', error);
+    logSafeAiError('Adaptive vocab generation error:', error);
     return res.status(500).json({ error: 'Không thể tạo deck từ vựng thích ứng.', status: 'error' });
   }
 });
@@ -1195,7 +1520,7 @@ Hãy trả về định dạng JSON DUY NHẤT theo schema sau:
 
     res.json(parsed);
   } catch (error: any) {
-    console.error("Generate Vocab Card Error:", error);
+    logSafeAiError("Generate Vocab Card Error:", error);
     res.status(500).json({ error: error.message || "Lỗi tự động sinh thẻ từ vựng với AI" });
   }
 });
@@ -1265,7 +1590,7 @@ Hãy trả về JSON:
       tips: "Luyện phát âm theo phương pháp Shadowing với loa mẫu."
     });
   } catch (error: any) {
-    console.error("Pronunciation Eval Error:", error);
+    logSafeAiError("Pronunciation Eval Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm phát âm" });
   }
 });
@@ -1311,7 +1636,7 @@ app.post("/api/tts/synthesize", async (req, res) => {
       res.status(503).json({ status: "unavailable", fallbackProvider: "browser" });
     }
   } catch (error: any) {
-    console.error("TTS API Error:", error);
+    logSafeAiError("TTS API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi tạo audio phát âm" });
   }
 });
@@ -1403,7 +1728,7 @@ Trả về duy nhất 1 JSON hợp lệ theo format sau:
     const parsed = JSON.parse(response.text || "{}");
     res.json(parsed);
   } catch (error: any) {
-    console.error("Generate Grammar Exercise Error:", error);
+    logSafeAiError("Generate Grammar Exercise Error:", error);
     res.status(500).json({ error: error.message || "Lỗi tạo bài tập ngữ pháp" });
   }
 });
@@ -1468,7 +1793,7 @@ Trả về duy nhất 1 JSON hợp lệ:
     const parsed = JSON.parse(response.text || "{}");
     res.json(parsed);
   } catch (error: any) {
-    console.error("Evaluate Grammar Exercise Error:", error);
+    logSafeAiError("Evaluate Grammar Exercise Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm bài tập ngữ pháp" });
   }
 });
@@ -1558,7 +1883,7 @@ Trả về duy nhất 1 JSON hợp lệ theo cấu trúc:
     const parsed = JSON.parse(response.text || "{}");
     res.json(parsed);
   } catch (error: any) {
-    console.error("Diagnose Grammar Error:", error);
+    logSafeAiError("Diagnose Grammar Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chẩn đoán ngữ pháp" });
   }
 });
@@ -2345,7 +2670,7 @@ Trả về duy nhất 1 JSON hợp lệ theo cấu trúc:
 
     return res.json({ session });
   } catch (error: any) {
-    console.error("Process YouTube Error:", error);
+    logSafeAiError("Process YouTube Error:", error);
     res.status(500).json({ error: error.message || "Lỗi xử lý video YouTube" });
   }
   /* c8 ignore stop */
@@ -2412,7 +2737,7 @@ Trả về duy nhất 1 JSON hợp lệ:
     parsed.acousticStatus = "measured";
     res.json(parsed);
   } catch (error: any) {
-    console.error("Evaluate Shadowing Error:", error);
+    logSafeAiError("Evaluate Shadowing Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm bài Shadowing" });
   }
 });
@@ -2648,7 +2973,7 @@ Yêu cầu chi tiết theo từng dạng:
 
     return res.status(503).json({ error: "Gemini không trả đề Reading hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Generate Reading Error:", error);
+    logSafeAiError("Generate Reading Error:", error);
     return res.status(503).json({ error: error.message || "Gemini không tạo được đề Reading.", status: "unavailable" });
     /* c8 ignore start -- legacy fallback retained temporarily while callers migrate */
     res.json({
@@ -2828,7 +3153,7 @@ Thông số:
 
     return res.status(503).json({ error: "Gemini không trả đề Listening hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Generate Listening Error:", error);
+    logSafeAiError("Generate Listening Error:", error);
     return res.status(503).json({ error: error.message || "Gemini không tạo được đề Listening.", status: "unavailable" });
     /* c8 ignore start -- legacy fallback retained temporarily while callers migrate */
     res.json({
@@ -2961,7 +3286,7 @@ Trả về duy nhất 1 JSON:
 
     return res.status(503).json({ error: "Gemini không trả đề Writing hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Generate Writing Prompt Error:", error);
+    logSafeAiError("Generate Writing Prompt Error:", error);
     res.status(500).json({ error: error.message || "Lỗi sinh đề Writing" });
   }
 });
@@ -3077,7 +3402,7 @@ Trả về JSON:
 
     return res.status(503).json({ error: "Gemini không trả đề Speaking hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Generate Speaking Prompt Error:", error);
+    logSafeAiError("Generate Speaking Prompt Error:", error);
     res.status(500).json({ error: error.message || "Lỗi sinh đề Speaking" });
   }
 });
@@ -3279,7 +3604,7 @@ Trả về duy nhất 1 JSON hợp lệ:
       }
     });
   } catch (error: any) {
-    console.error("Evaluate Writing Error:", error);
+    logSafeAiError("Evaluate Writing Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm bài Writing" });
   }
 });
@@ -3615,7 +3940,7 @@ Hãy trả về DUY NHẤT 1 JSON object hợp lệ đúng 100% theo schema sau:
     console.warn("Essay Upgrader unavailable due to AI response format:", geminiUpgradeErr);
     return res.status(503).json({ error: geminiUpgradeErr || "Gemini không trả bản nâng cấp hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Essay Upgrader API Error:", error);
+    logSafeAiError("Essay Upgrader API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi nâng cấp bài viết IELTS" });
   }
 });
@@ -3783,7 +4108,7 @@ Trả về duy nhất JSON:
 
     return res.status(503).json({ error: "Gemini audio grader không trả kết quả Speaking hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Evaluate Speaking Error:", error);
+    logSafeAiError("Evaluate Speaking Error:", error);
     res.status(500).json({ error: error.message || "Lỗi chấm bài Speaking" });
   }
 });
@@ -4179,6 +4504,7 @@ Yêu cầu đầu ra JSON CHÍNH XÁC:
       id: `mock_${Date.now()}`,
       testTitle: testPackage.title,
       testCode: testPackage.code,
+      provenance: testPackage.provenance,
       overallBand,
       listeningBand,
       readingBand,
@@ -4210,7 +4536,7 @@ Yêu cầu đầu ra JSON CHÍNH XÁC:
       result: mockResult
     });
   } catch (error: any) {
-    console.error("Evaluate Full Mock Error:", error);
+    logSafeAiError("Evaluate Full Mock Error:", error);
     res.status(500).json({ error: error.message || "Lỗi xử lý chấm bài thi thử toàn diện" });
   }
 });
@@ -4349,7 +4675,7 @@ Generate Dr. Jonathan Vance's immediate spoken response and next question accord
 
     return res.status(503).json({ error: "Gemini examiner không trả lượt hội thoại hợp lệ.", status: "unavailable" });
   } catch (error: any) {
-    console.error("Speaking Examiner API Error:", error);
+    logSafeAiError("Speaking Examiner API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi giao tiếp Giám khảo Speaking AI" });
   }
 });
@@ -4534,7 +4860,7 @@ Please listen carefully to the attached full audio recording and generate the au
 
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Speaking Live Audio Evaluation API Error:", error);
+    logSafeAiError("Speaking Live Audio Evaluation API Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -4815,7 +5141,7 @@ Trả về DUY NHẤT 1 JSON hợp lệ theo đúng cấu trúc sau:
       mistakesForNotebook: []
     });
   } catch (error: any) {
-    console.error("Speaking Evaluation API Error:", error);
+    logSafeAiError("Speaking Evaluation API Error:", error);
     res.status(500).json({ error: error.message || "Lỗi xử lý báo cáo điểm Speaking" });
   }
 });
@@ -5034,7 +5360,7 @@ Please perform a rigorous psychometric analysis and output strict JSON according
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Diagnostic Psychometrician] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Diagnostic Psychometrician] Model ${model} failed:`, err);
       }
     }
 
@@ -5056,7 +5382,7 @@ Please perform a rigorous psychometric analysis and output strict JSON according
 
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Diagnostic Psychometrician API Error:", error);
+    logSafeAiError("Diagnostic Psychometrician API Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -5207,7 +5533,7 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Sentence Stylist] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Sentence Stylist] Model ${model} failed:`, err);
       }
     }
 
@@ -5222,7 +5548,7 @@ Please analyze errors and provide 3-tier rewrites according to the strict JSON r
     const parsed = JSON.parse(responseText);
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Sentence Stylist API Error:", error);
+    logSafeAiError("Sentence Stylist API Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -5350,7 +5676,7 @@ Please classify the distractor trap and output JSON matching the strict response
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Trap Analysis] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Trap Analysis] Model ${model} failed:`, err);
       }
     }
 
@@ -5365,7 +5691,7 @@ Please classify the distractor trap and output JSON matching the strict response
     const parsed = JSON.parse(responseText);
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Trap Analysis API Error:", error);
+    logSafeAiError("Trap Analysis API Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -5535,7 +5861,7 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Mentor Panel] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Mentor Panel] Model ${model} failed:`, err);
       }
     }
 
@@ -5555,7 +5881,7 @@ Please conduct the 3-Persona Mentor Panel evaluation and return JSON conforming 
 
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Mentor Panel API Error:", error);
+    logSafeAiError("Mentor Panel API Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -5685,7 +6011,7 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Error Tagger] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Error Tagger] Model ${model} failed:`, err);
       }
     }
 
@@ -5705,7 +6031,7 @@ Extract all mistakes, construct high-yield SRS flashcard content for each error,
 
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Intelligent Error Tagger API Error:", error);
+    logSafeAiError("Intelligent Error Tagger API Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -5867,7 +6193,7 @@ Provide 4-5 high-yield IELTS collocation pairs with correct partner and 2 distra
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Speed Drill Generator] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Speed Drill Generator] Model ${model} failed:`, err);
       }
     }
 
@@ -5884,7 +6210,7 @@ Provide 4-5 high-yield IELTS collocation pairs with correct partner and 2 distra
     parsed.timeLimitSeconds = 60;
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Speed Drill Generator Error:", error);
+    logSafeAiError("Speed Drill Generator Error:", error);
     return res.status(500).json({
       error: error.message || "Lỗi trong quá trình sinh bài tập Speed Drill.",
     });
@@ -5980,7 +6306,7 @@ Evaluate accurately and return JSON matching responseSchema.`;
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Speed Drill Evaluator] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Speed Drill Evaluator] Model ${model} failed:`, err);
       }
     }
 
@@ -5995,7 +6321,7 @@ Evaluate accurately and return JSON matching responseSchema.`;
     const parsed = JSON.parse(responseText);
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Speed Drill Evaluator Error:", error);
+    logSafeAiError("Speed Drill Evaluator Error:", error);
     return res.status(500).json({
       error: error.message || "Lỗi trong quá trình chấm điểm bài tập Speed Drill.",
     });
@@ -6189,7 +6515,7 @@ Hãy thiết kế gói bài học 4 kỹ năng IELTS hoàn chỉnh và xuất JS
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Course Designer] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Course Designer] Model ${model} failed:`, err);
       }
     }
 
@@ -6205,7 +6531,7 @@ Hãy thiết kế gói bài học 4 kỹ năng IELTS hoàn chỉnh và xuất JS
     parsed.promptVersion = "source-to-learning-v1";
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Course Designer Error:", error);
+    logSafeAiError("Course Designer Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -6322,7 +6648,7 @@ Generate the complete flashcard content conforming strictly to responseSchema wi
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Vocab Enricher] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Vocab Enricher] Model ${model} failed:`, err);
       }
     }
 
@@ -6338,7 +6664,7 @@ Generate the complete flashcard content conforming strictly to responseSchema wi
     parsed.promptVersion = "vocab-enricher-v1";
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Vocab Enricher Error:", error);
+    logSafeAiError("Vocab Enricher Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -6452,7 +6778,7 @@ Generate the complete lesson and ${count} exercises conforming strictly to respo
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Grammar Curriculum Designer] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Grammar Curriculum Designer] Model ${model} failed:`, err);
       }
     }
 
@@ -6468,7 +6794,7 @@ Generate the complete lesson and ${count} exercises conforming strictly to respo
     parsed.promptVersion = "grammar-lesson-v1";
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Grammar Curriculum Designer Error:", error);
+    logSafeAiError("Grammar Curriculum Designer Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -6595,7 +6921,7 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Audio Transcribe Engine] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Audio Transcribe Engine] Model ${model} failed:`, err);
       }
     }
 
@@ -6611,7 +6937,7 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
     parsed.promptVersion = "media-transcribe-v1";
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Audio Transcribe Engine Error:", error);
+    logSafeAiError("Audio Transcribe Engine Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -6693,7 +7019,7 @@ Generate a complete, high-quality IELTS-style practice item with promptVersion =
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Item Writer Engine] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Item Writer Engine] Model ${model} failed:`, err);
       }
     }
 
@@ -6711,7 +7037,7 @@ Generate a complete, high-quality IELTS-style practice item with promptVersion =
     parsed.questionType = questionType;
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Item Writer Error:", error);
+    logSafeAiError("Item Writer Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -6848,7 +7174,7 @@ Evaluate the submission rigorously across the 4 independent criteria and output 
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        console.warn(`[Full Grader Engine] Model ${model} failed:`, err?.message || err);
+        logSafeAiError(`[Full Grader Engine] Model ${model} failed:`, err);
       }
     }
 
@@ -6909,7 +7235,7 @@ Evaluate the submission rigorously across the 4 independent criteria and output 
 
     return res.json(parsed);
   } catch (error: any) {
-    console.error("Full Grader Error:", error);
+    logSafeAiError("Full Grader Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -7036,7 +7362,7 @@ Create the complete package now. Required root keys: id, code, title, subtitle, 
     };
     return res.json(assembled);
   } catch (error: any) {
-    console.error("Mock Assembler Error:", error);
+    logSafeAiError("Mock Assembler Error:", error);
     return res.status(500).json({
       error:
         error.message ||
@@ -7051,8 +7377,9 @@ type ServerMockBuild = {
   updatedAt: string;
   input: any;
   skills: Partial<Record<MockSkill, any>>;
+  listeningSections: Partial<Record<1 | 2 | 3 | 4, any>>;
   speakingParts: Partial<Record<MockSpeakingPart, any>>;
-  attempts: Partial<Record<MockSkill | MockSpeakingPart, number>>;
+  attempts: Partial<Record<string, number>>;
   status: MockBuildState;
   errors: Partial<Record<MockSkill, string[]>>;
 };
@@ -7062,6 +7389,7 @@ const MOCK_BUILD_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_ACTIVE_MOCK_BUILDS = 50;
 
 const MOCK_SKILLS: MockSkill[] = ['listening', 'reading', 'writing', 'speaking'];
+const MOCK_LISTENING_SECTIONS = [1, 2, 3, 4] as const;
 const MOCK_SPEAKING_PARTS: MockSpeakingPart[] = ['part1', 'part2', 'part3'];
 
 function touchMockBuild(build: ServerMockBuild) {
@@ -7283,13 +7611,17 @@ async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild,
     try {
       const candidate = JSON.parse(result.text);
       const validation = validateSpeakingPart(part, candidate);
-      if (validation.ready) {
+      const sourcePart = ({ speaking_part1: 'part1', speaking_part2: 'part2', speaking_part3: 'part3' } as const)[build.input.sourceItem?.skill as 'speaking_part1' | 'speaking_part2' | 'speaking_part3'];
+      const sourceErrors = validation.ready && sourcePart === part
+        ? validateMockSourcePreservation('speaking', { [part]: validation.data }, build.input.sourceItem)
+        : [];
+      if (validation.ready && sourceErrors.length === 0) {
         build.speakingParts[part] = validation.data;
         touchMockBuild(build);
         return { part, data: validation.data, validation, attempts: attempt, reused: false };
       }
-      lastErrors = validation.errors;
-      repair = ` Previous ${part} failed schema validation: ${validation.errors.join(' ')} Return only a corrected ${part} object.`;
+      lastErrors = [...validation.errors, ...sourceErrors];
+      repair = ` Previous ${part} failed validation: ${lastErrors.join(' ')} Preserve the Live Hub prompt exactly when required. Return only a corrected ${part} object.`;
     } catch {
       lastErrors = [`Speaking ${part}: JSON không hợp lệ.`];
       repair = ` Previous ${part} was invalid JSON. Return only one valid ${part} object.`;
@@ -7360,11 +7692,12 @@ async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill:
     try {
       const section = normalizeMockSkill(skill, JSON.parse(result.text));
       const validation = validateMockSkill(skill, section);
-      if (validation.ready) return { section, validation, attempts: attempt + 1, failedParts: [], readyParts: [] };
-      lastErrors = validation.errors;
+      const sourceErrors = validation.ready ? validateMockSourcePreservation(skill, section, build.input.sourceItem) : [];
+      if (validation.ready && sourceErrors.length === 0) return { section, validation, attempts: attempt + 1, failedParts: [], readyParts: [] };
+      lastErrors = [...validation.errors, ...sourceErrors];
       lastCount = validation.count;
-      lastCode = validation.code;
-      repair = ` Previous output failed validation: ${validation.errors.join(' ')} Return the entire corrected ${skill} object.`;
+      lastCode = sourceErrors.length ? 'schema_invalid' : validation.code;
+      repair = ` Previous output failed validation: ${lastErrors.join(' ')} Preserve the Live Hub prompt exactly when required. Return the entire corrected ${skill} object.`;
     } catch (error: any) {
       lastErrors = [error?.message || 'INVALID_JSON'];
       repair = ' Previous output was invalid JSON. Return one complete valid JSON object.';
@@ -7384,19 +7717,31 @@ function assembleMockBuild(build: ServerMockBuild) {
       ? `Derived practice with provenance: ${build.input.sourceItem.groundingSourceUrl}`
       : 'Original AI-generated practice content. Not an official IELTS test.',
     estimatedMinutes: 165,
+    provenance: build.input.provenance ? {
+      ...build.input.provenance,
+      sourceArtifactId: build.input.sourceArtifactId,
+    } : undefined,
     ...build.skills,
   };
-  const validation = validateMockPackage(fullPackage);
+  const baseValidation = validateMockPackage(fullPackage);
+  const sourceErrors = MOCK_SKILLS.flatMap((skill) =>
+    validateMockSourcePreservation(skill, build.skills[skill], build.input.sourceItem),
+  );
+  const validation = {
+    ...baseValidation,
+    ready: baseValidation.ready && sourceErrors.length === 0,
+    errors: [...baseValidation.errors, ...sourceErrors],
+  };
   return { fullPackage, validation };
 }
 
-app.post('/api/mock/builds', (req, res) => {
+function createServerMockBuild(input: any): ServerMockBuild {
   pruneMockBuilds();
   const id = `mock_build_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
   const now = new Date().toISOString();
-  const resumeSkills = req.body?.resumeSkills && typeof req.body.resumeSkills === 'object' ? req.body.resumeSkills : {};
-  const resumeSpeakingParts = req.body?.resumeSpeakingParts && typeof req.body.resumeSpeakingParts === 'object'
-    ? req.body.resumeSpeakingParts
+  const resumeSkills = input?.resumeSkills && typeof input.resumeSkills === 'object' ? input.resumeSkills : {};
+  const resumeSpeakingParts = input?.resumeSpeakingParts && typeof input.resumeSpeakingParts === 'object'
+    ? input.resumeSpeakingParts
     : {};
   const validResumeSkills: Partial<Record<MockSkill, any>> = {};
   for (const skill of MOCK_SKILLS) {
@@ -7412,19 +7757,31 @@ app.post('/api/mock/builds', (req, res) => {
     id,
     createdAt: now,
     updatedAt: now,
-    input: req.body || {},
+    input: input || {},
     skills: validResumeSkills,
+    listeningSections: {},
     speakingParts: validSpeakingParts,
     attempts: {},
     status: 'draft',
     errors: {},
   };
   mockBuilds.set(id, build);
-  return res.status(201).json({
-    id,
+  return build;
+}
+
+function publicMockBuildSummary(build: ServerMockBuild) {
+  return {
+    id: build.id,
     status: build.status,
-    skillStates: Object.fromEntries(MOCK_SKILLS.map(skill => [skill, validResumeSkills[skill] ? 'ready' : 'pending'])),
+    skillStates: Object.fromEntries(MOCK_SKILLS.map(skill => [skill, build.skills[skill] ? 'ready' : 'pending'])),
     createdAt: build.createdAt,
+  };
+}
+
+app.post('/api/mock/builds', (req, res) => {
+  const build = createServerMockBuild(req.body || {});
+  return res.status(201).json({
+    ...publicMockBuildSummary(build),
   });
 });
 
@@ -7616,37 +7973,48 @@ app.post('/api/mock/builds/:id/finalize', (req, res) => {
 
 app.post("/api/mock/assemble-full-package", handleCreateMockBuild);
 
-function buildForecastSearchQuery(input: { skill?: string; council?: string; customQuery?: string; timeframe?: string }) {
-  const customQuery = String(input.customQuery || '').trim();
-  if (customQuery) return customQuery;
-  const skillLabels: Record<string, string> = {
-    writing_task2: 'IELTS Writing Task 2 recent reported questions',
-    writing_task1: 'IELTS Writing Task 1 recent reported questions',
-    speaking_part1: 'IELTS Speaking Part 1 recent reported questions',
-    speaking_part2: 'IELTS Speaking Part 2 cue card recent reports',
-    speaking_part3: 'IELTS Speaking Part 3 recent reported questions',
-  };
-  const councilLabels: Record<string, string> = {
-    idp_vietnam: 'IDP Vietnam',
-    bc_vietnam: 'British Council Vietnam',
-    both_vietnam: 'IDP and British Council Vietnam',
-    international: 'IDP and British Council international',
-  };
-  const period = input.timeframe === 'week' ? 'this week' : `latest ${new Date().getUTCFullYear()}`;
-  return `${skillLabels[input.skill || ''] || 'IELTS recent reported Speaking and Writing questions'} ${councilLabels[input.council || ''] || 'Vietnam and international'} ${period}`;
-}
-
 function getGroqApiKey(request?: express.Request) {
   return request?.header('x-groq-api-key')?.trim() || process.env.GROQ_API_KEY?.trim() || '';
 }
 
+function getBraveSearchApiKey() {
+  return process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
+}
+
 const handleForecastRefresh: express.RequestHandler = async (req, res) => {
   const retrievedAt = new Date().toISOString();
-  const searchTopicQuery = buildForecastSearchQuery(req.body || {});
-  const ai = getGeminiClient(req);
-  const groqApiKey = getGroqApiKey(req);
+  const searchTopicQueries = buildForecastSearchQueries(req.body || {}, new Date(retrievedAt));
+  const searchTopicQuery = searchTopicQueries[0];
+  const forecastCacheKey = crypto
+    .createHash('sha256')
+    .update(JSON.stringify({
+      skill: req.body?.skill || 'all',
+      council: req.body?.council || 'all',
+      timeframe: req.body?.timeframe || 'latest',
+      customQuery: String(req.body?.customQuery || '').trim().toLowerCase(),
+    }))
+    .digest('hex');
+  const cachedForecast = await forecastServerCache.getFresh(forecastCacheKey);
+  if (cachedForecast) return res.json(cachedForecast);
+  const hasGeminiByok = Boolean(req.header('x-gemini-api-key')?.trim());
+  const hasGroqByok = Boolean(req.header('x-groq-api-key')?.trim());
+  const gateway = await getHealthyGatewayClient();
+  const shouldUseDirectGemini = shouldUseDirectGroundedProvider({
+    hasByok: hasGeminiByok,
+    gatewayEnabled: gatewayCapabilities.enabled,
+    gatewayHealthy: Boolean(gateway),
+  });
+  const shouldUseDirectGroq = shouldUseDirectGroundedProvider({
+    hasByok: hasGroqByok,
+    gatewayEnabled: gatewayCapabilities.enabled,
+    gatewayHealthy: Boolean(gateway),
+  });
+  const directGeminiKey = req.header('x-gemini-api-key')?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const ai = shouldUseDirectGemini ? createDirectGeminiClient(directGeminiKey) : null;
+  const groqApiKey = shouldUseDirectGroq ? getGroqApiKey(req) : '';
+  const braveSearchApiKey = getBraveSearchApiKey();
 
-  const prompt = `Search for recent IELTS Writing or Speaking question reports matching this query: "${searchTopicQuery}".
+  const buildPrompt = (query: string) => `Search for IELTS Writing or Speaking reports or preparation sources matching this query: "${query}".
 Return JSON only. Keep the response compact: do not create model answers, vocabulary lists, PEEL outlines, dates, frequency scores, or claims that are not explicitly supported by a direct search result.
 Schema:
 {
@@ -7668,14 +8036,86 @@ Schema:
     "sourceUrl": "direct supporting URL"
   }]
 }
-A verified_report must have a direct source that explicitly supports that exact prompt and date. A user recall must be reported_recall. Everything else must be forecast.`;
+A verified_report must have a direct source that explicitly supports that exact prompt and date. A user recall must be reported_recall. Everything else must be forecast.
+If no recent recall is supported, use a real question from an official IELTS preparation page as a forecast item instead of inventing a recall. Copy sourceUrl exactly from a Web Search result, omit every unsupported item, and return at least one forecast item whenever a suitable official preparation source exists.`;
 
-  const runGeminiGrounded = async (model: string) => {
+  const buildEvidenceSearchPrompt = (query: string) => `Use Web Search to find direct public pages relevant to this IELTS query: "${query}".
+Prioritize official IELTS preparation pages, dated recall reports, and pages that contain the reported prompt. Return a short plain-text summary; the application will use executed tool results as the only citation evidence.`;
+
+  const synthesizeEvidence = async (evidence: ForecastEvidenceBundle) => {
+    try {
+      return await synthesizeForecastFromEvidence({
+        evidence,
+        generate: async (prompt) => {
+      const bridge = await getHealthyWebBridgeClient();
+      if (bridge) {
+        const route = getGatewayRoutes('balanced')[0];
+        const startedAt = Date.now();
+        try {
+          const response = await bridge.generateGemini(
+            route,
+            buildGeminiGatewayRequestBody(prompt, { responseMimeType: 'application/json' }),
+          );
+          const text = String(response?.text || '').trim();
+          if (!text) throw { category: 'schema_invalid', status: 502 };
+          recordGatewayAttempt({
+            lane: 'web_bridge',
+            provider: 'gemini_web',
+            model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
+            capability: 'text',
+            keyAlias: 'web-bridge-local',
+            latencyMs: Date.now() - startedAt,
+            circuitState: 'closed',
+            requestId: `forecast_synthesis_${crypto.randomUUID()}`,
+          });
+          return text;
+        } catch (error) {
+          const failure = classifyApiFailure(error, 'forecast', 'gemini_web');
+          recordGatewayAttempt({
+            lane: 'web_bridge',
+            provider: 'gemini_web',
+            model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
+            capability: 'text',
+            keyAlias: 'web-bridge-local',
+            latencyMs: Date.now() - startedAt,
+            failureCategory: failure.category,
+            circuitState: failure.category === 'quota_exhausted' || failure.category === 'rate_limited' ? 'open' : 'closed',
+            retryAfterMs: failure.retryAfterMs,
+            requestId: failure.requestId,
+          });
+        }
+      }
+
+      const textResult = await callGeminiResiliently(getGeminiClient(req), {
+        taskTier: 'balanced',
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+        maxRetriesPerModel: 1,
+      });
+      if (!textResult.text) {
+        throw { category: textResult.error || 'all_providers_exhausted', status: 503 };
+      }
+          return textResult.text;
+        },
+      });
+    } catch (error) {
+      const issues = error && typeof error === 'object' && 'issues' in error
+        ? (error as { issues?: Array<{ path?: PropertyKey[]; code?: string }> }).issues
+          ?.slice(0, 12)
+          .map((issue) => `${(issue.path || []).join('.')}:${issue.code || 'invalid'}`)
+          .join(',')
+        : undefined;
+      console.warn(`[Forecast synthesis] evidenceProvider=${evidence.provider} category=${classifyApiFailure(error, 'forecast', evidence.provider).category}${issues ? ` issues=${issues}` : ''}`);
+      throw error;
+    }
+  };
+
+  const runGeminiGrounded = async (model: string, query: string) => {
     if (!ai) throw Object.assign(new Error('NO_AI_CLIENT: Gemini not configured'), { code: 'NO_AI_CLIENT' });
     const geminiResponse = await retryProviderCall(
       () => ai.models.generateContent({
         model,
-        contents: prompt,
+        contents: buildPrompt(query),
         config: { tools: [{ googleSearch: {} }], responseMimeType: 'application/json' },
       }),
       { context: 'forecast', provider: 'gemini', maxAttempts: 2, baseDelayMs: 750 },
@@ -7684,15 +8124,10 @@ A verified_report must have a direct source that explicitly supports that exact 
     const groundingMetadata = candidate?.groundingMetadata as any;
     const searchQueries: string[] = groundingMetadata?.webSearchQueries?.length
       ? groundingMetadata.webSearchQueries
-      : [searchTopicQuery];
-    const uniqueSources = new Map<string, { title: string; url: string }>();
-    for (const chunk of groundingMetadata?.groundingChunks || []) {
-      const url = chunk?.web?.uri;
-      if (!url || uniqueSources.has(url)) continue;
-      let fallbackTitle = 'Nguồn tham khảo';
-      try { fallbackTitle = new URL(url).hostname; } catch { /* keep safe public label */ }
-      uniqueSources.set(url, { title: chunk?.web?.title || fallbackTitle, url });
-    }
+      : [query];
+    const uniqueSources = new Map(
+      extractGeminiGroundingSources(groundingMetadata).map((source) => [source.url, source]),
+    );
     return normalizeForecastGroundingPayload({
       raw: JSON.parse(geminiResponse.text || '{}'),
       groundingSources: [...uniqueSources.values()],
@@ -7702,52 +8137,156 @@ A verified_report must have a direct source that explicitly supports that exact 
   };
 
   try {
-    const groundedFallbackAttempts = AI_TASK_PROFILES.grounded.fallbacks.map((model) => {
-      if (model.startsWith('gemini-')) {
-        return {
-          provider: 'gemini' as const,
-          model,
-          run: () => runGeminiGrounded(model),
-        };
+    const runPrimaryForecast = async () => {
+      const directAttempts: Array<{ provider: 'gemini' | 'groq' | 'brave'; model: string; run: () => Promise<any> }> = [];
+      if (ai) {
+        for (const model of [AI_TASK_PROFILES.grounded.model, ...AI_TASK_PROFILES.grounded.fallbacks.filter((item) => item.startsWith('gemini-'))]) {
+          directAttempts.push({
+            provider: 'gemini',
+            model,
+            run: () => runForecastQueryVariants(
+              searchTopicQueries,
+              (query) => runGeminiGrounded(model, query),
+              (error) => classifyApiFailure(error, 'forecast', 'gemini').category,
+            ).then((result) => result.value),
+          });
+        }
       }
-      if (model === 'groq/compound-mini' || model === 'groq/compound') {
-        return {
-          provider: 'groq' as const,
-          model,
-          run: () => retryProviderCall(
-            () => requestGroqGroundedForecast({
-              apiKey: groqApiKey,
-              model,
-              prompt,
-              originalQuery: searchTopicQuery,
-              retrievedAt,
-            }),
-            { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
-          ),
-        };
+      if (groqApiKey) {
+        for (const model of ['groq/compound-mini', 'groq/compound'] as GroqGroundedModel[]) {
+          directAttempts.push({
+            provider: 'groq',
+            model,
+            run: () => runForecastQueryVariants(
+              searchTopicQueries,
+              (query) => retryProviderCall(
+                () => requestGroqForecastEvidence({
+                  apiKey: groqApiKey,
+                  model,
+                  prompt: buildEvidenceSearchPrompt(query),
+                  originalQuery: query,
+                  retrievedAt,
+                }),
+                { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
+              ),
+              (error) => classifyApiFailure(error, 'forecast', 'groq').category,
+            ).then((result) => synthesizeEvidence(result.value)),
+          });
+        }
       }
-      throw new Error(`Unsupported grounded fallback model: ${model}`);
-    });
+      if (braveSearchApiKey) {
+        directAttempts.push({
+          provider: 'brave',
+          model: 'brave-web-search',
+          run: () => runForecastQueryVariants(
+            searchTopicQueries,
+            (query) => retryProviderCall(
+              () => requestBraveForecastEvidence({
+                apiKey: braveSearchApiKey,
+                query,
+                retrievedAt,
+              }),
+              { context: 'forecast', provider: 'brave', maxAttempts: 2, baseDelayMs: 750 },
+            ),
+            (error) => classifyApiFailure(error, 'forecast', 'brave').category,
+          ).then((result) => synthesizeEvidence(result.value)),
+        });
+      }
 
-    const routed = await groundedProviderRouter.execute({
-      primary: {
-        provider: 'gemini',
-        model: AI_TASK_PROFILES.grounded.model,
-        run: () => runGeminiGrounded(AI_TASK_PROFILES.grounded.model),
-      },
-      fallbacks: groundedFallbackAttempts,
-    });
-    return res.json({
+      const gatewayAttempts = gateway ? getGatewayRoutes('grounded').map((route: AiGatewayRoute) => ({
+        lane: 'bifrost' as const,
+        provider: route.provider as 'gemini' | 'groq',
+        model: route.model,
+        run: async () => {
+          const startedAt = Date.now();
+          try {
+            const { value } = await runForecastQueryVariants(
+              searchTopicQueries,
+              (query) => route.provider === 'groq'
+                ? requestGatewayGroqForecastEvidence({
+                    client: gateway,
+                    route,
+                    prompt: buildEvidenceSearchPrompt(query),
+                    originalQuery: query,
+                    retrievedAt,
+                  }).then(synthesizeEvidence)
+                : requestGatewayGroundedForecast({
+                    client: gateway,
+                    route,
+                    prompt: buildPrompt(query),
+                    originalQuery: query,
+                    retrievedAt,
+                  }),
+              (error) => classifyApiFailure(error, 'forecast', route.provider).category,
+            );
+            recordGatewayAttempt({
+              lane: 'bifrost',
+              provider: route.provider,
+              model: route.modelAlias,
+              capability: route.capability,
+              keyAlias: 'bifrost-managed',
+              latencyMs: Date.now() - startedAt,
+              circuitState: 'closed',
+              requestId: `forecast_${crypto.randomUUID()}`,
+            });
+            return value;
+          } catch (error) {
+            const failure = classifyApiFailure(error, 'forecast', route.provider);
+            recordGatewayAttempt({
+              lane: 'bifrost',
+              provider: route.provider,
+              model: route.modelAlias,
+              capability: route.capability,
+              keyAlias: 'bifrost-managed',
+              latencyMs: Date.now() - startedAt,
+              failureCategory: failure.category,
+              circuitState: failure.category === 'quota_exhausted' || failure.category === 'rate_limited' ? 'open' : 'closed',
+              retryAfterMs: failure.retryAfterMs,
+              requestId: failure.requestId,
+            });
+            throw failure;
+          }
+        },
+      })) : [];
+      const attempts = orderForecastProviderAttempts([...directAttempts, ...gatewayAttempts]);
+      if (!attempts.length) {
+        throw { category: gatewayCapabilities.enabled ? 'gateway_unavailable' : 'auth_missing', status: 503 };
+      }
+      return groundedProviderRouter.execute({
+        primary: attempts[0],
+        fallbacks: attempts.slice(1),
+      });
+    };
+
+    const routed = await runPrimaryForecast();
+    const response = {
       ...routed.value,
+      ...(routed.lane ? { gatewayLane: routed.lane } : {}),
       provider: routed.provider,
       model: routed.model,
       fallbackReason: routed.fallbackReason,
+      cacheStatus: 'miss' as const,
+    };
+    await forecastServerCache.set(forecastCacheKey, response).catch(() => {
+      console.warn('[Forecast cache] write_failed');
     });
+    return res.json(response);
   } catch (error) {
-    const failure = (error && typeof error === 'object' && 'category' in error)
+    let failure = (error && typeof error === 'object' && 'category' in error && 'httpStatus' in error)
       ? error as ReturnType<typeof classifyApiFailure>
-      : classifyApiFailure(error, 'forecast');
+      : classifyApiFailure(error, 'forecast', gatewayCapabilities.enabled ? 'bifrost' : 'gemini');
+    if (gatewayCapabilities.enabled && ['auth_missing', 'auth_invalid', 'rate_limited', 'quota_exhausted', 'provider_overloaded', 'network_failed'].includes(failure.category)) {
+      failure = classifyApiFailure({ category: 'all_providers_exhausted', status: 503 }, 'forecast', 'bifrost');
+    }
     console.warn(`[Forecast Grounding] provider=${failure.provider || 'gemini'} category=${failure.category} requestId=${failure.requestId}`);
+    const staleSnapshot = await forecastServerCache.getStale(forecastCacheKey);
+    if (staleSnapshot) {
+      return res.json({
+        ...staleSnapshot,
+        error: failure.messageVi,
+        failure,
+      });
+    }
     return res.status(failure.httpStatus).json({
       status: 'unavailable',
       forecastItems: [],
@@ -7767,39 +8306,85 @@ app.post('/api/forecast/refresh', handleForecastRefresh);
 app.post('/api/gemini/forecast-grounding', handleForecastRefresh);
 app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/speaking-live-audio-evaluation'));
 
-app.post('/api/live-hub/items/:id/practice', (req, res) => {
-  const item = req.body?.item;
-  if (!item || String(item.id || req.params.id) !== req.params.id) {
-    return res.status(400).json({ error: 'Thiếu Live Hub item hợp lệ.' });
+const LiveHubArtifactItemSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  skill: z.enum(['writing_task1', 'writing_task2', 'speaking_part1', 'speaking_part2', 'speaking_part3']),
+  promptStatement: z.string().min(1),
+  evidenceType: z.enum(['verified_report', 'reported_recall', 'forecast', 'derived_practice']).default('forecast'),
+  groundingSourceTitle: z.string().optional(),
+  groundingSourceUrl: z.string().url().optional(),
+  citations: z.array(z.object({ claimId: z.string(), title: z.string(), url: z.string().url(), snippet: z.string().optional() })).optional(),
+}).passthrough();
+
+function parseLiveHubArtifactItem(req: express.Request, res: express.Response) {
+  const parsed = LiveHubArtifactItemSchema.safeParse(req.body?.item);
+  if (!parsed.success || parsed.data.id !== req.params.id) {
+    res.status(400).json({ error: 'Thiếu Live Hub item hợp lệ.', code: 'LIVE_HUB_ITEM_INVALID' });
+    return null;
   }
-  return res.status(201).json({
+  const item = parsed.data;
+  const citationUrls = [...new Set((item.citations || []).map((citation) => citation.url))];
+  if (item.evidenceType === 'verified_report' && !item.groundingSourceUrl && citationUrls.length === 0) {
+    res.status(422).json({
+      error: 'Item chưa có URL trực tiếp nên không thể dùng nhãn verified_report.',
+      code: 'PROVENANCE_REQUIRED',
+    });
+    return null;
+  }
+  return {
+    item,
+    provenance: {
+      sourceItemId: item.id,
+      evidenceType: item.evidenceType,
+      sourceTitle: item.groundingSourceTitle || null,
+      sourceUrl: item.groundingSourceUrl || citationUrls[0] || null,
+      citationUrls,
+      retrievedAt: req.body?.retrievedAt || null,
+    },
+  };
+}
+
+app.post('/api/live-hub/items/:id/practice', (req, res) => {
+  const parsed = parseLiveHubArtifactItem(req, res);
+  if (!parsed) return;
+  const { item, provenance } = parsed;
+  const artifact = {
     id: `practice_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
     kind: 'derived_practice',
     skill: item.skill,
     prompt: item.promptStatement,
-    provenance: {
-      sourceItemId: req.params.id,
-      evidenceType: item.evidenceType || 'forecast',
-      sourceUrl: item.groundingSourceUrl || null,
-      retrievedAt: item.retrievedAt || null,
-    },
-  });
+    sourceItem: item,
+    provenance,
+    createdAt: new Date().toISOString(),
+  };
+  return res.status(201).json({ artifact });
 });
 
-app.post('/api/live-hub/items/:id/mock-section', (req, res) => {
-  const item = req.body?.item;
-  if (!item || String(item.id || req.params.id) !== req.params.id) {
-    return res.status(400).json({ error: 'Thiếu Live Hub item hợp lệ.' });
-  }
-  return res.status(201).json({
+const handleCreateLiveHubMock: express.RequestHandler = (req, res) => {
+  const parsed = parseLiveHubArtifactItem(req, res);
+  if (!parsed) return;
+  const { item, provenance } = parsed;
+  const artifact = {
     id: `mock_section_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
     kind: 'derived_mock_section',
     skill: item.skill,
     sourceItem: item,
     requiresPreview: !['verified_report', 'reported_recall'].includes(item.evidenceType),
-    provenance: { sourceItemId: req.params.id, sourceUrl: item.groundingSourceUrl || null },
+    provenance,
+    createdAt: new Date().toISOString(),
+  };
+  const mockBuild = createServerMockBuild({
+    targetBand: req.body?.targetBand || 7,
+    sourceItem: item,
+    sourceArtifactId: artifact.id,
+    provenance,
   });
-});
+  return res.status(201).json({ artifact, mockBuild: publicMockBuildSummary(mockBuild) });
+};
+
+app.post('/api/live-hub/items/:id/mock', handleCreateLiveHubMock);
+app.post('/api/live-hub/items/:id/mock-section', handleCreateLiveHubMock);
 
 app.patch('/api/media/transcripts/:id', (req, res) => {
   const segments = req.body?.segments;
@@ -7895,7 +8480,7 @@ Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] 
           }
         }
       } catch (err: any) {
-        console.warn("[Mock Synthesizer AI Recommendation fallback]:", err?.message || err);
+        logSafeAiError("[Mock Synthesizer AI Recommendation fallback]:", err);
       }
     }
 
@@ -7914,7 +8499,7 @@ Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] 
       recommendedNextStepsVi,
     });
   } catch (error: any) {
-    console.error("Mock Synthesizer Error:", error);
+    logSafeAiError("Mock Synthesizer Error:", error);
     return res.status(500).json({
       error:
         error.message ||

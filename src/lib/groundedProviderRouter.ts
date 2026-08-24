@@ -2,6 +2,7 @@ import type { ApiFailure, ApiFailureCategory } from '../types';
 import { classifyApiFailure, type AiProvider } from './apiFailure';
 
 type ProviderAttempt<T> = {
+  lane?: 'bifrost';
   provider: AiProvider;
   model: string;
   run: () => Promise<T>;
@@ -25,6 +26,7 @@ const FALLBACK_CATEGORIES = new Set<ApiFailureCategory>([
   'provider_overloaded',
   'network_failed',
   'schema_invalid',
+  'no_results',
 ]);
 
 const pacificFormatter = new Intl.DateTimeFormat('en-US', {
@@ -101,6 +103,7 @@ export class GroundedProviderRouter {
     fallbacks?: ProviderAttempt<T>[];
   }): Promise<{
     value: T;
+    lane?: 'bifrost';
     provider: AiProvider;
     model: string;
     fallbackReason?: ApiFailureCategory;
@@ -114,7 +117,7 @@ export class GroundedProviderRouter {
 
     for (let index = 0; index < attempts.length; index += 1) {
       const attempt = attempts[index];
-      const circuitKey = `${attempt.provider}:${attempt.model}`;
+      const circuitKey = `${attempt.lane || 'direct'}:${attempt.provider}:${attempt.model}`;
       const blockedUntil = this.blockedUntil.get(circuitKey) || 0;
       let failure: ApiFailure;
 
@@ -129,6 +132,7 @@ export class GroundedProviderRouter {
         try {
           return {
             value: await attempt.run(),
+            ...(attempt.lane ? { lane: attempt.lane } : {}),
             provider: attempt.provider,
             model: attempt.model,
             fallbackReason: index > 0 ? primaryFailure?.category : undefined,

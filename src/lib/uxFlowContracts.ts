@@ -76,7 +76,7 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     id: 'live-hub.refresh', module: 'live-hub', owner: 'ForecastLiveHub',
     precondition: 'Live Hub is visible', trigger: 'Learner requests a grounded refresh',
     expectedTransition: 'idle -> loading -> fresh|unavailable', sideEffect: 'POST /api/forecast/refresh and persist verified snapshot',
-    errorStates: ['auth_missing', 'quota_exhausted', 'network_failed', 'schema_invalid'], evidence: ['e2e/live-hub.spec.ts'],
+    errorStates: ['auth_missing', 'quota_exhausted', 'gateway_unavailable', 'all_providers_exhausted', 'network_failed', 'schema_invalid'], evidence: ['e2e/live-hub.spec.ts'],
   },
   {
     id: 'live-hub.retry', module: 'live-hub', owner: 'ForecastLiveHub',
@@ -92,8 +92,8 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
   },
   {
     id: 'live-hub.open-quota', module: 'live-hub', owner: 'ForecastLiveHub',
-    precondition: 'Gemini quota is exhausted', trigger: 'Learner opens quota management',
-    expectedTransition: 'quota alert -> external quota page', sideEffect: 'Open Google AI Studio in a new tab',
+    precondition: 'A provider or the free gateway pool is exhausted', trigger: 'Learner opens quota management',
+    expectedTransition: 'quota alert -> provider quota page|Profile gateway settings', sideEffect: 'Open the matching provider page or navigate to Profile without exposing keys',
     errorStates: ['popup_blocked'], evidence: ['e2e/live-hub.spec.ts'],
   },
   {
@@ -101,6 +101,20 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     precondition: 'A sourced item already has generated enrichment', trigger: 'Learner expands or collapses analysis',
     expectedTransition: 'collapsed <-> expanded', sideEffect: 'Update local presentation state',
     errorStates: [], evidence: ['e2e/live-hub.spec.ts'],
+  },
+  {
+    id: 'live-hub.practice', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'A sourced Live Hub item is visible', trigger: 'Learner creates a single-skill practice artifact',
+    expectedTransition: 'sourced item -> persisted Practice artifact -> matching skill lesson',
+    sideEffect: 'POST /api/live-hub/items/:id/practice and persist provenance',
+    errorStates: ['provenance_required', 'artifact_unavailable'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
+  },
+  {
+    id: 'live-hub.mock', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'A sourced Live Hub item is visible', trigger: 'Learner creates a Full Mock from the source',
+    expectedTransition: 'sourced item -> persisted MockBuild draft -> Mock Orchestrator',
+    sideEffect: 'POST /api/live-hub/items/:id/mock and persist source provenance',
+    errorStates: ['provenance_required', 'build_unavailable'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
   },
   {
     id: 'mock.exam', module: 'mock', owner: 'MockTestView',

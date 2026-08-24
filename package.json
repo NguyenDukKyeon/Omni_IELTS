@@ -14,6 +14,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
+    "test:web-bridge:live": "node scripts/web-bridge-live-canary.mjs",
+    "setup:web-bridge": "node scripts/setup-web-bridge-key.mjs",
     "check:ux-contracts": "tsx scripts/check-ux-contracts.ts",
     "check:beta": "node scripts/public-beta-gate.mjs",
     "check:release": "node scripts/public-beta-gate.mjs"
