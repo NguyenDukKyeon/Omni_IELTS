@@ -33,7 +33,8 @@ export function ensureWebBridgeEnv(envPath = resolve(process.cwd(), '.env')) {
   changed = upsert(lines, 'WEB_AI_BRIDGE_KIND', 'gemini-web2api', true) || changed;
   changed = upsert(lines, 'WEB_AI_BRIDGE_BASE_URL', 'http://gemini-web2api:8081/v1', true) || changed;
   changed = upsert(lines, 'WEB_AI_BRIDGE_API_KEY', localKey, true) || changed;
-  changed = upsert(lines, 'WEB_AI_BRIDGE_MODEL', 'gemini-3.6-flash', true) || changed;
+  changed = upsert(lines, 'WEB_AI_BRIDGE_MODEL', 'gemini-3.1-pro') || changed;
+  changed = upsert(lines, 'WEB_AI_BRIDGE_PRIORITY', 'prefer_deep') || changed;
 
   if (changed) writeFileSync(envPath, `${lines.join(newline)}${newline}`, 'utf8');
   return { createdKey: !hasKey, changed };

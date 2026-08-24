@@ -594,6 +594,8 @@ export interface MediaShadowingEvaluation {
   swallowedWords?: string[];
   stressHighlights?: Array<{ word: string; isCorrect: boolean; tip?: string }>;
   actionableAdvice?: string;
+  acousticStatus?: 'measured' | 'unavailable';
+  telemetry?: SpeakingTelemetry;
 }
 
 export interface MediaExtractedVocab {
@@ -639,6 +641,7 @@ export type MediaImportFailureCategory =
   | 'runtime_missing'
   | 'provider_timeout'
   | 'audio_too_large'
+  | 'video_too_long'
   | 'ai_quota_exhausted'
   | 'transcript_invalid'
   | 'provider_failed';

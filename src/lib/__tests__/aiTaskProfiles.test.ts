@@ -22,8 +22,14 @@ describe('AI task profiles', () => {
   });
 
   it('keeps text fallbacks on zero-cost official API routes after removing Kira', () => {
-    expect(AI_TASK_PROFILES.balanced.fallbackChain).toHaveLength(3);
+    expect(AI_TASK_PROFILES.balanced.fallbackChain).toHaveLength(4);
     expect(JSON.stringify(AI_TASK_PROFILES.balanced.fallbackChain)).not.toContain('"kira"');
+    expect(AI_TASK_PROFILES.balanced.fallbackChain.at(-3)).toMatchObject({
+      provider: 'groq',
+      model: 'openai/gpt-oss-120b',
+      capability: 'text',
+      costClass: 'free',
+    });
     expect(AI_TASK_PROFILES.balanced.fallbackChain.at(-2)).toMatchObject({
       provider: 'nvidia_nim',
       capability: 'text',

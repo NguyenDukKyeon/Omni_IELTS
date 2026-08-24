@@ -31,6 +31,7 @@ import {
 import { transcribeAudioAndSegmentApi } from '../../services/mediaService';
 import { segmentUntimedTranscript } from '../../lib/mediaImport';
 import { parseTimedCaptionText } from '../../lib/transcriptNormalizer';
+import { putMediaAudioArtifact } from '../../lib/mediaArtifactStore';
 import { speakExaminerText } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
 import { XP_REWARDS } from '../../services/gamification';
@@ -67,6 +68,7 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
 
   // Processing & Results
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isCreatingSession, setIsCreatingSession] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [result, setResult] = useState<AudioTranscribeResult | null>(null);
 
@@ -214,7 +216,6 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
       setResult(data);
       awardXP(XP_REWARDS.EXERCISE_COMPLETED, 'Phiên âm & đồng bộ timestamp bài nghe với AI Transcription Engine');
     } catch (err: any) {
-      console.error('Audio Transcribe failed:', err);
       setErrorMessage(err?.message || 'Lỗi kết nối khi gọi gemini-3.1-pro.');
     } finally {
       setIsLoading(false);
@@ -264,45 +265,59 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
   };
 
   // Convert to MediaSession for Shadowing / Dictation
-  const handleCreateMediaSession = () => {
+  const handleCreateMediaSession = async () => {
     if (!result || result.segments.length === 0) return;
 
-    const segments: MediaTranscriptSegment[] = result.segments.map((seg, idx) => ({
-      id: `seg_${Date.now()}_${idx}`,
-      start: seg.startSec,
-      end: seg.endSec,
-      text: seg.text,
-      translation: '',
-      speaker: seg.speaker,
-    }));
+    setIsCreatingSession(true);
+    setErrorMessage(null);
 
-    const newSession: MediaSession = {
-      id: `media_audio_${Date.now()}`,
-      title: `${inputMode === 'captions' ? 'Bài Luyện Transcript' : 'Bài Luyện Audio'}: ${topicContext || 'Học Thuật IELTS'}`,
-      mediaType: inputMode === 'captions' ? 'article_audio' : 'audio',
-      mediaUrl: audioBase64 || '',
-      topic: topicContext || 'Academic Listening',
-      level: 'Band 7.0-8.0',
-      durationSeconds: Math.ceil(result.segments[result.segments.length - 1]?.endSec || 60),
-      currentTimestamp: 0,
-      transcriptSegments: segments,
-      mode: 'shadowing',
-      completed: false,
-      extractedVocab: result.detectedVocabulary.map((v) => ({
-        word: v.word,
-        meaningVi: v.meaningVi,
-        phonetic: '',
-        cefrLevel: 'C1',
-      })),
-      transcriptVersion: inputMode === 'captions'
-        ? { rawSource: 'user-upload', normalizerVersion: result.promptVersion, importedAt: new Date().toISOString() }
-        : undefined,
-    };
+    try {
+      const sessionId = `media_audio_${Date.now()}`;
+      const mediaUrl = inputMode === 'captions' || !audioBase64
+        ? ''
+        : await putMediaAudioArtifact(sessionId, audioBase64);
 
-    if (onSessionCreated) {
-      onSessionCreated(newSession);
+      const segments: MediaTranscriptSegment[] = result.segments.map((seg, idx) => ({
+        id: `seg_${Date.now()}_${idx}`,
+        start: seg.startSec,
+        end: seg.endSec,
+        text: seg.text,
+        translation: '',
+        speaker: seg.speaker,
+      }));
+
+      const newSession: MediaSession = {
+        id: sessionId,
+        title: `${inputMode === 'captions' ? 'Bài Luyện Transcript' : 'Bài Luyện Audio'}: ${topicContext || 'Học Thuật IELTS'}`,
+        mediaType: inputMode === 'captions' ? 'article_audio' : 'audio',
+        mediaUrl,
+        topic: topicContext || 'Academic Listening',
+        level: 'Adaptive',
+        durationSeconds: Math.ceil(result.segments[result.segments.length - 1]?.endSec || 60),
+        currentTimestamp: 0,
+        transcriptSegments: segments,
+        mode: 'shadowing',
+        completed: false,
+        extractedVocab: result.detectedVocabulary.map((v) => ({
+          word: v.word,
+          meaningVi: v.meaningVi,
+          phonetic: '',
+          cefrLevel: 'C1',
+        })),
+        transcriptVersion: {
+          rawSource: 'user-upload',
+          normalizerVersion: result.promptVersion,
+          importedAt: new Date().toISOString(),
+        },
+      };
+
+      onSessionCreated?.(newSession);
+      onClose();
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Không lưu được audio vào kho riêng tư của trình duyệt.');
+    } finally {
+      setIsCreatingSession(false);
     }
-    onClose();
   };
 
   return (
@@ -559,9 +574,10 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
               <button data-ux-flow="media.learning"
                 type="button"
                 onClick={handleCreateMediaSession}
+                disabled={isCreatingSession}
                 className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
               >
-                <span>Vào Phòng Shadowing & Dictation</span>
+                <span>{isCreatingSession ? 'Đang lưu audio riêng tư...' : 'Vào Phòng Shadowing & Dictation'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>

@@ -4,6 +4,7 @@ import {
   validateMockPackage,
   validateMockSkill,
   validateListeningSection,
+  validateReadingPassage,
   validateSpeakingPart,
   validateMockSourcePreservation,
 } from '../mockPackageValidator';
@@ -54,6 +55,23 @@ describe('validateMockPackage', () => {
       ...section,
       questions: section.questions.slice(0, 9),
     })).toMatchObject({ ready: false, count: 9, code: 'count_invalid' });
+  });
+
+  it('accepts only a Reading passage with its assigned question range', () => {
+    const passage = {
+      passageNumber: 3,
+      title: 'Passage 3',
+      subtitle: 'An academic argument',
+      wordCount: 760,
+      paragraphs: [{ label: 'A', text: 'A sufficiently detailed academic paragraph.' }],
+      questions: Array.from({ length: 14 }, (_, index) => question(index + 27, 2)),
+    };
+
+    expect(validateReadingPassage(3, passage)).toMatchObject({ ready: true, count: 14 });
+    expect(validateReadingPassage(3, {
+      ...passage,
+      questions: passage.questions.slice(0, 13),
+    })).toMatchObject({ ready: false, count: 13, code: 'count_invalid' });
   });
 
   it('rejects summary-only assembler output that cannot enter the exam room', () => {

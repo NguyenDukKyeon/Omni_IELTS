@@ -16,11 +16,13 @@ import {
   validateListeningSection,
   validateMockSourcePreservation,
   validateSpeakingPart,
+  validateReadingPassage,
   MockSkill,
   MockSpeakingPart,
 } from "./src/lib/mockPackageValidator";
 import { alignTranscriptSentences, normalizeAndAlignVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
+import { finalizeMediaShadowingEvaluation } from "./src/lib/mediaShadowingEvaluation";
 import { classifyApiFailure, retryProviderCall } from "./src/lib/apiFailure";
 import { normalizeForecastGroundingPayload } from "./src/lib/forecastGrounding";
 import {
@@ -32,6 +34,7 @@ import {
 import { buildForecastSearchQueries, runForecastQueryVariants } from "./src/lib/forecastSearchQueries";
 import { requestBraveForecastEvidence } from "./src/lib/braveSearch";
 import {
+  buildDeterministicForecastFromEvidence,
   orderForecastProviderAttempts,
   synthesizeForecastFromEvidence,
   type ForecastEvidenceBundle,
@@ -45,7 +48,6 @@ import {
   buildGeminiGatewayRequestBody,
   createGeminiGatewayFacade,
   describeGatewayCapabilities,
-  executeWithWebBridgeFallback,
   generateTextWithGateway,
   getGatewayRoutes,
   isWebBridgeCanaryAuthorized,
@@ -54,11 +56,25 @@ import {
   type WebBridgeKind,
 } from "./src/lib/aiGateway";
 import { MockBuildEvent, MockBuildState, transitionMockBuildState } from "./src/lib/mockBuildMachine";
-import { requestGroqForecastEvidence, type GroqGroundedModel } from "./src/lib/groqGrounding";
+import {
+  requestGroqForecastEvidence,
+  requestGroqGroundedForecast,
+  type GroqGroundedModel,
+} from "./src/lib/groqGrounding";
+import { getProviderApiKeyPool } from "./src/lib/providerKeyPool";
+import { generateTextWithDirectProviderPool } from "./src/lib/directTextProvider";
+import {
+  createSerialExecutor,
+  executeWithPreferredWebBridge,
+  getConfiguredWebBridgeSessionStatus,
+  resolveWebBridgeSessionStatusForTier,
+  type WebBridgeSessionStatus,
+} from "./src/lib/webBridgeSession";
 import {
   buildYtDlpRuntimeArgs,
   classifyMediaImportFailure,
   consumeFixedWindowQuota,
+  deriveMediaCapabilities,
   parseYtDlpMetadata,
   progressForMediaImportPhase,
   validateTranscriptCoverage,
@@ -68,7 +84,7 @@ import type { MediaCapabilities, MediaImportJob, MediaImportPhase, MediaSession 
 dotenv.config({ quiet: true });
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 const execFileAsync = promisify(execFile);
 const groundedProviderRouter = new GroundedProviderRouter({
   onAttemptFailure: ({ provider, model, category }) => {
@@ -115,6 +131,8 @@ const webBridgeGatewayClient = webBridgeLane?.enabled
   : null;
 let gatewayHealthCache = { checkedAt: 0, healthy: false };
 let webBridgeHealthCache = { checkedAt: 0, healthy: false };
+let webBridgeSessionStatus: WebBridgeSessionStatus = getConfiguredWebBridgeSessionStatus(process.env);
+const runWebBridgeSerial = createSerialExecutor();
 
 function recordGatewayAttempt(attempt: AiGatewayAttempt) {
   aiGatewayAttempts.push({ ...attempt, keyAlias: attempt.keyAlias || 'bifrost-managed' });
@@ -175,18 +193,21 @@ function createDirectGeminiClient(apiKey?: string): GoogleGenAI | null {
   });
 }
 
-// Resilient Gemini Execution helper with retries, exponential backoff & model fallback
-async function callGeminiResiliently(
+interface ResilientAiOptions {
+  contents: any;
+  config?: any;
+  primaryModel?: string;
+  fallbackModels?: string[];
+  taskTier?: AiTaskTier;
+  maxRetriesPerModel?: number;
+  retryDelayMs?: number;
+  validateText?: (text: string) => boolean;
+}
+
+// Official provider execution with retries, capability-compatible fallbacks and schema validation.
+async function callOfficialProvidersResiliently(
   ai: GoogleGenAI | null,
-  options: {
-    contents: any;
-    config?: any;
-    primaryModel?: string;
-    fallbackModels?: string[];
-    taskTier?: AiTaskTier;
-    maxRetriesPerModel?: number;
-    retryDelayMs?: number;
-  }
+  options: ResilientAiOptions,
 ): Promise<{ text: string | null; error?: string }> {
   const profile = AI_TASK_PROFILES[options.taskTier || "balanced"];
   const primary = options.primaryModel || profile.model;
@@ -220,7 +241,15 @@ async function callGeminiResiliently(
           }),
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`AI_TIMEOUT_${profile.timeoutMs}`)), profile.timeoutMs)),
         ]);
-        if (response && response.text) {
+        let validResponse = Boolean(response?.text);
+        if (validResponse && options.validateText) {
+          try {
+            validResponse = options.validateText(response.text);
+          } catch {
+            validResponse = false;
+          }
+        }
+        if (response && response.text && validResponse) {
           const durationMs = Date.now() - startedAt;
           recordAiLatency(profile.tier, durationMs);
           console.info(`[AI latency] tier=${options.taskTier || "balanced"} model=${model} ms=${durationMs}`);
@@ -270,6 +299,7 @@ async function callGeminiResiliently(
           config: options.config,
           client: gateway,
           onAttempt: recordGatewayAttempt,
+          validateText: options.validateText,
           skipProviders: (ai as any)?.__omniGatewayFacade ? ['gemini'] : [],
         });
         const durationMs = Date.now() - startedAt;
@@ -282,68 +312,154 @@ async function callGeminiResiliently(
     }
   }
 
-  let failure = lastError
+  if (profile.capability === 'text') {
+    const directTextRoutes = [
+      {
+        provider: 'groq' as const,
+        model: 'openai/gpt-oss-120b',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        keys: getProviderApiKeyPool(process.env, 'GROQ_API_KEY'),
+      },
+      {
+        provider: 'nvidia_nim' as const,
+        model: 'meta/llama-3.3-70b-instruct',
+        baseUrl: 'https://integrate.api.nvidia.com/v1',
+        keys: getProviderApiKeyPool(process.env, 'NVIDIA_NIM_API_KEY'),
+      },
+      {
+        provider: 'openrouter' as const,
+        model: 'openrouter/free',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        keys: getProviderApiKeyPool(process.env, 'OPENROUTER_API_KEY'),
+      },
+    ].filter((route) => route.keys.length > 0);
+    if (directTextRoutes.length) {
+      try {
+        const startedAt = Date.now();
+        const directFallbackBudgetMs = officialLaneBudgetMs || profile.timeoutMs;
+        const result = await generateTextWithDirectProviderPool({
+          contents: options.contents,
+          config: options.config,
+          routes: directTextRoutes,
+          totalTimeoutMs: directFallbackBudgetMs,
+          perAttemptTimeoutMs: Math.min(
+            25_000,
+            Math.max(5_000, Math.floor(directFallbackBudgetMs / directTextRoutes.length)),
+          ),
+          validateText: options.validateText,
+          onAttempt: (attempt) => {
+            const status = attempt.category ? ` category=${attempt.category}` : '';
+            console.info(`[Direct AI fallback] provider=${attempt.provider} model=${attempt.model} key=${attempt.keyAlias} ms=${attempt.latencyMs}${status}`);
+          },
+        });
+        recordAiLatency(profile.tier, Date.now() - startedAt);
+        return { text: result.text };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  const failure = lastError
     ? classifyApiFailure(lastError, 'ai', aiGatewayClient ? 'bifrost' : 'gemini')
     : classifyApiFailure(
         { category: aiGatewayClient ? 'gateway_unavailable' : 'auth_missing', status: 503 },
         'ai',
         aiGatewayClient ? 'bifrost' : 'gemini',
       );
-  if (profile.capability === 'text' && webBridgeLane?.enabled) {
-    try {
-      const startedAt = Date.now();
-      const laneResult = await executeWithWebBridgeFallback({
-        capability: 'text',
-        enabled: true,
-        primary: async () => { throw failure; },
-        secondary: async () => {
-          const client = await getHealthyWebBridgeClient();
-          if (!client) throw { category: 'gateway_unavailable', status: 503 };
-          const route = getGatewayRoutes(profile.tier)[0];
-          const attemptStartedAt = Date.now();
-          try {
-            const response = await client.generateGemini(
-              route,
-              buildGeminiGatewayRequestBody(options.contents, options.config),
-            );
-            const text = String(response?.text || '').trim();
-            if (!text) throw { category: 'schema_invalid', status: 502 };
-            recordGatewayAttempt({
-              lane: 'web_bridge',
-              provider: 'gemini_web',
-              model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
-              capability: 'text',
-              keyAlias: 'web-bridge-local',
-              latencyMs: Date.now() - attemptStartedAt,
-              circuitState: 'closed',
-              requestId: `web_bridge_${crypto.randomUUID()}`,
-            });
-            return { text };
-          } catch (error) {
-            const bridgeFailure = classifyApiFailure(error, 'ai', 'gemini_web');
-            recordGatewayAttempt({
-              lane: 'web_bridge',
-              provider: 'gemini_web',
-              model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
-              capability: 'text',
-              keyAlias: 'web-bridge-local',
-              latencyMs: Date.now() - attemptStartedAt,
-              failureCategory: bridgeFailure.category,
-              circuitState: bridgeFailure.category === 'quota_exhausted' || bridgeFailure.category === 'rate_limited' ? 'open' : 'closed',
-              retryAfterMs: bridgeFailure.retryAfterMs,
-              requestId: bridgeFailure.requestId,
-            });
-            throw error;
-          }
-        },
-      });
-      recordAiLatency(profile.tier, Date.now() - startedAt);
-      return { text: laneResult.value.text };
-    } catch (error) {
-      failure = classifyApiFailure(error, 'ai', 'gemini_web');
-    }
-  }
   return { text: null, error: failure.category };
+}
+
+async function generateWithDeepWebBridge(options: ResilientAiOptions): Promise<{
+  text: string;
+  bridgeMetadata: { authenticated: true; resolvedModel: 'gemini-pro' };
+}> {
+  return runWebBridgeSerial(async () => {
+    const attemptStartedAt = Date.now();
+    try {
+      const client = await getHealthyWebBridgeClient();
+      if (!client) throw { category: 'gateway_unavailable', status: 503 };
+      const route = getGatewayRoutes('deep')[0];
+      const response = await client.generateGemini(
+        route,
+        buildGeminiGatewayRequestBody(options.contents, options.config),
+      );
+      if (!response?.bridgeMetadata?.authenticated || response.bridgeMetadata.resolvedModel !== 'gemini-pro') {
+        throw { category: 'auth_invalid', status: 401 };
+      }
+      const text = String(response?.text || '').trim();
+      let valid = Boolean(text);
+      if (valid && options.validateText) {
+        try {
+          valid = options.validateText(text);
+        } catch {
+          valid = false;
+        }
+      }
+      if (!valid) throw { category: 'schema_invalid', status: 502 };
+      webBridgeSessionStatus = 'authenticated';
+      recordGatewayAttempt({
+        lane: 'web_bridge',
+        provider: 'gemini_web',
+        model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.1-pro',
+        capability: 'text',
+        keyAlias: 'web-bridge-local',
+        latencyMs: Date.now() - attemptStartedAt,
+        circuitState: 'closed',
+        requestId: `web_bridge_${crypto.randomUUID()}`,
+      });
+      return {
+        text,
+        bridgeMetadata: { authenticated: true, resolvedModel: 'gemini-pro' },
+      };
+    } catch (error) {
+      const bridgeFailure = classifyApiFailure(error, 'ai', 'gemini_web');
+      if (bridgeFailure.category === 'auth_missing') webBridgeSessionStatus = 'login_required';
+      if (bridgeFailure.category === 'auth_invalid') webBridgeSessionStatus = 'expired';
+      recordGatewayAttempt({
+        lane: 'web_bridge',
+        provider: 'gemini_web',
+        model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.1-pro',
+        capability: 'text',
+        keyAlias: 'web-bridge-local',
+        latencyMs: Date.now() - attemptStartedAt,
+        failureCategory: bridgeFailure.category,
+        circuitState: bridgeFailure.category === 'quota_exhausted' || bridgeFailure.category === 'rate_limited' ? 'open' : 'closed',
+        retryAfterMs: bridgeFailure.retryAfterMs,
+        requestId: bridgeFailure.requestId,
+      });
+      throw error;
+    }
+  });
+}
+
+// Deep tasks prefer the authenticated local Pro lane. Every other capability stays on official providers.
+async function callGeminiResiliently(
+  ai: GoogleGenAI | null,
+  options: ResilientAiOptions,
+): Promise<{ text: string | null; error?: string }> {
+  const tier = options.taskTier || 'balanced';
+  const startedAt = Date.now();
+  webBridgeSessionStatus = await resolveWebBridgeSessionStatusForTier({
+    tier,
+    enabled: Boolean(webBridgeLane?.enabled),
+    priority: process.env.WEB_AI_BRIDGE_PRIORITY,
+    sessionStatus: webBridgeSessionStatus,
+    probe: async () => Boolean(await getHealthyWebBridgeClient()),
+  });
+  const result = await executeWithPreferredWebBridge({
+    tier,
+    enabled: Boolean(webBridgeLane?.enabled),
+    priority: process.env.WEB_AI_BRIDGE_PRIORITY,
+    sessionStatus: webBridgeSessionStatus,
+    webBridge: async () => {
+      const result = await generateWithDeepWebBridge(options);
+      return { text: result.text };
+    },
+    official: () => callOfficialProvidersResiliently(ai, options),
+  });
+  if (result.lane === 'web_bridge') recordAiLatency(tier, Date.now() - startedAt);
+  return result.value;
 }
 
 // Health check endpoint
@@ -426,9 +542,10 @@ app.get('/api/ai/health', async (_req, res) => {
   const bifrostStatus = !aiGatewayClient
     ? 'disabled'
     : await getHealthyGatewayClient() ? 'healthy' : 'unavailable';
+  const webBridgeReachable = webBridgeGatewayClient ? Boolean(await getHealthyWebBridgeClient()) : false;
   const webBridgeStatus = !webBridgeGatewayClient
-    ? webBridgeLane?.status === 'auth_missing' ? 'auth_missing' : 'disabled'
-    : await getHealthyWebBridgeClient() ? 'healthy' : 'unavailable';
+    ? webBridgeSessionStatus
+    : webBridgeReachable ? webBridgeSessionStatus : 'unavailable';
   return res.json({
     status: bifrostStatus,
     checkedAt: new Date().toISOString(),
@@ -459,56 +576,33 @@ app.post('/api/internal/ai/canary/text', async (req, res) => {
   const prompt = artifact === 'vocabulary'
     ? 'Create exactly 2 intermediate IELTS vocabulary cards. Return JSON only: {"cards":[{"term":"...","definition":"...","example":"..."}]}.'
     : 'Create exactly 2 IELTS Reading short-answer questions for a short academic practice section. Return JSON only: {"title":"...","questions":[{"id":"q1","prompt":"...","answer":"..."}]}.';
-  const startedAt = Date.now();
-
   try {
-    const result = await executeWithWebBridgeFallback({
-      capability: 'text',
-      enabled: true,
-      primary: async () => {
-        throw { category: 'gateway_unavailable', status: 503 };
-      },
-      secondary: async () => {
-        const client = await getHealthyWebBridgeClient();
-        if (!client) throw { category: 'gateway_unavailable', status: 503 };
-        const route = getGatewayRoutes('balanced')[0];
-        return client.generateGemini(route, buildGeminiGatewayRequestBody(prompt, {
-          responseMimeType: 'application/json',
-        }));
-      },
+    const result = await generateWithDeepWebBridge({
+      taskTier: 'deep',
+      contents: prompt,
+      config: { responseMimeType: 'application/json' },
+      validateText: (text) => schema.safeParse(JSON.parse(text)).success,
     });
-    const parsedJson = JSON.parse(String(result.value?.text || ''));
+    const parsedJson = JSON.parse(result.text);
     const validated = schema.safeParse(parsedJson);
     if (!validated.success) throw { category: 'schema_invalid', status: 502 };
     const itemCount = artifact === 'vocabulary'
       ? (validated.data as z.infer<typeof WebBridgeVocabularyCanarySchema>).cards.length
       : (validated.data as z.infer<typeof WebBridgeMockSectionCanarySchema>).questions.length;
-    recordGatewayAttempt({
+    return res.json({
+      status: 'ok',
       lane: 'web_bridge',
-      provider: 'gemini_web',
-      model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
-      capability: 'text',
-      keyAlias: 'web-bridge-local',
-      latencyMs: Date.now() - startedAt,
-      circuitState: 'closed',
-      requestId: `web_bridge_canary_${crypto.randomUUID()}`,
+      sessionStatus: 'authenticated',
+      model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.1-pro',
+      resolvedModel: result.bridgeMetadata.resolvedModel,
+      artifact,
+      itemCount,
     });
-    return res.json({ status: 'ok', lane: result.lane, artifact, itemCount });
   } catch (error) {
     const failure = classifyApiFailure(error, 'ai', 'gemini_web');
-    recordGatewayAttempt({
-      lane: 'web_bridge',
-      provider: 'gemini_web',
-      model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
-      capability: 'text',
-      keyAlias: 'web-bridge-local',
-      latencyMs: Date.now() - startedAt,
-      failureCategory: failure.category,
-      circuitState: 'closed',
-      requestId: failure.requestId,
-    });
     return res.status(failure.httpStatus >= 400 ? failure.httpStatus : 503).json({
       status: 'unavailable',
+      sessionStatus: webBridgeSessionStatus,
       category: failure.category,
       requestId: failure.requestId,
     });
@@ -1361,6 +1455,14 @@ app.post('/api/vocab/adaptive-topic-decks', async (req, res) => {
     if (!ai) return res.status(503).json({ error: 'Cần Gemini API key để tạo deck thích ứng; hệ thống không trả deck giả.', status: 'unavailable' });
 
     const allowedCefr = tierId === 'foundation' ? ['A2', 'B1'] : tierId === 'bridge' ? ['B1', 'B2'] : ['C1', 'C2'];
+    const deckSchema = z.object({ cards: z.array(adaptiveVocabCardSchema).length(count) });
+    const validateDeckText = (text: string) => {
+      const candidate = deckSchema.safeParse(JSON.parse(text));
+      if (!candidate.success) return false;
+      const normalizedWords = candidate.data.cards.map((card) => card.word.trim().toLocaleLowerCase());
+      return new Set(normalizedWords).size === normalizedWords.length
+        && candidate.data.cards.every((card) => allowedCefr.includes(card.cefrLevel));
+    };
     const result = await callGeminiResiliently(ai, {
       taskTier: 'balanced',
       contents: `Create exactly ${count} distinct vocabulary cards for IELTS learners.
@@ -1372,6 +1474,7 @@ Every card must include natural pronunciation IPA, word family, paraphrases, at 
 Return JSON only: {"cards":[{"word":"...","phonetic":"/.../","pos":"...","definitionVi":"...","definitionEn":"...","exampleEn":"...","exampleVi":"...","collocations":["...","..."],"wordFamily":["..."],"paraphrases":["..."],"usageNoteVi":"...","cefrLevel":"${allowedCefr[0]}"}]}`,
       config: { responseMimeType: 'application/json' },
       maxRetriesPerModel: 1,
+      validateText: validateDeckText,
     });
     if (!result.text) return res.status(503).json({ error: 'AI đang không khả dụng; chưa có thẻ nào được lưu.', status: 'unavailable' });
 
@@ -1381,7 +1484,7 @@ Return JSON only: {"cards":[{"word":"...","phonetic":"/.../","pos":"...","defini
     } catch {
       return res.status(422).json({ error: 'AI trả dữ liệu không hợp lệ; chưa có thẻ nào được lưu.', status: 'schema_invalid' });
     }
-    const parsed = z.object({ cards: z.array(adaptiveVocabCardSchema).length(count) }).safeParse(rawPayload);
+    const parsed = deckSchema.safeParse(rawPayload);
     if (!parsed.success) return res.status(422).json({ error: 'AI trả deck không đúng schema; chưa có thẻ nào được lưu.', status: 'schema_invalid' });
     const normalizedWords = parsed.data.cards.map((card) => card.word.trim().toLocaleLowerCase());
     if (new Set(normalizedWords).size !== normalizedWords.length) {
@@ -2292,23 +2395,7 @@ async function detectMediaCapabilities(): Promise<MediaCapabilities> {
     }
   }
 
-  const available = ytDlp && jsRuntime;
-  const value: MediaCapabilities = {
-    youtubeImport: {
-      available,
-      ytDlp,
-      jsRuntime,
-      potProvider,
-      reason: available
-        ? undefined
-        : !ytDlp
-          ? 'Máy chủ chưa cài được yt-dlp đã pin và kiểm tra checksum.'
-          : 'Máy chủ cần Node.js 22 trở lên để giải thử thách JavaScript của YouTube.',
-    },
-    uploadAudio: true,
-    uploadCaptions: true,
-    pasteTranscript: true,
-  };
+  const value = deriveMediaCapabilities({ ytDlp, jsRuntime, potProvider });
   mediaCapabilitiesCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
 }
@@ -2414,272 +2501,13 @@ app.post("/api/media/process-youtube", async (req, res) => {
   return res.redirect(307, "/api/media/youtube/import");
 });
 
-// Retained temporarily for rollback diagnostics; no frontend caller uses this route.
-app.post("/api/media/process-youtube-legacy", async (req, res) => {
-  return res.status(410).json({ error: "Endpoint cũ đã ngừng hoạt động để tránh transcript mô phỏng. Dùng /api/media/youtube/import." });
-  /* c8 ignore start -- temporary source retained only until callers have migrated */
-  try {
-    const { url, topic, level } = req.body;
-    if (!url) {
-      return res.status(400).json({ error: "Vui lòng cung cấp URL YouTube hợp lệ." });
-    }
-
-    const videoId = extractYouTubeId(url);
-    if (!videoId) {
-      return res.status(400).json({ error: "Không nhận diện được YouTube Video ID từ đường dẫn này." });
-    }
-
-    const ai = getGeminiClient();
-    let videoTitle = "IELTS Academic Video Lesson";
-    let channelTitle = "YouTube Channel";
-    let durationSeconds = 180;
-    const thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-
-    // 1. Fetch metadata via oEmbed
-    try {
-      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
-      if (oembedRes.ok) {
-        const oembedData = await oembedRes.json() as any;
-        if (oembedData.title) videoTitle = oembedData.title;
-        if (oembedData.author_name) channelTitle = oembedData.author_name;
-      }
-    } catch (e) {
-      console.warn("oEmbed fetch warning:", e);
-    }
-
-    // 2. Fetch transcript using youtube-transcript library or multi-lang fallback
-    let rawTranscript: Array<{ text: string; duration: number; offset: number }> = [];
-    try {
-      const { YoutubeTranscript } = await import("youtube-transcript");
-      try {
-        rawTranscript = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" });
-      } catch {
-        // Try without explicit lang filter (auto-generated English or default)
-        try {
-          rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
-        } catch {
-          // Subtitles may be disabled or restricted on YouTube
-          rawTranscript = [];
-        }
-      }
-    } catch {
-      rawTranscript = [];
-    }
-
-    // 3. Process into sentence-aligned segments & Vietnamese translations with Gemini
-    if (ai) {
-      const rawText = rawTranscript.length > 0
-        ? rawTranscript.map((t) => `[${(t.offset / 1000).toFixed(1)}s - ${((t.offset + t.duration) / 1000).toFixed(1)}s] ${t.text}`).join("\n")
-        : `Video Title: ${videoTitle}. Channel: ${channelTitle}. Video ID: ${videoId}`;
-
-      const prompt = `Bạn là Chuyên gia Khảo thí Ngôn ngữ Cambridge IELTS kiêm Kỹ sư Xử lý Âm thanh (Audio & Speech Alignment Specialist).
-Chúng ta có video YouTube:
-- Title: "${videoTitle}"
-- Channel: "${channelTitle}"
-- Video ID: "${videoId}"
-- Raw Subtitle timestamps (nếu có):
-"""
-${rawText.slice(0, 5000)}
-"""
-
-YÊU CẦU:
-1. Tạo danh sách các câu luyện tập Shadowing & Dictation (10 - 20 câu hoàn chỉnh có nghĩa học thuật, tách câu rõ ràng với dấu câu đầy đủ, không để cụm từ vụn).
-2. Với mỗi câu, cung cấp:
-   - "start": thời điểm bắt đầu (giây, số thực ví dụ 0.0, 4.5, 9.2...)
-   - "end": thời điểm kết thúc (giây, số thực ví dụ 4.2, 8.9, 14.0...)
-   - "text": nội dung câu tiếng Anh chuẩn xác, đầy đủ dấu câu
-   - "translation": bản dịch tiếng Việt học thuật, mượt mà
-   - "speaker": "Speaker 1" hoặc tên người nói nếu là đối thoại/phỏng vấn
-3. Trích xuất 6-8 từ vựng/collocation học thuật C1/C2 xuất hiện hoặc tiêu biểu từ video:
-   - "word", "pos", "definitionVi", "definitionEn", "exampleEn", "collocations" (mảng 2-3 cụm), "cefrLevel" ('B2' | 'C1' | 'C2')
-4. Đánh giá độ khó: "Band 5.5-6.5" | "Band 7.0-8.0" | "Band 8.0+"
-5. Ước tính tổng thời lượng "durationSeconds".
-
-Trả về duy nhất 1 JSON hợp lệ theo cấu trúc:
-{
-  "title": "${videoTitle.replace(/"/g, '\\"')}",
-  "channelTitle": "${channelTitle.replace(/"/g, '\\"')}",
-  "topic": "${topic || 'Academic Discourse & IELTS Speaking'}",
-  "level": "Band 7.0-8.0",
-  "durationSeconds": 180,
-  "transcriptSegments": [
-    {
-      "id": "seg_1",
-      "start": 0.0,
-      "end": 4.5,
-      "text": "The rapid pace of technological innovation has fundamentally transformed modern communication.",
-      "translation": "Tốc độ đổi mới công nghệ nhanh chóng đã làm thay đổi căn bản phương thức giao tiếp hiện đại.",
-      "speaker": "Speaker 1"
-    }
-  ],
-  "extractedVocab": [
-    {
-      "word": "fundamentally",
-      "pos": "adv",
-      "definitionVi": "về cơ bản, một cách căn bản",
-      "definitionEn": "in a basic and essential way",
-      "exampleEn": "Technology has fundamentally altered educational methodologies.",
-      "collocations": ["fundamentally alter", "fundamentally flawed", "differ fundamentally"],
-      "cefrLevel": "C1"
-    }
-  ]
-}`;
-
-      const response = await ai.models.generateContent({
-        model: AI_TASK_PROFILES.balanced.model,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-
-      const parsed = JSON.parse(response.text || "{}");
-
-      const parsedSegments = Array.isArray(parsed.transcriptSegments) && parsed.transcriptSegments.length > 0
-        ? parsed.transcriptSegments.map((s: any, idx: number) => ({
-            id: s.id || `seg_${idx + 1}`,
-            start: typeof s.start === "number" ? s.start : idx * 4,
-            end: typeof s.end === "number" ? s.end : (idx + 1) * 4,
-            text: s.text || "",
-            translation: s.translation || "",
-            speaker: s.speaker || (idx % 2 === 0 ? "Examiner" : "Candidate"),
-          }))
-        : [
-            {
-              id: "seg_1",
-              start: 0.0,
-              end: 4.5,
-              text: `Welcome to this IELTS speaking session analyzing the topic of "${videoTitle}".`,
-              translation: `Chào mừng bạn đến với buổi luyện nói IELTS phân tích chủ đề "${videoTitle}".`,
-              speaker: "Examiner",
-            },
-            {
-              id: "seg_2",
-              start: 4.6,
-              end: 9.8,
-              text: "Could you articulate your perspectives regarding the primary factors influencing this phenomenon?",
-              translation: "Bạn có thể trình bày quan điểm của mình về các yếu tố chính ảnh hưởng đến hiện tượng này không?",
-              speaker: "Examiner",
-            },
-            {
-              id: "seg_3",
-              start: 10.0,
-              end: 15.5,
-              text: "From my standpoint, technological integration and socioeconomic shifts play an indispensable role.",
-              translation: "Theo quan điểm của tôi, sự tích hợp công nghệ và các biến chuyển kinh tế xã hội đóng vai trò không thể thiếu.",
-              speaker: "Candidate",
-            }
-          ];
-
-      const session = {
-        id: `media_yt_${videoId}_${Date.now()}`,
-        title: parsed.title || videoTitle,
-        mediaType: "youtube" as const,
-        mediaUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        youtubeId: videoId,
-        channelTitle: parsed.channelTitle || channelTitle,
-        thumbnail,
-        topic: parsed.topic || topic || "Academic English",
-        level: (parsed.level || level || "Band 7.0-8.0") as "Band 5.5-6.5" | "Band 7.0-8.0" | "Band 8.0+",
-        durationSeconds: parsed.durationSeconds || 180,
-        currentTimestamp: 0,
-        transcriptSegments: parsedSegments,
-        mode: "shadowing" as const,
-        completed: false,
-        lastPracticedDate: new Date().toISOString(),
-        extractedVocab: Array.isArray(parsed.extractedVocab) ? parsed.extractedVocab : [],
-      };
-
-      return res.json({ session });
-    }
-
-    // Fallback if Gemini client is not initialized
-    const fallbackSegments = rawTranscript.length > 0
-      ? rawTranscript.slice(0, 10).map((t, idx) => ({
-          id: `seg_${idx + 1}`,
-          start: Math.round((t.offset / 1000) * 10) / 10,
-          end: Math.round(((t.offset + t.duration) / 1000) * 10) / 10,
-          text: t.text,
-          translation: "Bản dịch nghĩa đang cập nhật.",
-          speaker: "Speaker 1",
-        }))
-      : [
-          {
-            id: "seg_1",
-            start: 0.0,
-            end: 4.5,
-            text: "Welcome to this IELTS speaking practice session on modern technology and global issues.",
-            translation: "Chào mừng bạn đến với buổi luyện nói IELTS về công nghệ hiện đại và các vấn đề toàn cầu.",
-            speaker: "Examiner",
-          },
-          {
-            id: "seg_2",
-            start: 4.6,
-            end: 9.8,
-            text: "Could you elaborate on how renewable energy sources contribute to sustainable urban development?",
-            translation: "Bạn có thể nói rõ hơn về việc các nguồn năng lượng tái tạo đóng góp vào sự phát triển đô thị bền vững như thế nào không?",
-            speaker: "Examiner",
-          },
-          {
-            id: "seg_3",
-            start: 10.0,
-            end: 16.5,
-            text: "Undoubtedly, transitioning away from fossil fuels significantly mitigates carbon emissions and enhances public health.",
-            translation: "Không nghi ngờ gì nữa, việc chuyển đổi khỏi nhiên liệu hóa thạch giúp giảm đáng kể lượng khí thải carbon và nâng cao sức khỏe cộng đồng.",
-            speaker: "Candidate",
-          },
-        ];
-
-    const session = {
-      id: `media_yt_${videoId}_${Date.now()}`,
-      title: videoTitle,
-      mediaType: "youtube" as const,
-      mediaUrl: `https://www.youtube.com/watch?v=${videoId}`,
-      youtubeId: videoId,
-      channelTitle,
-      thumbnail,
-      topic: topic || "IELTS Academic Speaking",
-      level: (level || "Band 7.0-8.0") as "Band 5.5-6.5" | "Band 7.0-8.0" | "Band 8.0+",
-      durationSeconds: 180,
-      currentTimestamp: 0,
-      transcriptSegments: fallbackSegments,
-      mode: "shadowing" as const,
-      completed: false,
-      lastPracticedDate: new Date().toISOString(),
-      extractedVocab: [
-        {
-          word: "mitigate",
-          pos: "verb",
-          definitionVi: "làm giảm bớt, làm dịu đi (tác động tiêu cực)",
-          definitionEn: "make something less severe, serious, or painful",
-          exampleEn: "Subsidies for mass transit mitigate urban traffic congestion.",
-          collocations: ["mitigate risks", "mitigate the effects of", "actively mitigate"],
-          cefrLevel: "C1" as const,
-        },
-        {
-          word: "undoubtedly",
-          pos: "adv",
-          definitionVi: "chắc chắn, không thể phủ nhận",
-          definitionEn: "without doubt; certainly",
-          exampleEn: "Undoubtedly, early bilingual education enhances cognitive flexibility.",
-          collocations: ["undoubtedly true", "undoubtedly contribute to"],
-          cefrLevel: "C1" as const,
-        }
-      ],
-    };
-
-    return res.json({ session });
-  } catch (error: any) {
-    logSafeAiError("Process YouTube Error:", error);
-    res.status(500).json({ error: error.message || "Lỗi xử lý video YouTube" });
-  }
-  /* c8 ignore stop */
-});
-
+// Legacy callers keep working through /api/media/process-youtube; the former mock
+// transcript implementation was removed so no rollback can reintroduce fabricated media.
 // Evaluate Shadowing Attempt with Gemini
 app.post("/api/media/evaluate-shadowing", async (req, res) => {
+  const requestId = `shadow_${crypto.randomBytes(6).toString("hex")}`;
   try {
-    const { targetSentence, userTranscript, userAudioBase64, topicTitle } = req.body;
+    const { targetSentence, userTranscript, userAudioBase64, topicTitle, durationSeconds, speechSegments } = req.body;
     const ai = getGeminiClient(req);
 
     if (!userAudioBase64) {
@@ -2732,13 +2560,47 @@ Trả về duy nhất 1 JSON hợp lệ:
       ],
       config: { responseMimeType: "application/json" },
     });
-    if (!result.text) return res.status(503).json({ error: result.error || "Audio evaluation unavailable", acousticStatus: "unavailable" });
-    const parsed = JSON.parse(result.text);
-    parsed.acousticStatus = "measured";
-    res.json(parsed);
-  } catch (error: any) {
-    logSafeAiError("Evaluate Shadowing Error:", error);
-    res.status(500).json({ error: error.message || "Lỗi chấm bài Shadowing" });
+    if (!result.text) return res.status(503).json({
+      error: "Chấm audio đang tạm thời không khả dụng. Hãy thử lại sau.",
+      acousticStatus: "unavailable",
+      requestId,
+    });
+    let rawEvaluation: unknown;
+    try {
+      rawEvaluation = JSON.parse(result.text);
+    } catch {
+      return res.status(502).json({
+        error: "Kết quả chấm Shadowing không đúng định dạng. Hãy thử lại.",
+        code: "SCHEMA_INVALID",
+        requestId,
+      });
+    }
+    const safeDuration = Number.isFinite(Number(durationSeconds)) ? Math.max(0, Number(durationSeconds)) : 0;
+    const safeSegments = Array.isArray(speechSegments)
+      ? speechSegments
+          .map((item) => ({ start: Number(item?.start), end: Number(item?.end) }))
+          .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
+      : null;
+    try {
+      return res.json(finalizeMediaShadowingEvaluation(rawEvaluation, {
+        transcript: String(userTranscript || ""),
+        durationSeconds: safeDuration,
+        speechSegments: safeSegments,
+      }));
+    } catch {
+      return res.status(502).json({
+        error: "Kết quả chấm Shadowing không vượt qua kiểm tra dữ liệu. Hãy thử lại.",
+        code: "SCHEMA_INVALID",
+        requestId,
+      });
+    }
+  } catch {
+    console.warn("[media-shadowing] evaluation unavailable", { requestId });
+    return res.status(503).json({
+      error: "Không thể chấm Shadowing lúc này. Audio không được lưu; hãy thử lại sau.",
+      acousticStatus: "unavailable",
+      requestId,
+    });
   }
 });
 
@@ -6921,28 +6783,23 @@ Transcribe the audio accurately into sentence-level segments with startSec, endS
         }
       } catch (err: any) {
         lastGeminiErr = err;
-        logSafeAiError(`[Audio Transcribe Engine] Model ${model} failed:`, err);
+        const failure = classifyMediaImportFailure(err);
+        console.warn(`[Audio Transcribe Engine] model=${model} category=${failure.category} requestId=${failure.requestId}`);
       }
     }
 
     if (!responseText) {
-      return res.status(500).json({
-        error:
-          lastGeminiErr?.message ||
-          "Không nhận được phản hồi hợp lệ từ Gemini khi phiên âm audio.",
-      });
+      const failure = classifyMediaImportFailure(lastGeminiErr || new Error('MEDIA_TRANSCRIPTION_UNAVAILABLE'));
+      return res.status(failure.category === 'ai_quota_exhausted' ? 503 : 500).json(failure);
     }
 
     const parsed = JSON.parse(responseText);
     parsed.promptVersion = "media-transcribe-v1";
     return res.json(parsed);
   } catch (error: any) {
-    logSafeAiError("Audio Transcribe Engine Error:", error);
-    return res.status(500).json({
-      error:
-        error.message ||
-        "Lỗi trong quá trình phiên âm và phân đoạn audio với Gemini.",
-    });
+    const failure = classifyMediaImportFailure(error);
+    console.warn(`[Audio Transcribe Engine] category=${failure.category} requestId=${failure.requestId}`);
+    return res.status(failure.category === 'ai_quota_exhausted' ? 503 : 500).json(failure);
   }
 });
 
@@ -7378,6 +7235,7 @@ type ServerMockBuild = {
   input: any;
   skills: Partial<Record<MockSkill, any>>;
   listeningSections: Partial<Record<1 | 2 | 3 | 4, any>>;
+  readingPassages: Partial<Record<1 | 2 | 3, any>>;
   speakingParts: Partial<Record<MockSpeakingPart, any>>;
   attempts: Partial<Record<string, number>>;
   status: MockBuildState;
@@ -7452,6 +7310,28 @@ function mockSpeakingPartInstructions(part: MockSpeakingPart, build: ServerMockB
   return `Create IELTS Speaking ${part} for target band ${build.input.targetBand || 7}. ${contracts[part]} ${provenance} Return only this Part JSON object, never the whole Speaking test, without markdown.`;
 }
 
+function mockListeningSectionInstructions(sectionNumber: 1 | 2 | 3 | 4, build: ServerMockBuild): string {
+  const start = (sectionNumber - 1) * 10 + 1;
+  const end = start + 9;
+  return `Create only IELTS Listening section ${sectionNumber} for target band ${build.input.targetBand || 7}.
+Return one JSON object with sectionNumber=${sectionNumber}, title, context, a complete audioScriptExcerpt containing every answer, instructionsVi, and exactly 10 questions numbered ${start}-${end} in order.
+Every question must use sectionIndex=${sectionNumber - 1} and include id, number, sectionIndex, type, prompt, correctAnswer and explanationVi.
+type must be one of multiple_choice, gap_fill, matching_features, map_labelling, sentence_completion.
+Return JSON only. This is AI-generated IELTS-style practice, never official content.`;
+}
+
+function mockReadingPassageInstructions(passageNumber: 1 | 2 | 3, build: ServerMockBuild): string {
+  const counts = [13, 13, 14] as const;
+  const start = counts.slice(0, passageNumber - 1).reduce((total, count) => total + count, 0) + 1;
+  const count = counts[passageNumber - 1];
+  const end = start + count - 1;
+  return `Create only IELTS Academic Reading passage ${passageNumber} for target band ${build.input.targetBand || 7}.
+Return one JSON object with passageNumber=${passageNumber}, title, subtitle, wordCount, paragraphs [{label,text}], and exactly ${count} questions numbered ${start}-${end} in order.
+Every question must use sectionIndex=${passageNumber - 1} and include id, number, sectionIndex, type, prompt, correctAnswer and explanationVi.
+type must be one of multiple_choice, gap_fill, true_false_not_given, yes_no_not_given, matching_headings, matching_features, sentence_completion.
+Return JSON only. This is AI-generated IELTS-style practice, never official content.`;
+}
+
 const mockQuestionResponseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -7472,6 +7352,51 @@ const mockQuestionResponseSchema = {
   },
   required: ['id', 'number', 'sectionIndex', 'type', 'prompt', 'correctAnswer', 'explanationVi'],
 };
+
+function listeningSectionResponseSchema(): any {
+  return {
+    type: Type.OBJECT,
+    properties: {
+      sectionNumber: { type: Type.NUMBER },
+      title: { type: Type.STRING },
+      context: { type: Type.STRING },
+      audioScriptExcerpt: { type: Type.STRING },
+      instructionsVi: { type: Type.STRING },
+      questions: { type: Type.ARRAY, items: mockQuestionResponseSchema },
+    },
+    required: ['sectionNumber', 'title', 'context', 'audioScriptExcerpt', 'instructionsVi', 'questions'],
+  };
+}
+
+function readingPassageResponseSchema(): any {
+  return {
+    type: Type.OBJECT,
+    properties: {
+      passageNumber: { type: Type.NUMBER },
+      title: { type: Type.STRING },
+      subtitle: { type: Type.STRING },
+      wordCount: { type: Type.NUMBER },
+      paragraphs: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { label: { type: Type.STRING }, text: { type: Type.STRING } },
+          required: ['label', 'text'],
+        },
+      },
+      headingsList: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { id: { type: Type.STRING }, text: { type: Type.STRING } },
+          required: ['id', 'text'],
+        },
+      },
+      questions: { type: Type.ARRAY, items: mockQuestionResponseSchema },
+    },
+    required: ['passageNumber', 'title', 'subtitle', 'wordCount', 'paragraphs', 'questions'],
+  };
+}
 
 function mockSkillResponseSchema(skill: Exclude<MockSkill, 'speaking'>): any {
   if (skill === 'listening') {
@@ -7587,6 +7512,106 @@ type MockSkillGenerationResult = {
   partial?: Partial<Record<MockSpeakingPart, any>>;
 };
 
+async function generateMockListening(ai: GoogleGenAI, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
+  let totalAttempts = 0;
+  for (const sectionNumber of MOCK_LISTENING_SECTIONS) {
+    const existing = validateListeningSection(sectionNumber, build.listeningSections[sectionNumber]);
+    if (existing.ready) continue;
+    let repair = '';
+    let lastErrors = existing.errors;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      totalAttempts += 1;
+      if (attempt > 1 && build.status === 'generating') moveMockBuild(build, { type: 'REPAIR' });
+      const attemptKey = `listening-section-${sectionNumber}`;
+      build.attempts[attemptKey] = (build.attempts[attemptKey] || 0) + 1;
+      touchMockBuild(build);
+      const result = await callGeminiResiliently(ai, {
+        taskTier: 'deep',
+        contents: `${mockListeningSectionInstructions(sectionNumber, build)}${repair}`,
+        config: { responseMimeType: 'application/json', responseSchema: listeningSectionResponseSchema() },
+        maxRetriesPerModel: 1,
+        validateText: (text) => validateListeningSection(sectionNumber, JSON.parse(text)).ready,
+      });
+      if (!result.text) {
+        lastErrors = [result.error || 'AI_UNAVAILABLE'];
+        repair = ' The provider returned no valid section. Generate the complete section again.';
+        continue;
+      }
+      const validation = validateListeningSection(sectionNumber, JSON.parse(result.text));
+      if (validation.ready) {
+        build.listeningSections[sectionNumber] = validation.data;
+        touchMockBuild(build);
+        lastErrors = [];
+        break;
+      }
+      lastErrors = validation.errors;
+      repair = ` Previous section failed validation: ${lastErrors.join(' ')} Return the complete corrected section.`;
+    }
+    if (lastErrors.length) {
+      const count = Object.values(build.listeningSections)
+        .reduce((total, section: any) => total + (section?.questions?.length || 0), 0);
+      return { section: null, validation: { ready: false, errors: lastErrors, count, code: 'schema_invalid' }, attempts: totalAttempts, failedParts: [], readyParts: [] };
+    }
+  }
+  const sections = MOCK_LISTENING_SECTIONS.map((sectionNumber) => build.listeningSections[sectionNumber]);
+  const section = {
+    title: 'AI-generated IELTS-style Listening Test',
+    audioTranscript: sections.map((item: any) => item.audioScriptExcerpt).join('\n\n'),
+    sections,
+  };
+  const validation = validateMockSkill('listening', section);
+  return { section: validation.ready ? section : null, validation, attempts: totalAttempts, failedParts: [], readyParts: [] };
+}
+
+async function generateMockReading(ai: GoogleGenAI, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
+  let totalAttempts = 0;
+  for (const passageNumber of [1, 2, 3] as const) {
+    const existing = validateReadingPassage(passageNumber, build.readingPassages[passageNumber]);
+    if (existing.ready) continue;
+    let repair = '';
+    let lastErrors = existing.errors;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      totalAttempts += 1;
+      if (attempt > 1 && build.status === 'generating') moveMockBuild(build, { type: 'REPAIR' });
+      const attemptKey = `reading-passage-${passageNumber}`;
+      build.attempts[attemptKey] = (build.attempts[attemptKey] || 0) + 1;
+      touchMockBuild(build);
+      const result = await callGeminiResiliently(ai, {
+        taskTier: 'deep',
+        contents: `${mockReadingPassageInstructions(passageNumber, build)}${repair}`,
+        config: { responseMimeType: 'application/json', responseSchema: readingPassageResponseSchema() },
+        maxRetriesPerModel: 1,
+        validateText: (text) => validateReadingPassage(passageNumber, JSON.parse(text)).ready,
+      });
+      if (!result.text) {
+        lastErrors = [result.error || 'AI_UNAVAILABLE'];
+        repair = ' The provider returned no valid passage. Generate the complete passage again.';
+        continue;
+      }
+      const validation = validateReadingPassage(passageNumber, JSON.parse(result.text));
+      if (validation.ready) {
+        build.readingPassages[passageNumber] = validation.data;
+        touchMockBuild(build);
+        lastErrors = [];
+        break;
+      }
+      lastErrors = validation.errors;
+      repair = ` Previous passage failed validation: ${lastErrors.join(' ')} Return the complete corrected passage.`;
+    }
+    if (lastErrors.length) {
+      const count = Object.values(build.readingPassages)
+        .reduce((total, passage: any) => total + (passage?.questions?.length || 0), 0);
+      return { section: null, validation: { ready: false, errors: lastErrors, count, code: 'schema_invalid' }, attempts: totalAttempts, failedParts: [], readyParts: [] };
+    }
+  }
+  const section = {
+    title: 'AI-generated IELTS-style Academic Reading Test',
+    passages: ([1, 2, 3] as const).map((passageNumber) => build.readingPassages[passageNumber]),
+  };
+  const validation = validateMockSkill('reading', section);
+  return { section: validation.ready ? section : null, validation, attempts: totalAttempts, failedParts: [], readyParts: [] };
+}
+
 async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild, part: MockSpeakingPart) {
   const existing = validateSpeakingPart(part, build.speakingParts[part]);
   if (existing.ready) return { part, data: existing.data, validation: existing, attempts: 0, reused: true };
@@ -7602,6 +7627,13 @@ async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild,
       contents: `${mockSpeakingPartInstructions(part, build)}${repair}`,
       config: { responseMimeType: 'application/json', responseSchema: speakingPartResponseSchema(part) },
       maxRetriesPerModel: 2,
+      validateText: (text) => {
+        const validation = validateSpeakingPart(part, JSON.parse(text));
+        if (!validation.ready) return false;
+        const sourcePart = ({ speaking_part1: 'part1', speaking_part2: 'part2', speaking_part3: 'part3' } as const)[build.input.sourceItem?.skill as 'speaking_part1' | 'speaking_part2' | 'speaking_part3'];
+        return sourcePart !== part
+          || validateMockSourcePreservation('speaking', { [part]: validation.data }, build.input.sourceItem).length === 0;
+      },
     });
     if (!result.text) {
       lastErrors = [result.error || 'AI_UNAVAILABLE'];
@@ -7669,8 +7701,64 @@ async function generateMockSpeaking(ai: GoogleGenAI, build: ServerMockBuild): Pr
   return { section, partial: build.speakingParts, failedParts: [], readyParts: MOCK_SPEAKING_PARTS, validation, attempts: results.reduce((total, result) => total + result.attempts, 0) };
 }
 
+async function generateMockSpeakingStep(ai: GoogleGenAI, build: ServerMockBuild, part: MockSpeakingPart) {
+  const result = await generateMockSpeakingPart(ai, build, part);
+  const readyParts = MOCK_SPEAKING_PARTS.filter((candidate) =>
+    validateSpeakingPart(candidate, build.speakingParts[candidate]).ready,
+  );
+  if (!result.validation.ready) {
+    return {
+      part,
+      partData: null,
+      section: null,
+      partial: { ...build.speakingParts },
+      failedParts: [part],
+      readyParts,
+      validation: {
+        ready: false,
+        code: 'schema_invalid' as const,
+        errors: result.validation.errors,
+        count: readyParts.length,
+      },
+      attempts: result.attempts,
+    };
+  }
+
+  if (readyParts.length < MOCK_SPEAKING_PARTS.length) {
+    return {
+      part,
+      partData: result.data,
+      section: null,
+      partial: { ...build.speakingParts },
+      failedParts: [],
+      readyParts,
+      validation: { ready: true, errors: [], count: readyParts.length },
+      attempts: result.attempts,
+    };
+  }
+
+  const section = normalizeMockSkill('speaking', {
+    examinerName: 'Omni AI Examiner',
+    examinerAvatar: '',
+    ...build.speakingParts,
+  });
+  const validation = validateMockSkill('speaking', section);
+  return {
+    part,
+    partData: result.data,
+    section: validation.ready ? section : null,
+    partial: { ...build.speakingParts },
+    failedParts: validation.ready ? [] : [part],
+    readyParts,
+    validation,
+    attempts: result.attempts,
+  };
+}
+
 async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill: MockSkill): Promise<MockSkillGenerationResult> {
   if (skill === 'speaking') return generateMockSpeaking(ai, build);
+  if (skill === 'listening') return generateMockListening(ai, build);
+  if (skill === 'reading') return generateMockReading(ai, build);
   let repair = '';
   let lastErrors: string[] = [];
   let lastCount = 0;
@@ -7684,6 +7772,12 @@ async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill:
       contents: `${mockSkillInstructions(skill, build)}${repair}`,
       config: { responseMimeType: 'application/json', responseSchema: mockSkillResponseSchema(skill as Exclude<MockSkill, 'speaking'>) },
       maxRetriesPerModel: 2,
+      validateText: (text) => {
+        const section = normalizeMockSkill(skill, JSON.parse(text));
+        const validation = validateMockSkill(skill, section);
+        return validation.ready
+          && validateMockSourcePreservation(skill, section, build.input.sourceItem).length === 0;
+      },
     });
     if (!result.text) {
       lastErrors = [result.error || 'AI_UNAVAILABLE'];
@@ -7760,6 +7854,7 @@ function createServerMockBuild(input: any): ServerMockBuild {
     input: input || {},
     skills: validResumeSkills,
     listeningSections: {},
+    readingPassages: {},
     speakingParts: validSpeakingParts,
     attempts: {},
     status: 'draft',
@@ -7822,7 +7917,43 @@ app.post('/api/mock/builds/:id/skills/:skill/generate', async (req, res) => {
   if (build.status === 'generating' || build.status === 'repairing') {
     return res.status(409).json({ error: 'Mock build đang được xử lý.', code: 'BUILD_BUSY' });
   }
+  const requestedSpeakingPart = skill === 'speaking' ? req.body?.part as MockSpeakingPart | undefined : undefined;
+  if (skill === 'speaking' && !MOCK_SPEAKING_PARTS.includes(requestedSpeakingPart as MockSpeakingPart)) {
+    return res.status(400).json({ error: 'Speaking Part không hợp lệ.', code: 'INVALID_SPEAKING_PART' });
+  }
   moveMockBuild(build, { type: 'START' });
+  if (skill === 'speaking' && requestedSpeakingPart) {
+    const generated = await generateMockSpeakingStep(ai, build, requestedSpeakingPart);
+    if (!generated.validation.ready) {
+      moveMockBuild(build, { type: 'FAIL' });
+      build.errors.speaking = generated.validation.errors;
+      touchMockBuild(build);
+      return res.status(422).json({
+        error: `Không thể tạo Speaking ${requestedSpeakingPart} đạt quality gate.`,
+        skill,
+        part: requestedSpeakingPart,
+        code: generated.validation.code || 'schema_invalid',
+        validation: generated.validation,
+        failedParts: generated.failedParts,
+        readyParts: generated.readyParts,
+        partial: generated.partial,
+      });
+    }
+    if (generated.section) build.skills.speaking = generated.section;
+    delete build.errors.speaking;
+    moveMockBuild(build, { type: 'VALIDATE' });
+    return res.json({
+      mockBuildId: build.id,
+      skill,
+      part: requestedSpeakingPart,
+      state: generated.section ? 'ready' : 'partial',
+      partData: generated.partData,
+      data: generated.section || undefined,
+      validation: generated.validation,
+      attempts: generated.attempts,
+      readyParts: generated.readyParts,
+    });
+  }
   const generated = await generateMockSkill(ai, build, skill);
   if (!generated.section) {
     moveMockBuild(build, { type: 'FAIL' });
@@ -7885,7 +8016,10 @@ app.post('/api/mock/builds/:id/retry', async (req, res) => {
     return res.status(409).json({ error: 'Mock build đã hoàn tất.', code: 'BUILD_ALREADY_READY' });
   }
 
-  const generated = await generateMockSkill(ai, build, skill);
+  const speakingStep = skill === 'speaking' && part
+    ? await generateMockSpeakingStep(ai, build, part)
+    : null;
+  const generated = speakingStep || await generateMockSkill(ai, build, skill);
   if (!generated.section) {
     moveMockBuild(build, { type: 'FAIL' });
     build.errors[skill] = generated.validation.errors;
@@ -7901,15 +8035,16 @@ app.post('/api/mock/builds/:id/retry', async (req, res) => {
       partial: generated.partial,
     });
   }
-  build.skills[skill] = generated.section;
+  if (generated.section) build.skills[skill] = generated.section;
   delete build.errors[skill];
   moveMockBuild(build, { type: 'VALIDATE' });
   return res.json({
     mockBuildId: build.id,
     skill,
     part,
-    state: 'ready',
-    data: generated.section,
+    state: generated.section ? 'ready' : 'partial',
+    data: generated.section || undefined,
+    partData: speakingStep?.partData,
     validation: generated.validation,
     attempts: generated.attempts,
     readyParts: generated.readyParts,
@@ -7973,8 +8108,12 @@ app.post('/api/mock/builds/:id/finalize', (req, res) => {
 
 app.post("/api/mock/assemble-full-package", handleCreateMockBuild);
 
-function getGroqApiKey(request?: express.Request) {
-  return request?.header('x-groq-api-key')?.trim() || process.env.GROQ_API_KEY?.trim() || '';
+function getGroqApiKeyPool(request?: express.Request) {
+  return getProviderApiKeyPool(
+    process.env,
+    'GROQ_API_KEY',
+    request?.header('x-groq-api-key')?.trim(),
+  );
 }
 
 function getBraveSearchApiKey() {
@@ -8011,7 +8150,7 @@ const handleForecastRefresh: express.RequestHandler = async (req, res) => {
   });
   const directGeminiKey = req.header('x-gemini-api-key')?.trim() || process.env.GEMINI_API_KEY?.trim();
   const ai = shouldUseDirectGemini ? createDirectGeminiClient(directGeminiKey) : null;
-  const groqApiKey = shouldUseDirectGroq ? getGroqApiKey(req) : '';
+  const groqApiKeys = shouldUseDirectGroq ? getGroqApiKeyPool(req) : [];
   const braveSearchApiKey = getBraveSearchApiKey();
 
   const buildPrompt = (query: string) => `Search for IELTS Writing or Speaking reports or preparation sources matching this query: "${query}".
@@ -8047,45 +8186,6 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
       return await synthesizeForecastFromEvidence({
         evidence,
         generate: async (prompt) => {
-      const bridge = await getHealthyWebBridgeClient();
-      if (bridge) {
-        const route = getGatewayRoutes('balanced')[0];
-        const startedAt = Date.now();
-        try {
-          const response = await bridge.generateGemini(
-            route,
-            buildGeminiGatewayRequestBody(prompt, { responseMimeType: 'application/json' }),
-          );
-          const text = String(response?.text || '').trim();
-          if (!text) throw { category: 'schema_invalid', status: 502 };
-          recordGatewayAttempt({
-            lane: 'web_bridge',
-            provider: 'gemini_web',
-            model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
-            capability: 'text',
-            keyAlias: 'web-bridge-local',
-            latencyMs: Date.now() - startedAt,
-            circuitState: 'closed',
-            requestId: `forecast_synthesis_${crypto.randomUUID()}`,
-          });
-          return text;
-        } catch (error) {
-          const failure = classifyApiFailure(error, 'forecast', 'gemini_web');
-          recordGatewayAttempt({
-            lane: 'web_bridge',
-            provider: 'gemini_web',
-            model: process.env.WEB_AI_BRIDGE_MODEL || 'gemini-3.6-flash',
-            capability: 'text',
-            keyAlias: 'web-bridge-local',
-            latencyMs: Date.now() - startedAt,
-            failureCategory: failure.category,
-            circuitState: failure.category === 'quota_exhausted' || failure.category === 'rate_limited' ? 'open' : 'closed',
-            retryAfterMs: failure.retryAfterMs,
-            requestId: failure.requestId,
-          });
-        }
-      }
-
       const textResult = await callGeminiResiliently(getGeminiClient(req), {
         taskTier: 'balanced',
         contents: prompt,
@@ -8106,6 +8206,19 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
           .join(',')
         : undefined;
       console.warn(`[Forecast synthesis] evidenceProvider=${evidence.provider} category=${classifyApiFailure(error, 'forecast', evidence.provider).category}${issues ? ` issues=${issues}` : ''}`);
+      const failure = classifyApiFailure(error, 'forecast', evidence.provider);
+      if ([
+        'auth_missing',
+        'auth_invalid',
+        'rate_limited',
+        'quota_exhausted',
+        'provider_overloaded',
+        'network_failed',
+        'gateway_unavailable',
+        'all_providers_exhausted',
+      ].includes(failure.category)) {
+        return buildDeterministicForecastFromEvidence(evidence);
+      }
       throw error;
     }
   };
@@ -8138,7 +8251,12 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
 
   try {
     const runPrimaryForecast = async () => {
-      const directAttempts: Array<{ provider: 'gemini' | 'groq' | 'brave'; model: string; run: () => Promise<any> }> = [];
+      const directAttempts: Array<{
+        provider: 'gemini' | 'groq' | 'brave';
+        model: string;
+        keyAlias?: string;
+        run: () => Promise<any>;
+      }> = [];
       if (ai) {
         for (const model of [AI_TASK_PROFILES.grounded.model, ...AI_TASK_PROFILES.grounded.fallbacks.filter((item) => item.startsWith('gemini-'))]) {
           directAttempts.push({
@@ -8152,26 +8270,29 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
           });
         }
       }
-      if (groqApiKey) {
+      if (groqApiKeys.length) {
         for (const model of ['groq/compound-mini', 'groq/compound'] as GroqGroundedModel[]) {
+          for (const keyCandidate of groqApiKeys) {
           directAttempts.push({
             provider: 'groq',
             model,
+            keyAlias: keyCandidate.alias,
             run: () => runForecastQueryVariants(
               searchTopicQueries,
               (query) => retryProviderCall(
-                () => requestGroqForecastEvidence({
-                  apiKey: groqApiKey,
+                () => requestGroqGroundedForecast({
+                  apiKey: keyCandidate.apiKey,
                   model,
-                  prompt: buildEvidenceSearchPrompt(query),
+                  prompt: buildPrompt(query),
                   originalQuery: query,
                   retrievedAt,
                 }),
                 { context: 'forecast', provider: 'groq', maxAttempts: 2, baseDelayMs: 750 },
               ),
               (error) => classifyApiFailure(error, 'forecast', 'groq').category,
-            ).then((result) => synthesizeEvidence(result.value)),
+            ).then((result) => result.value),
           });
+          }
         }
       }
       if (braveSearchApiKey) {

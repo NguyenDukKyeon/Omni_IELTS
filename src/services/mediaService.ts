@@ -9,6 +9,8 @@ import {
   MediaImportJob,
 } from '../types';
 import { getGeminiRequestHeaders } from './aiTutor';
+import { classifyMediaImportFailure } from '../lib/mediaImport';
+import { MediaShadowingEvaluationSchema } from '../lib/mediaShadowingEvaluation';
 
 export interface ProcessYouTubeResponse {
   session?: MediaSession;
@@ -100,10 +102,12 @@ export async function evaluateShadowingAttempt(params: {
   userTranscript?: string;
   userAudioBase64?: string;
   topicTitle?: string;
+  durationSeconds?: number;
+  speechSegments?: Array<{ start: number; end: number }> | null;
 }): Promise<MediaShadowingEvaluation> {
   const response = await fetch('/api/media/evaluate-shadowing', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getGeminiRequestHeaders(),
     body: JSON.stringify(params),
   });
 
@@ -113,7 +117,11 @@ export async function evaluateShadowingAttempt(params: {
   }
 
   const data: EvaluateShadowingResponse = await response.json();
-  return data;
+  const parsed = MediaShadowingEvaluationSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new Error('Kết quả chấm Shadowing không đúng định dạng; chưa thể hiển thị điểm đáng tin cậy.');
+  }
+  return parsed.data as MediaShadowingEvaluation;
 }
 
 /**
@@ -152,7 +160,10 @@ export async function transcribeAudioAndSegmentApi(
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error || `Lỗi phiên âm audio (${response.status})`);
+    const failure = classifyMediaImportFailure(new Error(
+      errData.message || errData.error || `Lỗi phiên âm audio (${response.status})`,
+    ));
+    throw new Error(failure.message);
   }
 
   return await response.json();

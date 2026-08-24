@@ -6,11 +6,17 @@ if (!npmCli) {
   process.exit(1);
 }
 
-for (const script of ['test', 'check:ux-contracts', 'lint', 'build', 'test:e2e', 'test:e2e:live']) {
+const childEnv = { ...process.env };
+if (childEnv.OMNI_CANARY_BASE_URL && !childEnv.PLAYWRIGHT_LIVE_BASE_URL) {
+  childEnv.PLAYWRIGHT_LIVE_BASE_URL = childEnv.OMNI_CANARY_BASE_URL;
+}
+
+for (const script of ['test', 'check:ux-contracts', 'lint', 'build', 'test:e2e', 'test:web-bridge:live', 'test:e2e:live']) {
   const result = spawnSync(process.execPath, [npmCli, 'run', script], {
     cwd: process.cwd(),
     shell: false,
     stdio: 'inherit',
+    env: childEnv,
   });
   if (result.error) console.error(`Could not run npm script ${script}:`, result.error);
   if (result.status !== 0) {

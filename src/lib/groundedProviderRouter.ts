@@ -5,6 +5,7 @@ type ProviderAttempt<T> = {
   lane?: 'bifrost';
   provider: AiProvider;
   model: string;
+  keyAlias?: string;
   run: () => Promise<T>;
 };
 
@@ -117,7 +118,7 @@ export class GroundedProviderRouter {
 
     for (let index = 0; index < attempts.length; index += 1) {
       const attempt = attempts[index];
-      const circuitKey = `${attempt.lane || 'direct'}:${attempt.provider}:${attempt.model}`;
+      const circuitKey = `${attempt.lane || 'direct'}:${attempt.provider}:${attempt.model}:${attempt.keyAlias || 'managed'}`;
       const blockedUntil = this.blockedUntil.get(circuitKey) || 0;
       let failure: ApiFailure;
 

@@ -198,4 +198,33 @@ describe('GroundedProviderRouter', () => {
     expect(primary).toHaveBeenCalledTimes(2);
     expect(restored.value).toEqual({ ok: 'restored' });
   });
+
+  it('isolates quota circuits for separate keys of the same provider and model', async () => {
+    const exhaustedKey = vi.fn().mockRejectedValue({
+      status: 429,
+      message: 'Daily quota exhausted',
+      retryAfterMs: 60_000,
+    });
+    const freshKey = vi.fn().mockResolvedValue({ ok: 'second-key' });
+    const router = new GroundedProviderRouter();
+
+    const result = await router.execute({
+      primary: {
+        provider: 'groq',
+        model: 'groq/compound-mini',
+        keyAlias: 'groq-primary',
+        run: exhaustedKey,
+      },
+      fallback: {
+        provider: 'groq',
+        model: 'groq/compound-mini',
+        keyAlias: 'groq-2',
+        run: freshKey,
+      },
+    });
+
+    expect(result.value).toEqual({ ok: 'second-key' });
+    expect(exhaustedKey).toHaveBeenCalledOnce();
+    expect(freshKey).toHaveBeenCalledOnce();
+  });
 });

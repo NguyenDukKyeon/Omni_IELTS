@@ -72,7 +72,7 @@ describe('AI gateway capability routing', () => {
     expect(routes.some((route) => route.provider === 'nvidia_nim')).toBe(false);
   });
 
-  it('falls back from Gemini text to NVIDIA NIM and OpenRouter without Kira', () => {
+  it('falls back from Gemini text to Groq, NVIDIA NIM and OpenRouter without Kira', () => {
     const routes = getGatewayRoutes('balanced');
 
     expect(JSON.stringify(routes)).not.toContain('"kira"');
@@ -128,11 +128,21 @@ describe('AI gateway capability routing', () => {
       GEMINI_API_KEY: 'secret-gemini-1',
       GEMINI_API_KEY_2: 'secret-gemini-2',
       GROQ_API_KEY: 'secret-groq',
+      GROQ_API_KEY_2: 'secret-groq-2',
+      GROQ_API_KEY_3: 'secret-groq-3',
+      NVIDIA_NIM_API_KEY: 'secret-nvidia',
+      NVIDIA_NIM_API_KEY_2: 'secret-nvidia-2',
+      NVIDIA_NIM_API_KEY_3: 'secret-nvidia-3',
+      OPENROUTER_API_KEY: 'secret-openrouter',
+      OPENROUTER_API_KEY_2: 'secret-openrouter-2',
+      OPENROUTER_API_KEY_3: 'secret-openrouter-3',
       WEB_AI_BRIDGE_ENABLED: 'true',
       WEB_AI_BRIDGE_KIND: 'gemini-web2api',
       WEB_AI_BRIDGE_BASE_URL: 'http://gemini-web2api:8081/v1',
       WEB_AI_BRIDGE_API_KEY: 'secret-web-bridge',
-      WEB_AI_BRIDGE_MODEL: 'gemini-3.6-flash',
+      WEB_AI_BRIDGE_MODEL: 'gemini-3.1-pro',
+      WEB_AI_BRIDGE_COOKIE_HOST_PATH: 'C:/private/session.json',
+      WEB_AI_BRIDGE_PRIORITY: 'prefer_deep',
     });
 
     expect(capabilities).toMatchObject({
@@ -148,7 +158,7 @@ describe('AI gateway capability routing', () => {
         lane: 'web_bridge',
         enabled: true,
         mode: 'canary',
-        status: 'ready',
+        status: 'unavailable',
         capabilities: ['text'],
       }),
     ]);
@@ -159,6 +169,26 @@ describe('AI gateway capability routing', () => {
         { alias: 'gemini-project-3', configured: false },
         { alias: 'gemini-project-4', configured: false },
       ]);
+    expect(capabilities.providers.find((provider) => provider.provider === 'groq')?.capabilities)
+      .toEqual(expect.arrayContaining(['text', 'search']));
+    expect(capabilities.providers.find((provider) => provider.provider === 'groq')?.keys)
+      .toEqual([
+        { alias: 'groq-primary', configured: true },
+        { alias: 'groq-2', configured: true },
+        { alias: 'groq-3', configured: true },
+      ]);
+    expect(capabilities.providers.find((provider) => provider.provider === 'nvidia_nim')?.keys)
+      .toEqual([
+        { alias: 'nvidia-nim-primary', configured: true },
+        { alias: 'nvidia-nim-2', configured: true },
+        { alias: 'nvidia-nim-3', configured: true },
+      ]);
+    expect(capabilities.providers.find((provider) => provider.provider === 'openrouter')?.keys)
+      .toEqual([
+        { alias: 'openrouter-primary', configured: true },
+        { alias: 'openrouter-2', configured: true },
+        { alias: 'openrouter-3', configured: true },
+      ]);
     expect(JSON.stringify(capabilities.providers)).not.toContain('"kira"');
     expect(JSON.stringify(capabilities)).not.toContain('secret-');
   });
@@ -168,12 +198,13 @@ describe('AI gateway capability routing', () => {
       WEB_AI_BRIDGE_ENABLED: 'true',
       WEB_AI_BRIDGE_KIND: 'gemini-web2api',
       WEB_AI_BRIDGE_BASE_URL: 'http://gemini-web2api:8081/v1',
+      WEB_AI_BRIDGE_COOKIE_HOST_PATH: '',
     });
 
     expect(capabilities.lanes.find((lane) => lane.lane === 'web_bridge')).toMatchObject({
       enabled: false,
       mode: 'canary',
-      status: 'auth_missing',
+      status: 'login_required',
       credentialsConfigured: false,
     });
   });
@@ -318,6 +349,8 @@ describe('Web Bridge private fallback client', () => {
 
   it('converts a structured text request to the local OpenAI-compatible endpoint', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      model: 'gemini-3.1-pro',
+      omni: { authenticated: true, resolved_model: 'gemini-pro' },
       choices: [{ message: { content: '```json\n{"cards":[]}\n```' } }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const client = new WebBridgeGatewayClient({
@@ -337,6 +370,7 @@ describe('Web Bridge private fallback client', () => {
     });
 
     expect(response.candidates[0].content.parts[0].text).toBe('{"cards":[]}');
+    expect(response.bridgeMetadata).toEqual({ authenticated: true, resolvedModel: 'gemini-pro' });
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://127.0.0.1:18081/v1/chat/completions',
       expect.objectContaining({
@@ -387,7 +421,7 @@ describe('Web Bridge private fallback client', () => {
 });
 
 describe('generateTextWithGateway', () => {
-  it('moves from exhausted Gemini routes to NVIDIA NIM for text work', async () => {
+  it('moves from exhausted Gemini routes to Groq for text work', async () => {
     const onAttempt = vi.fn();
     const client = {
       lane: 'bifrost' as const,
@@ -408,8 +442,8 @@ describe('generateTextWithGateway', () => {
 
     expect(result).toMatchObject({
       text: '{"reply":"ok"}',
-      provider: 'nvidia_nim',
-      model: 'meta/llama-3.3-70b-instruct',
+      provider: 'groq',
+      model: 'openai/gpt-oss-120b',
     });
     expect(client.generateGemini).toHaveBeenCalledTimes(2);
     expect(client.chatCompletion).toHaveBeenCalledOnce();
@@ -473,12 +507,12 @@ describe('createGeminiGatewayFacade', () => {
     }));
   });
 
-  it('keeps legacy text callers alive with NVIDIA after the Gemini pool is exhausted', async () => {
+  it('keeps legacy text callers alive with Groq after the Gemini pool is exhausted', async () => {
     const client = {
       lane: 'bifrost' as const,
       generateGemini: vi.fn().mockRejectedValue({ category: 'quota_exhausted', status: 429 }),
       chatCompletion: vi.fn().mockResolvedValue({
-        choices: [{ message: { content: 'NVIDIA fallback response' } }],
+        choices: [{ message: { content: 'Groq fallback response' } }],
       }),
     };
     const facade = createGeminiGatewayFacade({ getClient: async () => client as any });
@@ -489,9 +523,9 @@ describe('createGeminiGatewayFacade', () => {
       config: {},
     });
 
-    expect(response.text).toBe('NVIDIA fallback response');
+    expect(response.text).toBe('Groq fallback response');
     expect(client.chatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: 'nvidia_nim' }),
+      expect.objectContaining({ provider: 'groq', model: 'openai/gpt-oss-120b' }),
       expect.any(Array),
       expect.any(Object),
     );
@@ -516,7 +550,7 @@ describe('createGeminiGatewayFacade', () => {
     expect(response.text).toBe('{"cards":[]}');
     expect(client.chatCompletion).toHaveBeenCalledOnce();
     expect(client.chatCompletion.mock.calls.map(([route]) => route.model)).toEqual([
-      'meta/llama-3.3-70b-instruct',
+      'openai/gpt-oss-120b',
     ]);
   });
 
@@ -541,7 +575,7 @@ describe('createGeminiGatewayFacade', () => {
       expect.not.objectContaining({ generationConfig: expect.objectContaining({ __omniTaskTier: expect.anything() }) }),
     );
     expect(client.chatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: 'nvidia_nim', timeoutMs: 90_000 }),
+      expect.objectContaining({ provider: 'groq', model: 'openai/gpt-oss-120b', timeoutMs: 90_000 }),
       expect.any(Array),
       expect.any(Object),
     );
