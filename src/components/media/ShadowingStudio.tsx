@@ -31,21 +31,26 @@ interface ShadowingStudioProps {
   session: MediaSession;
   activeSegmentIndex: number;
   onSelectSegmentIndex: (index: number) => void;
+  onUpdateSession: (session: MediaSession) => void;
 }
 
 export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
   session,
   activeSegmentIndex,
   onSelectSegmentIndex,
+  onUpdateSession,
 }) => {
   const { awardXP, addMistake, openAITutorWithPrompt } = useApp();
 
   const segment: MediaTranscriptSegment | undefined =
     session.transcriptSegments[activeSegmentIndex];
+  const hasOriginalAudio = Boolean(session.youtubeId || session.mediaUrl);
 
   // Playback settings
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [loopCount, setLoopCount] = useState<number>(1);
+  const [waitBetweenLoopsMs, setWaitBetweenLoopsMs] = useState<number>(0);
+  const [fullLessonMode, setFullLessonMode] = useState<boolean>(false);
   const [currentLoop, setCurrentLoop] = useState<number>(0);
   const [isPlayingNative, setIsPlayingNative] = useState<boolean>(false);
   const [showTranslation, setShowTranslation] = useState<boolean>(true);
@@ -70,10 +75,23 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
   const speechRecognitionRef = useRef<any>(null);
   const recognizedTextRef = useRef<string>('');
   const originalPlayerRef = useRef<OriginalMediaPlayerHandle | null>(null);
+  const continueFullLessonRef = useRef(false);
+  const activeStreamRef = useRef<MediaStream | null>(null);
+  const vadRef = useRef<{ pause: () => Promise<void>; destroy: () => Promise<void> } | null>(null);
+  const vadAvailableRef = useRef(false);
+  const recordingStartedAtRef = useRef(0);
+  const recordingDurationRef = useRef(0);
+  const speechStartedAtRef = useRef<number | null>(null);
+  const speechSegmentsRef = useRef<Array<{ start: number; end: number }>>([]);
+  const cancelRecordingRef = useRef(false);
 
   // Clean up on unmount or segment change
   useEffect(() => {
-    setEvaluation(null);
+    if (mediaRecorderRef.current?.state === 'recording') {
+      cancelRecordingRef.current = true;
+      mediaRecorderRef.current.stop();
+    }
+    setEvaluation(session.transcriptSegments[activeSegmentIndex]?.shadowingEvaluation ?? null);
     setUserAudioUrl(null);
     setUserAudioBlob(null);
     setIsRecording(false);
@@ -81,21 +99,44 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
     setIsPlayingUserAudio(false);
     setRecordingSeconds(0);
     clearInterval(recordTimerRef.current);
+    vadRef.current?.pause().catch(() => undefined);
+    vadRef.current?.destroy().catch(() => undefined);
+    vadRef.current = null;
+    activeStreamRef.current?.getTracks().forEach((track) => track.stop());
+    activeStreamRef.current = null;
   }, [activeSegmentIndex, session.id]);
+
+  useEffect(() => () => {
+    if (userAudioUrl) URL.revokeObjectURL(userAudioUrl);
+  }, [userAudioUrl]);
 
   // Handle Play Native Sentence Audio
   const handlePlayNativeAudio = () => {
-    if (!segment) return;
+    if (!segment || !hasOriginalAudio) return;
     setIsPlayingNative(true);
     setCurrentLoop(1);
-    originalPlayerRef.current?.playSegment(segment.start, segment.end, playbackSpeed, loopCount);
+    originalPlayerRef.current?.playSegment(
+      segment.start,
+      segment.end,
+      playbackSpeed,
+      loopCount,
+      waitBetweenLoopsMs,
+    );
   };
 
   const handleStopNativeAudio = () => {
+    continueFullLessonRef.current = false;
     originalPlayerRef.current?.stop();
     setIsPlayingNative(false);
     setCurrentLoop(0);
   };
+
+  useEffect(() => {
+    if (!continueFullLessonRef.current) return;
+    continueFullLessonRef.current = false;
+    const timer = window.setTimeout(() => handlePlayNativeAudio(), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeSegmentIndex]);
 
   // Start Real Voice Recording
   const startRecording = async () => {
@@ -104,6 +145,11 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
     setUserAudioUrl(null);
     setUserAudioBlob(null);
     recognizedTextRef.current = '';
+    speechSegmentsRef.current = [];
+    speechStartedAtRef.current = null;
+    vadAvailableRef.current = false;
+    recordingDurationRef.current = 0;
+    cancelRecordingRef.current = false;
 
     try {
       // Initialize SpeechRecognition if supported for transcript capture
@@ -129,6 +175,7 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
       // Initialize MediaRecorder
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      activeStreamRef.current = stream;
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -141,26 +188,71 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Stop all audio tracks
+        stream.getTracks().forEach((track) => track.stop());
+        activeStreamRef.current = null;
+        if (cancelRecordingRef.current) return;
+
         setUserAudioBlob(audioBlob);
         const url = URL.createObjectURL(audioBlob);
         setUserAudioUrl(url);
 
-        // Stop all audio tracks
-        stream.getTracks().forEach((track) => track.stop());
-
         // Perform AI evaluation
-        await handleEvaluateRecording(audioBlob, recognizedTextRef.current);
+        await handleEvaluateRecording(
+          audioBlob,
+          recognizedTextRef.current,
+          recordingDurationRef.current,
+          vadAvailableRef.current && speechSegmentsRef.current.length
+            ? speechSegmentsRef.current
+            : null,
+        );
       };
 
       mediaRecorder.start();
+      recordingStartedAtRef.current = performance.now();
       setIsRecording(true);
       setRecordingSeconds(0);
 
       recordTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
+
+      try {
+        const { MicVAD } = await import('@ricky0123/vad-web');
+        const vad = await MicVAD.new({
+          getStream: async () => stream,
+          pauseStream: async () => undefined,
+          resumeStream: async () => stream,
+          onSpeechStart: () => {
+            speechStartedAtRef.current = (performance.now() - recordingStartedAtRef.current) / 1000;
+          },
+          onSpeechEnd: () => {
+            if (speechStartedAtRef.current === null) return;
+            speechSegmentsRef.current.push({
+              start: speechStartedAtRef.current,
+              end: (performance.now() - recordingStartedAtRef.current) / 1000,
+            });
+            speechStartedAtRef.current = null;
+          },
+        });
+        if (mediaRecorder.state !== 'recording') {
+          await vad.destroy();
+        } else {
+          vadRef.current = vad;
+          await vad.start();
+          vadAvailableRef.current = true;
+        }
+      } catch {
+        vadAvailableRef.current = false;
+      }
     } catch (err: any) {
       console.warn('Microphone permission denied or not supported:', err);
+      try {
+        speechRecognitionRef.current?.stop();
+      } catch {}
+      speechRecognitionRef.current = null;
+      activeStreamRef.current?.getTracks().forEach((track) => track.stop());
+      activeStreamRef.current = null;
       setEvaluationError('Không truy cập được microphone. Điểm phát âm và ngữ điệu đang unavailable; hãy cấp quyền mic rồi thử lại.');
       setIsRecording(false);
     }
@@ -173,6 +265,21 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
       } catch (e) {}
     }
 
+    recordingDurationRef.current = Math.max(
+      0,
+      (performance.now() - recordingStartedAtRef.current) / 1000,
+    );
+    if (speechStartedAtRef.current !== null) {
+      speechSegmentsRef.current.push({
+        start: speechStartedAtRef.current,
+        end: recordingDurationRef.current,
+      });
+      speechStartedAtRef.current = null;
+    }
+    vadRef.current?.pause().catch(() => undefined);
+    vadRef.current?.destroy().catch(() => undefined);
+    vadRef.current = null;
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     } else setEvaluationError('Không có audio thật để chấm.');
@@ -182,7 +289,12 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
   };
 
   // Perform AI Evaluation
-  const handleEvaluateRecording = async (blob: Blob | null, userTranscript: string) => {
+  const handleEvaluateRecording = async (
+    blob: Blob | null,
+    userTranscript: string,
+    durationSeconds: number,
+    speechSegments: Array<{ start: number; end: number }> | null,
+  ) => {
     if (!segment) return;
     setIsEvaluating(true);
     setEvaluationError(null);
@@ -205,9 +317,18 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
         userTranscript,
         userAudioBase64: base64Audio,
         topicTitle: session.title,
+        durationSeconds,
+        speechSegments,
       });
 
       setEvaluation(evalResult);
+      onUpdateSession({
+        ...session,
+        lastPracticedDate: new Date().toISOString(),
+        transcriptSegments: session.transcriptSegments.map((item, index) => index === activeSegmentIndex
+          ? { ...item, shadowingScore: evalResult.overallScore, shadowingEvaluation: evalResult }
+          : item),
+      });
 
       // Award XP based on score
       if (evalResult.overallScore >= 80) {
@@ -302,9 +423,14 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
       <OriginalMediaPlayer
         ref={originalPlayerRef}
         session={session}
+        onLoopChange={setCurrentLoop}
         onPlaybackEnded={() => {
           setIsPlayingNative(false);
           setCurrentLoop(0);
+          if (fullLessonMode && activeSegmentIndex < session.transcriptSegments.length - 1) {
+            continueFullLessonRef.current = true;
+            onSelectSegmentIndex(activeSegmentIndex + 1);
+          }
         }}
       />
       {/* Active Segment Studio Card */}
@@ -353,9 +479,11 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
               <Repeat className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
               {[1, 2, 3].map((lp) => (
-                <button data-ux-flow="media.learning"
-                  key={lp}
-                  onClick={() => setLoopCount(lp)}
+                 <button data-ux-flow="media.learning"
+                   key={lp}
+                   onClick={() => setLoopCount(lp)}
+                   aria-label={`Lặp ${lp} lần`}
+                   aria-pressed={loopCount === lp}
                   className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
                     loopCount === lp
                       ? 'bg-white dark:bg-stone-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
@@ -366,8 +494,30 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
                   {lp}x
                 </button>
               ))}
-            </div>
-          </div>
+             </div>
+
+             <button
+               type="button"
+               data-ux-flow="media.learning"
+               aria-label="Chờ 0.8 giây giữa các vòng"
+               aria-pressed={waitBetweenLoopsMs === 800}
+               onClick={() => setWaitBetweenLoopsMs((value) => value === 800 ? 0 : 800)}
+               className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-bold transition-all ${waitBetweenLoopsMs === 800 ? 'border-amber-500 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : 'border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400'}`}
+             >
+               Chờ 0.8s
+             </button>
+
+             <button
+               type="button"
+               data-ux-flow="media.learning"
+               aria-label="Tự chuyển toàn bài"
+               aria-pressed={fullLessonMode}
+               onClick={() => setFullLessonMode((value) => !value)}
+               className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-bold transition-all ${fullLessonMode ? 'border-indigo-500 bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200' : 'border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400'}`}
+             >
+               Toàn bài
+             </button>
+           </div>
         </div>
 
         {/* Big Sentence Display */}
@@ -391,8 +541,9 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
             ) : (
               <button data-ux-flow="media.learning"
                 onClick={handlePlayNativeAudio}
-                className="w-16 h-16 rounded-full bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center shadow-lg shadow-sky-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer group"
-                title="Nghe phát âm chuẩn bản xứ"
+                disabled={!hasOriginalAudio}
+                className="w-16 h-16 rounded-full bg-sky-500 hover:bg-sky-600 disabled:bg-stone-300 disabled:shadow-none disabled:cursor-not-allowed dark:disabled:bg-stone-700 text-white flex items-center justify-center shadow-lg shadow-sky-500/30 hover:enabled:scale-105 active:enabled:scale-95 transition-all cursor-pointer group"
+                title={hasOriginalAudio ? 'Nghe phát âm chuẩn bản xứ' : 'Chưa có audio gốc để nghe'}
               >
                 <Volume2 className="w-8 h-8 group-hover:scale-110 transition-transform" />
               </button>
@@ -400,7 +551,11 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
           </div>
 
           <div className="text-xs font-bold text-sky-600 dark:text-sky-400">
-            {isPlayingNative ? 'Đang lắng nghe phát âm bản xứ...' : 'Bấm để nghe giọng chuẩn'}
+            {isPlayingNative
+              ? 'Đang lắng nghe phát âm bản xứ...'
+              : hasOriginalAudio
+                ? 'Bấm để nghe giọng chuẩn'
+                : 'Chưa có audio gốc — hãy nhập YouTube hoặc audio để luyện Shadowing'}
           </div>
 
           {/* Sentence Text with word click */}
@@ -552,6 +707,35 @@ export const ShadowingStudio: React.FC<ShadowingStudioProps> = ({
                 </div>
               </div>
             </div>
+
+            {evaluation.telemetry && (
+              <div className="rounded-2xl border border-sky-200/80 bg-sky-50/60 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-sky-900 dark:text-sky-200">Chỉ số nhịp nói từ audio thật</div>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${evaluation.telemetry.acousticStatus === 'measured' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : 'bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300'}`}>
+                    {evaluation.telemetry.acousticStatus === 'measured' ? 'VAD đã đo' : 'Pause metrics unavailable'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                  <div className="rounded-xl bg-white p-2 dark:bg-stone-900">
+                    <div className="text-base font-black text-sky-700 dark:text-sky-300">{evaluation.telemetry.rawWpm}</div>
+                    <div className="text-[10px] text-stone-500">Raw WPM</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-2 dark:bg-stone-900">
+                    <div className="text-base font-black text-sky-700 dark:text-sky-300">{evaluation.telemetry.articulationRate ?? '—'}</div>
+                    <div className="text-[10px] text-stone-500">Articulation/min</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-2 dark:bg-stone-900">
+                    <div className="text-base font-black text-sky-700 dark:text-sky-300">{evaluation.telemetry.longPauses ?? '—'}</div>
+                    <div className="text-[10px] text-stone-500">Ngắt dài</div>
+                  </div>
+                  <div className="rounded-xl bg-white p-2 dark:bg-stone-900">
+                    <div className="text-base font-black text-sky-700 dark:text-sky-300">{evaluation.telemetry.speechRatio === null ? '—' : `${Math.round(evaluation.telemetry.speechRatio * 100)}%`}</div>
+                    <div className="text-[10px] text-stone-500">Speech ratio</div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Detailed Feedback & Actionable Advice */}
             <div className="space-y-3">

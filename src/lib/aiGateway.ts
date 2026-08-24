@@ -1,4 +1,5 @@
 import { AI_TASK_PROFILES, type AiCapability, type AiTaskTier } from './aiTaskProfiles';
+import { getConfiguredWebBridgeSessionStatus, type WebBridgeSessionStatus } from './webBridgeSession';
 
 export type AiGatewayProvider = 'gemini' | 'gemini_web' | 'groq' | 'nvidia_nim' | 'openrouter';
 export type AiGatewayLane = 'bifrost' | 'web_bridge';
@@ -78,7 +79,7 @@ export interface AiGatewayCapabilities {
     lane: AiGatewayLane;
     enabled: boolean;
     mode: 'public' | 'canary' | 'disabled';
-    status: 'ready' | 'auth_missing' | 'disabled';
+    status: 'ready' | 'auth_missing' | WebBridgeSessionStatus;
     capabilities: AiCapability[];
     baseUrlConfigured: boolean;
     credentialsConfigured: boolean;
@@ -250,13 +251,15 @@ export function describeGatewayCapabilities(
     && virtualKeyConfigured;
   const webBridgeBaseUrlConfigured = has('WEB_AI_BRIDGE_BASE_URL');
   const webBridgeCredentialsConfigured = has('WEB_AI_BRIDGE_API_KEY');
+  const webBridgeSessionStatus = getConfiguredWebBridgeSessionStatus(env);
   const bridgeKind = env.WEB_AI_BRIDGE_KIND?.trim().toLowerCase();
   const webBridgeKindSupported = bridgeKind === 'gemini-web2api' || bridgeKind === 'webai-to-api';
   const webBridgeRequested = env.WEB_AI_BRIDGE_ENABLED?.trim().toLowerCase() === 'true';
   const webBridgeEnabled = webBridgeRequested
     && webBridgeKindSupported
     && webBridgeBaseUrlConfigured
-    && webBridgeCredentialsConfigured;
+    && webBridgeCredentialsConfigured
+    && webBridgeSessionStatus !== 'login_required';
   return {
     enabled: bifrostEnabled,
     gatewayBaseUrlConfigured,
@@ -276,18 +279,30 @@ export function describeGatewayCapabilities(
       },
       {
         provider: 'groq',
-        capabilities: ['search'],
-        keys: [{ alias: 'groq-primary', configured: has('GROQ_API_KEY') }],
+        capabilities: ['text', 'search'],
+        keys: [
+          { alias: 'groq-primary', configured: has('GROQ_API_KEY') },
+          { alias: 'groq-2', configured: has('GROQ_API_KEY_2') },
+          { alias: 'groq-3', configured: has('GROQ_API_KEY_3') },
+        ],
       },
       {
         provider: 'nvidia_nim',
         capabilities: ['text'],
-        keys: [{ alias: 'nvidia-nim-primary', configured: has('NVIDIA_NIM_API_KEY') }],
+        keys: [
+          { alias: 'nvidia-nim-primary', configured: has('NVIDIA_NIM_API_KEY') },
+          { alias: 'nvidia-nim-2', configured: has('NVIDIA_NIM_API_KEY_2') },
+          { alias: 'nvidia-nim-3', configured: has('NVIDIA_NIM_API_KEY_3') },
+        ],
       },
       {
         provider: 'openrouter',
         capabilities: ['text'],
-        keys: [{ alias: 'openrouter-primary', configured: has('OPENROUTER_API_KEY') }],
+        keys: [
+          { alias: 'openrouter-primary', configured: has('OPENROUTER_API_KEY') },
+          { alias: 'openrouter-2', configured: has('OPENROUTER_API_KEY_2') },
+          { alias: 'openrouter-3', configured: has('OPENROUTER_API_KEY_3') },
+        ],
       },
     ],
     lanes: [
@@ -307,8 +322,10 @@ export function describeGatewayCapabilities(
         enabled: webBridgeEnabled,
         mode: 'canary',
         status: webBridgeEnabled
-          ? 'ready'
-          : webBridgeRequested ? 'auth_missing' : 'disabled',
+          ? 'unavailable'
+          : webBridgeSessionStatus === 'login_required'
+            ? 'login_required'
+            : webBridgeRequested ? 'auth_missing' : 'disabled',
         capabilities: ['text'],
         baseUrlConfigured: webBridgeBaseUrlConfigured,
         credentialsConfigured: webBridgeCredentialsConfigured,
@@ -851,7 +868,7 @@ export class WebBridgeGatewayClient implements AiGatewayClient {
   }) {
     this.baseUrl = normalizeBaseUrl(input.baseUrl);
     this.apiKey = input.apiKey.trim();
-    this.model = input.model?.trim() || 'gemini-3.6-flash';
+    this.model = input.model?.trim() || 'gemini-3.1-pro';
     this.kind = input.kind;
     this.fetchImpl = input.fetchImpl || fetch;
     if (!this.baseUrl || !this.apiKey || !this.model) {
@@ -883,9 +900,17 @@ export class WebBridgeGatewayClient implements AiGatewayClient {
       stream: false,
     });
     const text = normalizeWebBridgeText(payload?.choices?.[0]?.message?.content, structured);
+    const bridgeMetadata = {
+      authenticated: payload?.omni?.authenticated === true,
+      resolvedModel: String(payload?.omni?.resolved_model || ''),
+    };
+    if (!bridgeMetadata.authenticated || bridgeMetadata.resolvedModel !== 'gemini-pro') {
+      throw new AiGatewayError({ category: 'auth_invalid', status: 401, provider: 'gemini_web' });
+    }
     return {
       candidates: [{ content: { role: 'model', parts: [{ text }] } }],
       text,
+      bridgeMetadata,
     };
   }
 

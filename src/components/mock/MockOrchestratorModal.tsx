@@ -96,9 +96,10 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
           recentMistakeTags: recentMistakeTags.length > 0 ? recentMistakeTags : undefined,
         },
         sourceItem: pendingSource ? JSON.parse(pendingSource) : undefined,
-      }, (skill, state) => {
+      }, (skill, state, detail) => {
         const labels = { listening: 'Listening', reading: 'Reading', writing: 'Writing', speaking: 'Speaking', finalize: 'kiểm định toàn bộ đề' };
-        setBuildProgress(state === 'building' ? `Đang tạo ${labels[skill]}…` : `${labels[skill]} đã đạt quality gate`);
+        const partLabel = detail?.part ? ` ${detail.part.replace('part', 'Part ')}` : '';
+        setBuildProgress(state === 'building' ? `Đang tạo ${labels[skill]}${partLabel}…` : `${labels[skill]} đã đạt quality gate`);
       });
 
       if (pendingSource) sessionStorage.removeItem('omni_pending_mock_source');

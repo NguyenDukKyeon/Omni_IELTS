@@ -425,7 +425,11 @@ export async function createLiveHubMockBuildApi(
  */
 export async function assembleFullMockPackageApi(
   params: MockAssemblerInput,
-  onProgress?: (skill: 'listening' | 'reading' | 'writing' | 'speaking' | 'finalize', state: 'building' | 'ready') => void,
+  onProgress?: (
+    skill: 'listening' | 'reading' | 'writing' | 'speaking' | 'finalize',
+    state: 'building' | 'ready',
+    detail?: { part?: 'part1' | 'part2' | 'part3' },
+  ) => void,
 ): Promise<MockAssemblerPackage> {
   type PendingMockBuild = {
     id: string;
@@ -454,7 +458,11 @@ export async function assembleFullMockPackageApi(
       skillData: pending.skillData || {},
     };
   }
-  let buildState: { id: string; skillStates?: Record<string, string> } | null = null;
+  let buildState: {
+    id: string;
+    skillStates?: Record<string, string>;
+    speaking?: { readyParts?: Array<'part1' | 'part2' | 'part3'> };
+  } | null = null;
   if (pending?.id) {
     const statusResponse = await fetch(`/api/mock/builds/${encodeURIComponent(pending.id)}`, {
       headers: getGeminiRequestHeaders(),
@@ -500,6 +508,49 @@ export async function assembleFullMockPackageApi(
       onProgress?.(skill, 'ready');
       continue;
     }
+    if (skill === 'speaking') {
+      const readyParts = new Set<'part1' | 'part2' | 'part3'>([
+        ...(buildState.speaking?.readyParts || []),
+        ...Object.keys(pending.speakingParts || {}).filter((part): part is 'part1' | 'part2' | 'part3' =>
+          part === 'part1' || part === 'part2' || part === 'part3',
+        ),
+      ]);
+      for (const part of ['part1', 'part2', 'part3'] as const) {
+        if (readyParts.has(part)) continue;
+        onProgress?.('speaking', 'building', { part });
+        const shouldRetryPart = pending.lastFailedSkill === 'speaking'
+          && (pending.failedParts || []).includes(part);
+        const endpoint = shouldRetryPart
+          ? `/api/mock/builds/${encodeURIComponent(pending.id)}/retry`
+          : `/api/mock/builds/${encodeURIComponent(pending.id)}/skills/speaking/generate`;
+        const partResponse = await fetch(endpoint, {
+          method: 'POST',
+          headers: getGeminiRequestHeaders(),
+          body: JSON.stringify(shouldRetryPart ? { skill: 'speaking', part } : { part }),
+        });
+        if (!partResponse.ok) {
+          const error = await partResponse.json().catch(() => ({}));
+          pending.lastFailedSkill = 'speaking';
+          pending.failedParts = Array.isArray(error.failedParts) ? error.failedParts : [part];
+          if (error.partial && typeof error.partial === 'object') pending.speakingParts = error.partial;
+          writePending(pending);
+          const detail = Array.isArray(error.validation?.errors) ? ` ${error.validation.errors.join(' ')}` : '';
+          throw new Error(`${error.error || `Không thể tạo Speaking ${part}.`} (${part})${detail}`);
+        }
+        const partResult = await partResponse.json().catch(() => ({}));
+        pending.speakingParts = pending.speakingParts || {};
+        if (partResult.partData) pending.speakingParts[part] = partResult.partData;
+        if (partResult.data) pending.skillData.speaking = partResult.data;
+        readyParts.add(part);
+        pending.lastFailedSkill = undefined;
+        pending.failedParts = undefined;
+        writePending(pending);
+      }
+      pending.speakingParts = undefined;
+      writePending(pending);
+      onProgress?.('speaking', 'ready');
+      continue;
+    }
     onProgress?.(skill, 'building');
     const shouldRetry = pending.lastFailedSkill === skill;
     const endpoint = shouldRetry
@@ -524,7 +575,6 @@ export async function assembleFullMockPackageApi(
     if (skillResult.data) pending.skillData[skill] = skillResult.data;
     pending.lastFailedSkill = undefined;
     pending.failedParts = undefined;
-    if (skill === 'speaking') pending.speakingParts = undefined;
     writePending(pending);
     onProgress?.(skill, 'ready');
   }

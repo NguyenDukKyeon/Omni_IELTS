@@ -172,8 +172,18 @@ export const YouTubeUrlInputModal: React.FC<YouTubeUrlInputModalProps> = ({
             )}
 
             {capabilities && !capabilities.youtubeImport.available && (
-              <div className="p-3.5 rounded-xl border border-amber-300 bg-amber-50 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-                {capabilities.youtubeImport.reason} Bạn vẫn có thể dùng file audio của mình.
+              <div className="space-y-2 p-3.5 rounded-xl border border-amber-300 bg-amber-50 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                <p>{capabilities.youtubeImport.reason} Bạn vẫn có thể dùng file audio, phụ đề hoặc transcript của mình.</p>
+                {onFallbackRequested && !errorMsg && (
+                  <button
+                    type="button"
+                    data-ux-flow="media.learning"
+                    onClick={onFallbackRequested}
+                    className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-950"
+                  >
+                    Dùng audio, VTT/SRT hoặc transcript
+                  </button>
+                )}
               </div>
             )}
 

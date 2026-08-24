@@ -53,7 +53,7 @@ export function calculateSpeakingTelemetry(input: {
   const pauses = segments.slice(1).map((segment, index) => ({
     start: segments[index].end,
     end: segment.start,
-    duration: Math.max(0, segment.start - segments[index].end),
+    duration: Number(Math.max(0, segment.start - segments[index].end).toFixed(3)),
   })).filter((pause) => pause.duration > 0.25);
 
   return {

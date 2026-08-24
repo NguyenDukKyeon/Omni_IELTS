@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildDeterministicForecastFromEvidence,
   buildForecastSynthesisPrompt,
   orderForecastProviderAttempts,
   synthesizeForecastFromEvidence,
@@ -147,5 +148,23 @@ describe('Forecast evidence synthesis', () => {
     expect(prompt).not.toContain('copy sourceUrl');
     expect(prompt).not.toMatch(/search the web/i);
     expect(prompt).not.toContain('googleSearch');
+  });
+
+  it('keeps fresh cited evidence usable when every text synthesis provider is unavailable', () => {
+    const result = buildDeterministicForecastFromEvidence(evidence);
+
+    expect(result).toMatchObject({
+      status: 'fresh',
+      provider: 'groq',
+      model: 'groq/compound-mini',
+      stale: false,
+      forecastItems: [{
+        evidenceType: 'forecast',
+        groundingSourceUrl: 'https://example.org/ielts-recall',
+        citations: [{ url: 'https://example.org/ielts-recall' }],
+      }],
+    });
+    expect(result.forecastItems[0].trendBadge).toBe('Dự báo luyện tập');
+    expect(result.forecastItems[0].frequencyScore).toBeUndefined();
   });
 });

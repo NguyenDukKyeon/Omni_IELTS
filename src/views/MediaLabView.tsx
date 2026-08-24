@@ -32,6 +32,20 @@ import { DictationStudio } from '../components/media/DictationStudio';
 import { MediaVocabDrawer } from '../components/media/MediaVocabDrawer';
 import { playTextToSpeech } from '../services/aiTutor';
 import { saveMediaTranscript } from '../services/mediaService';
+import { deleteMediaAudioArtifact } from '../lib/mediaArtifactStore';
+
+const resumeSegmentIndex = (session?: MediaSession) => {
+  if (!session?.transcriptSegments.length) return 0;
+  const timestamp = Number.isFinite(session.currentTimestamp) ? session.currentTimestamp : 0;
+  const containingIndex = session.transcriptSegments.findIndex((segment) =>
+    timestamp >= segment.start && timestamp < segment.end
+  );
+  if (containingIndex >= 0) return containingIndex;
+  for (let index = session.transcriptSegments.length - 1; index >= 0; index -= 1) {
+    if (timestamp >= session.transcriptSegments[index].start) return index;
+  }
+  return 0;
+};
 
 export const MediaLabView: React.FC = () => {
   const {
@@ -46,9 +60,9 @@ export const MediaLabView: React.FC = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<string>(
     mediaSessions[0]?.id || ''
   );
-  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number>(0);
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number>(() => resumeSegmentIndex(mediaSessions[0]));
   const [activeTab, setActiveTab] = useState<'studio' | 'transcript' | 'vocab'>('studio');
-  const [mode, setMode] = useState<'shadowing' | 'dictation'>('shadowing');
+  const [mode, setMode] = useState<'shadowing' | 'dictation'>(mediaSessions[0]?.mode || 'shadowing');
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isAudioTranscribeOpen, setIsAudioTranscribeOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -77,6 +91,32 @@ export const MediaLabView: React.FC = () => {
     setSelectedSessionId(newSession.id);
     setActiveSegmentIndex(0);
     setActiveTab('studio');
+    setMode(newSession.mode);
+  };
+
+  const handleSelectSession = (session: MediaSession) => {
+    setSelectedSessionId(session.id);
+    setActiveSegmentIndex(resumeSegmentIndex(session));
+    setMode(session.mode);
+  };
+
+  const handleSelectSegment = (index: number) => {
+    if (!selectedSession) return;
+    const boundedIndex = Math.max(0, Math.min(index, selectedSession.transcriptSegments.length - 1));
+    const segment = selectedSession.transcriptSegments[boundedIndex];
+    setActiveSegmentIndex(boundedIndex);
+    if (!segment) return;
+    updateMediaSession({
+      ...selectedSession,
+      currentTimestamp: segment.start,
+      mode,
+      lastPracticedDate: new Date().toISOString(),
+    });
+  };
+
+  const handleModeChange = (nextMode: MediaSession['mode']) => {
+    setMode(nextMode);
+    if (selectedSession) updateMediaSession({ ...selectedSession, mode: nextMode });
   };
 
   const beginTranscriptEdit = () => {
@@ -119,11 +159,16 @@ export const MediaLabView: React.FC = () => {
   const handleDeleteSession = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm('Bạn có chắc muốn xoá bài luyện Media này không?')) {
+      const deletedSession = mediaSessions.find((session) => session.id === id);
+      if (deletedSession) void deleteMediaAudioArtifact(deletedSession.mediaUrl).catch(() => undefined);
       deleteMediaSession(id);
       if (selectedSessionId === id) {
         const remaining = mediaSessions.filter((s) => s.id !== id);
         if (remaining.length > 0) {
-          setSelectedSessionId(remaining[0].id);
+          handleSelectSession(remaining[0]);
+        } else {
+          setSelectedSessionId('');
+          setActiveSegmentIndex(0);
         }
       }
     }
@@ -198,10 +243,7 @@ export const MediaLabView: React.FC = () => {
                 return (
                   <div
                     key={session.id}
-                    onClick={() => {
-                      setSelectedSessionId(session.id);
-                      setActiveSegmentIndex(0);
-                    }}
+                    onClick={() => handleSelectSession(session)}
                     className={`p-3.5 rounded-2xl transition-all border cursor-pointer group relative flex flex-col justify-between gap-2.5 ${
                       isSelected
                         ? 'bg-sky-50/80 dark:bg-sky-950/50 border-sky-500 dark:border-sky-600 shadow-sm'
@@ -248,7 +290,7 @@ export const MediaLabView: React.FC = () => {
 
                       <div className="flex items-center gap-1">
                         <button data-ux-flow="media.learning"
-                          onClick={(e) => handleDeleteSession(e, session.id)}
+                          onClick={(e) => handleDeleteSession(session.id, e)}
                           className="p-1 text-stone-400 hover:text-rose-600 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                           title="Xóa bài luyện này"
                         >
@@ -308,7 +350,7 @@ export const MediaLabView: React.FC = () => {
                   {/* Mode Switcher */}
                   <div className="bg-stone-100 dark:bg-stone-900 p-1 rounded-2xl flex items-center gap-1 border border-stone-200 dark:border-stone-700 shrink-0">
                     <button data-ux-flow="media.learning"
-                      onClick={() => setMode('shadowing')}
+                      onClick={() => handleModeChange('shadowing')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         mode === 'shadowing'
                           ? 'bg-indigo-600 text-white shadow-xs'
@@ -319,7 +361,7 @@ export const MediaLabView: React.FC = () => {
                       <span>Shadowing (Nói)</span>
                     </button>
                     <button data-ux-flow="media.learning"
-                      onClick={() => setMode('dictation')}
+                      onClick={() => handleModeChange('dictation')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         mode === 'dictation'
                           ? 'bg-sky-600 text-white shadow-xs'
@@ -381,13 +423,15 @@ export const MediaLabView: React.FC = () => {
                     <ShadowingStudio
                       session={selectedSession}
                       activeSegmentIndex={activeSegmentIndex}
-                      onSelectSegmentIndex={setActiveSegmentIndex}
+                      onSelectSegmentIndex={handleSelectSegment}
+                      onUpdateSession={updateMediaSession}
                     />
                   ) : (
                     <DictationStudio
                       session={selectedSession}
                       activeSegmentIndex={activeSegmentIndex}
-                      onSelectSegmentIndex={setActiveSegmentIndex}
+                      onSelectSegmentIndex={handleSelectSegment}
+                      onUpdateSession={updateMediaSession}
                     />
                   )}
                 </>
@@ -455,7 +499,7 @@ export const MediaLabView: React.FC = () => {
                           key={seg.id || idx}
                           onClick={() => {
                             if (isEditingTranscript) return;
-                            setActiveSegmentIndex(idx);
+                            handleSelectSegment(idx);
                             setActiveTab('studio');
                           }}
                           className={`p-4 rounded-2xl border transition-all cursor-pointer space-y-2 ${

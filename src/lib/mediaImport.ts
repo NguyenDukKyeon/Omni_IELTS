@@ -1,4 +1,4 @@
-import type { MediaImportFailure, MediaImportPhase } from '../types';
+import type { MediaCapabilities, MediaImportFailure, MediaImportPhase } from '../types';
 
 export interface TimedTranscriptSegment {
   start: number;
@@ -34,6 +34,30 @@ const phaseProgress: Record<MediaImportPhase, number> = {
 
 export function progressForMediaImportPhase(phase: MediaImportPhase) {
   return phaseProgress[phase];
+}
+
+export function deriveMediaCapabilities(input: {
+  ytDlp: boolean;
+  jsRuntime: boolean;
+  potProvider: boolean;
+}): MediaCapabilities {
+  const available = input.ytDlp && input.jsRuntime && input.potProvider;
+  return {
+    youtubeImport: {
+      available,
+      ...input,
+      reason: available
+        ? undefined
+        : !input.ytDlp
+          ? 'Máy chủ chưa cài được yt-dlp đã pin và kiểm tra checksum.'
+          : !input.jsRuntime
+            ? 'Máy chủ cần Node.js 22 trở lên để giải thử thách JavaScript của YouTube.'
+            : 'Máy chủ chưa kết nối PO-token provider nên YouTube import tự động đang tạm khóa.',
+    },
+    uploadAudio: true,
+    uploadCaptions: true,
+    pasteTranscript: true,
+  };
 }
 
 export function consumeFixedWindowQuota(
@@ -106,6 +130,7 @@ export function validateTranscriptCoverage(
   if (!segments.length) return { valid: false, coverage: 0, issue: 'empty' };
 
   let previousEnd = -1;
+  let coveredSeconds = 0;
   for (const segment of segments) {
     if (!Number.isFinite(segment.start)
       || !Number.isFinite(segment.end)
@@ -115,12 +140,14 @@ export function validateTranscriptCoverage(
       || !segment.text.trim()) {
       return { valid: false, coverage: 0, issue: 'timestamps_invalid' };
     }
+    coveredSeconds += durationSeconds > 0
+      ? Math.max(0, Math.min(segment.end, durationSeconds) - Math.min(Math.max(segment.start, 0), durationSeconds))
+      : Math.max(0, segment.end - segment.start);
     previousEnd = segment.end;
   }
 
-  const transcriptEnd = segments.at(-1)?.end || 0;
   const coverage = durationSeconds > 0
-    ? Math.min(1, transcriptEnd / durationSeconds)
+    ? Math.min(1, coveredSeconds / durationSeconds)
     : 1;
   if (durationSeconds > 0 && coverage < 0.65) {
     return { valid: false, coverage, issue: 'coverage_insufficient' };
@@ -191,6 +218,17 @@ export function classifyMediaImportFailure(error: unknown): MediaImportFailure {
       category: 'audio_too_large',
       code: 'MEDIA_AUDIO_TOO_LARGE',
       message: 'Audio vượt giới hạn 14 MB. Hãy chọn đoạn ngắn hơn hoặc tải lên file nhỏ hơn.',
+      retryable: false,
+      recoveryAction: 'upload_source',
+      requestId: id,
+    };
+  }
+
+  if (normalized.includes('dài hơn 25 phút') || normalized.includes('longer than 25 minutes')) {
+    return {
+      category: 'video_too_long',
+      code: 'MEDIA_VIDEO_TOO_LONG',
+      message: 'Video dài hơn 25 phút. Hãy chọn một đoạn ngắn hơn hoặc tải lên audio/VTT/SRT phù hợp.',
       retryable: false,
       recoveryAction: 'upload_source',
       requestId: id,

@@ -70,6 +70,8 @@ const fullPackage = {
 
 async function mockStagedBuildApi(page: Page, options: { failSpeakingOnce?: boolean } = {}) {
   const readySkills = new Set<string>();
+  const readySpeakingParts = new Set<'part1' | 'part2' | 'part3'>();
+  const speakingPartRequests: string[] = [];
   let speakingFailures = 0;
   await page.route('**/api/mock/builds', route => route.fulfill({
     status: 201,
@@ -78,7 +80,12 @@ async function mockStagedBuildApi(page: Page, options: { failSpeakingOnce?: bool
   }));
   await page.route(/\/api\/mock\/builds\/mock_build_e2e\/skills\/(listening|reading|writing|speaking)\/generate$/, route => {
     const skill = route.request().url().match(/skills\/(\w+)\/generate/)?.[1] as keyof typeof fullPackage;
-    if (skill === 'speaking' && options.failSpeakingOnce && speakingFailures++ === 0) {
+    const requestBody = route.request().postDataJSON?.() || {};
+    const speakingPart = requestBody.part as 'part1' | 'part2' | 'part3' | undefined;
+    if (skill === 'speaking') {
+      speakingPartRequests.push(String(speakingPart || 'missing'));
+    }
+    if (skill === 'speaking' && speakingPart === 'part2' && options.failSpeakingOnce && speakingFailures++ === 0) {
       return route.fulfill({
         status: 422,
         contentType: 'application/json',
@@ -86,9 +93,28 @@ async function mockStagedBuildApi(page: Page, options: { failSpeakingOnce?: bool
           error: 'Không thể tạo phần speaking đạt quality gate.',
           code: 'schema_invalid',
           failedParts: ['part2'],
-          readyParts: ['part1', 'part3'],
-          partial: { part1: speaking.part1, part3: speaking.part3 },
-          validation: { ready: false, errors: ['Speaking part2.cueCard: Required.'], count: 2 },
+          readyParts: ['part1'],
+          partial: { part1: speaking.part1 },
+          validation: { ready: false, errors: ['Speaking part2.cueCard: Required.'], count: 1 },
+        }),
+      });
+    }
+    if (skill === 'speaking' && speakingPart) {
+      readySpeakingParts.add(speakingPart);
+      const speakingReady = readySpeakingParts.size === 3;
+      if (speakingReady) readySkills.add('speaking');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          mockBuildId: 'mock_build_e2e',
+          skill,
+          part: speakingPart,
+          state: speakingReady ? 'ready' : 'partial',
+          partData: speaking[speakingPart],
+          data: speakingReady ? speaking : undefined,
+          readyParts: [...readySpeakingParts],
+          validation: { ready: true, errors: [] },
         }),
       });
     }
@@ -112,17 +138,20 @@ async function mockStagedBuildApi(page: Page, options: { failSpeakingOnce?: bool
     }),
   }));
   await page.route('**/api/mock/builds/mock_build_e2e/retry', route => {
-    readySkills.add('speaking');
+    const requestBody = route.request().postDataJSON?.() || {};
+    expect(requestBody).toMatchObject({ skill: 'speaking', part: 'part2' });
+    readySpeakingParts.add('part2');
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         mockBuildId: 'mock_build_e2e',
         skill: 'speaking',
-        state: 'ready',
-        data: speaking,
-        validation: { ready: true, errors: [], count: 3 },
-        readyParts: ['part1', 'part2', 'part3'],
+        part: 'part2',
+        state: 'partial',
+        partData: speaking.part2,
+        validation: { ready: true, errors: [], count: 2 },
+        readyParts: ['part1', 'part2'],
       }),
     });
   });
@@ -142,12 +171,13 @@ async function mockStagedBuildApi(page: Page, options: { failSpeakingOnce?: bool
       speakingPackage: { examinerName: speaking.examinerName, part1Topics: [speaking.part1.topic], part2CueCard: { topic: speaking.part2.cueCard.topic, bulletPoints: speaking.part2.cueCard.bulletPoints }, part3AbstractThemes: [speaking.part3.topic] },
     }),
   }));
+  return { speakingPartRequests };
 }
 
 test('staged Mock Orchestrator opens a validated package in the exam room', async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
-  await mockStagedBuildApi(page);
+  const staged = await mockStagedBuildApi(page);
 
   await page.goto('/');
   await expect(page).toHaveTitle(/Omni IELTS/);
@@ -171,6 +201,7 @@ test('staged Mock Orchestrator opens a validated package in the exam room', asyn
   await expect(page.getByText('OMNI-E2E-01')).toBeVisible();
   await expect(page.getByText(/Listening Test — Section 1/i)).toBeVisible();
   await expect(page.getByText(/Question 1/).first()).toBeVisible();
+  expect(staged.speakingPartRequests).toEqual(['part1', 'part2', 'part3']);
   expect(runtimeErrors).toEqual([]);
 });
 
@@ -191,7 +222,7 @@ test.describe('controlled Mock repair failure', () => {
       id: 'mock_build_e2e',
       lastFailedSkill: 'speaking',
       failedParts: ['part2'],
-      speakingParts: { part1: speaking.part1, part3: speaking.part3 },
+      speakingParts: { part1: speaking.part1 },
     });
 
     await page.getByRole('button', { name: /Thử lại đúng phần bị lỗi/ }).click();

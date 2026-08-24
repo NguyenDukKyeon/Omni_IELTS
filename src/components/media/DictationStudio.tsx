@@ -29,21 +29,27 @@ interface DictationStudioProps {
   session: MediaSession;
   activeSegmentIndex: number;
   onSelectSegmentIndex: (index: number) => void;
+  onUpdateSession: (session: MediaSession) => void;
 }
 
 export const DictationStudio: React.FC<DictationStudioProps> = ({
   session,
   activeSegmentIndex,
   onSelectSegmentIndex,
+  onUpdateSession,
 }) => {
   const { awardXP, addMistake, openAITutorWithPrompt } = useApp();
 
   const segment: MediaTranscriptSegment | undefined =
     session.transcriptSegments[activeSegmentIndex];
+  const hasOriginalAudio = Boolean(session.youtubeId || session.mediaUrl);
 
   // Playback settings
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.9);
   const [loopCount, setLoopCount] = useState<number>(1);
+  const [currentLoop, setCurrentLoop] = useState<number>(0);
+  const [waitBetweenLoopsMs, setWaitBetweenLoopsMs] = useState<number>(0);
+  const [fullLessonMode, setFullLessonMode] = useState<boolean>(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [exerciseMode, setExerciseMode] = useState<'sentence' | 'fill' | 'arrange'>('sentence');
@@ -59,14 +65,23 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
   const [fillAnswers, setFillAnswers] = useState<Record<number, string>>({});
   const [arrangedWordIndexes, setArrangedWordIndexes] = useState<number[]>([]);
   const originalPlayerRef = useRef<OriginalMediaPlayerHandle | null>(null);
+  const autoAdvanceTimerRef = useRef<number | null>(null);
 
   // Reset state on segment change
   useEffect(() => {
-    setUserInput('');
-    setIsSubmitted(false);
-    setDiffResults([]);
-    setAccuracyScore(0);
-    setShowHintFirstLetters(difficulty === 'easy');
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+    const savedInput = segment?.userDictationInput || '';
+    const savedScore = segment?.dictationScore;
+    setUserInput(savedInput);
+    setIsSubmitted(Boolean(savedInput) && Number.isFinite(savedScore));
+    setDiffResults(savedInput && Number.isFinite(savedScore) && segment
+      ? diffWords(segment.text, savedInput).tokens
+      : []);
+    setAccuracyScore(Number.isFinite(savedScore) ? Number(savedScore) : 0);
+    setShowHintFirstLetters(difficulty === 'easy' && !savedInput);
     setShowFullAnswer(false);
     setMistakeSaved(false);
     setFillAnswers({});
@@ -76,9 +91,15 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
 
   // Clean play audio handler
   const handlePlayAudio = () => {
-    if (!segment) return;
+    if (!segment || !hasOriginalAudio) return;
     setIsPlayingAudio(true);
-    originalPlayerRef.current?.playSegment(segment.start, segment.end, playbackSpeed, loopCount);
+    originalPlayerRef.current?.playSegment(
+      segment.start,
+      segment.end,
+      playbackSpeed,
+      loopCount,
+      waitBetweenLoopsMs,
+    );
   };
 
   const sentenceWords = segment?.text.trim().split(/\s+/).filter(Boolean) || [];
@@ -110,8 +131,33 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
     setDiffResults(comparison.tokens);
     setIsSubmitted(true);
 
+    const transcriptSegments = session.transcriptSegments.map((currentSegment, index) =>
+      index === activeSegmentIndex
+        ? { ...currentSegment, userDictationInput: attempt, dictationScore: accuracy }
+        : currentSegment
+    );
+    const completedScores = transcriptSegments
+      .map((currentSegment) => currentSegment.dictationScore)
+      .filter((score): score is number => Number.isFinite(score));
+    onUpdateSession({
+      ...session,
+      mode: 'dictation',
+      currentTimestamp: segment.start,
+      lastPracticedDate: new Date().toISOString(),
+      transcriptSegments,
+      dictationAccuracyAvg: completedScores.length
+        ? Math.round(completedScores.reduce((sum, score) => sum + score, 0) / completedScores.length)
+        : undefined,
+    });
+
     if (accuracy >= 85) {
       awardXP(XP_REWARDS.DICTATION_COMPLETED, `Chép chính tả xuất sắc (${accuracy}%)!`);
+      if (fullLessonMode && activeSegmentIndex < session.transcriptSegments.length - 1) {
+        autoAdvanceTimerRef.current = window.setTimeout(() => {
+          autoAdvanceTimerRef.current = null;
+          onSelectSegmentIndex(activeSegmentIndex + 1);
+        }, 700);
+      }
     } else {
       awardXP(Math.round(XP_REWARDS.DICTATION_COMPLETED / 2), 'Luyện tập chép chính tả');
     }
@@ -201,7 +247,11 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
       <OriginalMediaPlayer
         ref={originalPlayerRef}
         session={session}
-        onPlaybackEnded={() => setIsPlayingAudio(false)}
+        onLoopChange={setCurrentLoop}
+        onPlaybackEnded={() => {
+          setIsPlayingAudio(false);
+          setCurrentLoop(0);
+        }}
       />
       <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 shadow-sm space-y-6">
         {/* Top Header Controls */}
@@ -220,22 +270,63 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
             )}
           </div>
 
-          {/* Speed Selector */}
-          <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
-            <Gauge className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
-            {[0.75, 0.9, 1.0].map((spd) => (
-              <button data-ux-flow="media.learning"
-                key={spd}
-                onClick={() => setPlaybackSpeed(spd)}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                  playbackSpeed === spd
-                    ? 'bg-white dark:bg-stone-700 text-sky-600 dark:text-sky-300 shadow-xs'
-                    : 'text-stone-500 dark:text-stone-400 hover:text-stone-900'
-                }`}
-              >
-                {spd}x
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Speed Selector */}
+            <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
+              <Gauge className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
+              {[0.75, 0.9, 1.0].map((spd) => (
+                <button data-ux-flow="media.learning"
+                  key={spd}
+                  onClick={() => setPlaybackSpeed(spd)}
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                    playbackSpeed === spd
+                      ? 'bg-white dark:bg-stone-700 text-sky-600 dark:text-sky-300 shadow-xs'
+                      : 'text-stone-500 dark:text-stone-400 hover:text-stone-900'
+                  }`}
+                >
+                  {spd}x
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-900 p-1 rounded-xl border border-stone-200 dark:border-stone-700">
+              <Repeat className="w-3.5 h-3.5 text-stone-400 ml-1.5" />
+              {[1, 2, 3].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  data-ux-flow="media.learning"
+                  aria-label={`Lặp ${count} lần`}
+                  aria-pressed={loopCount === count}
+                  onClick={() => setLoopCount(count)}
+                  className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${loopCount === count ? 'bg-white text-indigo-600 shadow-xs dark:bg-stone-700 dark:text-indigo-300' : 'text-stone-500 dark:text-stone-400'}`}
+                >
+                  {count}x
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              data-ux-flow="media.learning"
+              aria-label="Chờ 0.8 giây giữa các vòng"
+              aria-pressed={waitBetweenLoopsMs === 800}
+              onClick={() => setWaitBetweenLoopsMs((value) => value === 800 ? 0 : 800)}
+              className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-bold ${waitBetweenLoopsMs === 800 ? 'border-amber-500 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : 'border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400'}`}
+            >
+              Chờ 0.8s
+            </button>
+
+            <button
+              type="button"
+              data-ux-flow="media.learning"
+              aria-label="Tự chuyển toàn bài"
+              aria-pressed={fullLessonMode}
+              onClick={() => setFullLessonMode((value) => !value)}
+              className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-bold ${fullLessonMode ? 'border-indigo-500 bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200' : 'border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400'}`}
+            >
+              Toàn bài
+            </button>
           </div>
         </div>
 
@@ -294,19 +385,26 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
           <div className="flex justify-center">
             <button data-ux-flow="media.learning"
               onClick={handlePlayAudio}
+              disabled={!hasOriginalAudio}
               className={`w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-all cursor-pointer ${
-                isPlayingAudio
+                !hasOriginalAudio
+                  ? 'bg-stone-300 shadow-none cursor-not-allowed dark:bg-stone-700'
+                  : isPlayingAudio
                   ? 'bg-rose-500 hover:bg-rose-600 animate-pulse shadow-rose-500/30'
                   : 'bg-sky-500 hover:bg-sky-600 shadow-sky-500/30 hover:scale-105 active:scale-95'
               }`}
-              title="Nghe âm thanh câu này"
+              title={hasOriginalAudio ? 'Nghe âm thanh câu này' : 'Chưa có audio gốc để chép chính tả'}
             >
               <Volume2 className="w-8 h-8" />
             </button>
           </div>
 
           <div className="text-xs font-bold text-sky-600 dark:text-sky-400">
-            {isPlayingAudio ? 'Đang phát âm thanh câu...' : 'Bấm để nghe câu tiếng Anh'}
+            {isPlayingAudio
+              ? `Đang phát âm thanh câu... (Vòng ${currentLoop || 1}/${loopCount})`
+              : hasOriginalAudio
+                ? 'Bấm để nghe câu tiếng Anh'
+                : 'Chưa có audio gốc — hãy nhập YouTube hoặc audio để luyện Dictation'}
           </div>
 
           <p className="text-xs text-stone-500 dark:text-stone-400 italic max-w-md mx-auto">
@@ -507,6 +605,17 @@ export const DictationStudio: React.FC<DictationStudioProps> = ({
                       >
                         <span className="line-through opacity-70 mr-1">{item.user}</span>
                         <span>{item.expected}</span>
+                      </span>
+                    );
+                  }
+                  if (item.status === 'extra') {
+                    return (
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 rounded-md bg-violet-100 dark:bg-violet-950 text-violet-800 dark:text-violet-300 font-bold border border-violet-300 dark:border-violet-800 line-through"
+                        title="Từ thừa"
+                      >
+                        {item.user}
                       </span>
                     );
                   }

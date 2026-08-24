@@ -52,7 +52,16 @@ test('a real text provider preserves a Live Hub source, builds all skills and op
   await page.getByRole('button', { name: /Mở Mock Test Orchestrator/ }).click();
   await page.getByRole('button', { name: 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)', exact: true }).click();
 
-  await expect(page.getByText('Bộ Đề Đã Lắp Ráp Thành Công')).toBeVisible({ timeout: 840_000 });
+  const successHeading = page.getByText('Bộ Đề Đã Lắp Ráp Thành Công');
+  const failureHeading = page.getByText('Lỗi lắp ráp đề thi');
+  const outcome = await Promise.race([
+    successHeading.waitFor({ state: 'visible', timeout: 840_000 }).then(() => 'ready' as const),
+    failureHeading.waitFor({ state: 'visible', timeout: 840_000 }).then(() => 'failed' as const),
+  ]);
+  if (outcome === 'failed') {
+    const failurePanel = failureHeading.locator('..');
+    throw new Error(`Mock live provider failed: ${(await failurePanel.textContent())?.trim() || 'unknown failure'}`);
+  }
   await page.getByRole('button', { name: /Vào Phòng Thi Thử Ngay/ }).click();
 
   await expect(page.getByText(/Listening Test — Section 1/i)).toBeVisible();

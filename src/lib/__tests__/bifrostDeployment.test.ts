@@ -35,8 +35,14 @@ describe('Bifrost deployment configuration', () => {
       'env.GEMINI_API_KEY_3',
       'env.GEMINI_API_KEY_4',
       'env.GROQ_API_KEY',
+      'env.GROQ_API_KEY_2',
+      'env.GROQ_API_KEY_3',
       'env.NVIDIA_NIM_API_KEY',
+      'env.NVIDIA_NIM_API_KEY_2',
+      'env.NVIDIA_NIM_API_KEY_3',
       'env.OPENROUTER_API_KEY',
+      'env.OPENROUTER_API_KEY_2',
+      'env.OPENROUTER_API_KEY_3',
     ]));
     expect(providerKeys.every((key: any) => String(key.value).startsWith('env.'))).toBe(true);
     expect(raw).not.toMatch(/(?:AIza|AQ\.|sk-or-v1-|nvapi-|kira_)[A-Za-z0-9_-]+/);
@@ -46,8 +52,11 @@ describe('Bifrost deployment configuration', () => {
     const config = JSON.parse(readFileSync(resolve(root, 'infra/bifrost/config.json'), 'utf8'));
 
     expect(config.providers.gemini.keys).toHaveLength(4);
+    expect(config.providers.groq.keys).toHaveLength(3);
+    expect(config.providers.nvidia_nim.keys).toHaveLength(3);
+    expect(config.providers.openrouter.keys).toHaveLength(3);
     expect(config.providers.gemini.network_config.max_retries).toBeGreaterThanOrEqual(3);
-    expect(config.providers.groq.keys[0].models).toEqual(['groq/compound-mini', 'groq/compound']);
+    expect(config.providers.groq.keys[0].models).toEqual(['groq/compound-mini', 'groq/compound', 'openai/gpt-oss-120b']);
     expect(config.providers.kira).toBeUndefined();
     expect(config.providers.nvidia_nim.keys[0].models).toEqual(['meta/llama-3.3-70b-instruct']);
     expect(config.providers.openrouter.keys[0].models).toEqual(['openrouter/free']);
@@ -55,7 +64,7 @@ describe('Bifrost deployment configuration', () => {
       config.governance.virtual_keys[0].provider_configs
         .map((providerConfig: any) => [providerConfig.provider, providerConfig.allowed_models]),
     );
-    expect(vkProviders.groq).toEqual(['groq/compound-mini', 'groq/compound']);
+    expect(vkProviders.groq).toEqual(['groq/compound-mini', 'groq/compound', 'openai/gpt-oss-120b']);
     expect(vkProviders.kira).toBeUndefined();
     expect(vkProviders.openrouter).toEqual(['openrouter/free']);
     expect(config.providers.nvidia_nim.custom_provider_config).toMatchObject({

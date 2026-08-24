@@ -107,6 +107,81 @@ ${JSON.stringify({
   })}`;
 }
 
+function inferForecastSkill(query: string) {
+  const normalized = query.toLowerCase();
+  if (normalized.includes('speaking part 1')) return 'speaking_part1' as const;
+  if (normalized.includes('speaking part 2') || normalized.includes('cue card')) return 'speaking_part2' as const;
+  if (normalized.includes('speaking part 3') || normalized.includes('speaking')) return 'speaking_part3' as const;
+  if (normalized.includes('writing task 1') || normalized.includes('chart')) return 'writing_task1' as const;
+  return 'writing_task2' as const;
+}
+
+function inferTopicDomain(query: string, source: ForecastEvidenceSource) {
+  const haystack = `${query} ${source.title} ${source.snippet || ''}`.toLowerCase();
+  const topic = [
+    ['education', 'Education'],
+    ['environment', 'Environment'],
+    ['technology', 'Technology'],
+    ['health', 'Health'],
+    ['work', 'Work'],
+    ['travel', 'Travel'],
+    ['city', 'Cities'],
+    ['media', 'Media'],
+  ].find(([keyword]) => haystack.includes(keyword));
+  return topic?.[1] || 'General IELTS';
+}
+
+function stableEvidenceId(source: ForecastEvidenceSource, index: number) {
+  let hostname = 'source';
+  try { hostname = new URL(source.url).hostname; } catch { /* URL validity is checked upstream. */ }
+  const slug = `${hostname}-${source.title}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 56);
+  return `evidence-${index + 1}-${slug || 'source'}`;
+}
+
+/**
+ * Produces a citation-bearing minimal snapshot from search evidence only.
+ * It deliberately labels every item as forecast and never infers an exam date,
+ * frequency score, verified report or reported recall claim.
+ */
+export function buildDeterministicForecastFromEvidence(
+  evidence: ForecastEvidenceBundle,
+): ForecastGroundingResponse {
+  const skill = inferForecastSkill(evidence.originalQuery);
+  const isVietnamQuery = evidence.originalQuery.toLowerCase().includes('vietnam');
+  const raw = {
+    summaryOverviewVi: `Đã tìm thấy ${evidence.sources.length} nguồn web có thể kiểm tra. Các mục dưới đây chỉ là gợi ý luyện tập từ evidence, không phải xác nhận đề thi thật.`,
+    detectedTrends: evidence.sources.slice(0, 4).map((source) => source.title),
+    forecastItems: evidence.sources.slice(0, 4).map((source, index) => {
+      const snippet = source.snippet?.trim().slice(0, 900) || '';
+      return {
+        id: stableEvidenceId(source, index),
+        title: source.title,
+        skill,
+        council: isVietnamQuery ? 'both_vietnam' as const : 'idp_global' as const,
+        councilLabel: isVietnamQuery ? 'Nguồn web liên quan Việt Nam' : 'Nguồn web quốc tế',
+        topicDomain: inferTopicDomain(evidence.originalQuery, source),
+        subCategory: 'Evidence-derived practice',
+        promptStatement: snippet.length >= 12
+          ? snippet
+          : `Practise an IELTS response using this sourced topic: ${source.title}.`,
+        evidenceType: 'forecast' as const,
+        sourceUrl: source.url,
+      };
+    }),
+  };
+  const normalized = normalizeForecastGroundingPayload({
+    raw,
+    groundingSources: evidence.sources,
+    searchQueries: evidence.searchQueries,
+    retrievedAt: evidence.retrievedAt,
+  });
+  return { ...normalized, provider: evidence.provider, model: evidence.model };
+}
+
 export async function synthesizeForecastFromEvidence(input: {
   evidence: ForecastEvidenceBundle;
   generate: (prompt: string) => Promise<string>;

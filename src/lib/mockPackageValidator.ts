@@ -77,9 +77,7 @@ const ListeningSchema = z.object({
   }
 });
 
-const ReadingSchema = z.object({
-  title: nonEmpty,
-  passages: z.array(z.object({
+const ReadingPassageSchema = z.object({
     passageNumber: z.number().int().min(1).max(3),
     title: nonEmpty,
     subtitle: z.string(),
@@ -91,7 +89,11 @@ const ReadingSchema = z.object({
       items: z.array(z.object({ id: nonEmpty, name: nonEmpty }).strict()).min(1),
     }).strict().optional(),
     questions: z.array(MockQuestionSchema).min(1),
-  }).strict()).length(3),
+  }).strict();
+
+const ReadingSchema = z.object({
+  title: nonEmpty,
+  passages: z.array(ReadingPassageSchema).length(3),
 }).strict();
 
 const WritingSchema = z.object({
@@ -213,6 +215,46 @@ export function validateListeningSection(
   }
   if (parsed.data.questions.some((question) => question.sectionIndex !== expectedSectionIndex)) {
     errors.push(`Listening section ${sectionNumber} phải dùng sectionIndex=${expectedSectionIndex}.`);
+  }
+  return {
+    ready: errors.length === 0,
+    code: errors.length ? 'count_invalid' : undefined,
+    count: actualNumbers.length,
+    errors,
+    data: parsed.data,
+  };
+}
+
+export function validateReadingPassage(
+  passageNumber: number,
+  value: unknown,
+): MockSkillValidationResult & { data?: unknown } {
+  const parsed = ReadingPassageSchema.safeParse(value);
+  if (!parsed.success) {
+    const count = Array.isArray((value as any)?.questions) ? (value as any).questions.length : 0;
+    return {
+      ready: false,
+      code: 'schema_invalid',
+      count,
+      errors: formatIssues(`Reading passage ${passageNumber}`, parsed.error.issues),
+    };
+  }
+
+  const counts = [13, 13, 14] as const;
+  const expectedCount = counts[passageNumber - 1] || 0;
+  const expectedStart = counts.slice(0, passageNumber - 1).reduce((total, count) => total + count, 0) + 1;
+  const expectedNumbers = Array.from({ length: expectedCount }, (_, index) => expectedStart + index);
+  const actualNumbers = parsed.data.questions.map((question) => question.number);
+  const expectedSectionIndex = passageNumber - 1;
+  const errors: string[] = [];
+  if (parsed.data.passageNumber !== passageNumber) {
+    errors.push(`Reading passage ${passageNumber} phải có passageNumber=${passageNumber}.`);
+  }
+  if (actualNumbers.length !== expectedCount || actualNumbers.some((number, index) => number !== expectedNumbers[index])) {
+    errors.push(`Reading passage ${passageNumber} phải có đúng câu ${expectedStart}-${expectedStart + expectedCount - 1} theo thứ tự.`);
+  }
+  if (parsed.data.questions.some((question) => question.sectionIndex !== expectedSectionIndex)) {
+    errors.push(`Reading passage ${passageNumber} phải dùng sectionIndex=${expectedSectionIndex}.`);
   }
   return {
     ready: errors.length === 0,

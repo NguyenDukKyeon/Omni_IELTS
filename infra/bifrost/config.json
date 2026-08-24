@@ -49,7 +49,7 @@
           },
           {
             "provider": "groq",
-            "allowed_models": ["groq/compound-mini", "groq/compound"],
+            "allowed_models": ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"],
             "key_ids": ["*"],
             "weight": 1
           },
@@ -109,7 +109,19 @@
         {
           "name": "groq-primary",
           "value": "env.GROQ_API_KEY",
-          "models": ["groq/compound-mini", "groq/compound"],
+          "models": ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"],
+          "weight": 1
+        },
+        {
+          "name": "groq-2",
+          "value": "env.GROQ_API_KEY_2",
+          "models": ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"],
+          "weight": 1
+        },
+        {
+          "name": "groq-3",
+          "value": "env.GROQ_API_KEY_3",
+          "models": ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"],
           "weight": 1
         }
       ],
@@ -123,6 +135,18 @@
         {
           "name": "nvidia-nim-primary",
           "value": "env.NVIDIA_NIM_API_KEY",
+          "models": ["meta/llama-3.3-70b-instruct"],
+          "weight": 1
+        },
+        {
+          "name": "nvidia-nim-2",
+          "value": "env.NVIDIA_NIM_API_KEY_2",
+          "models": ["meta/llama-3.3-70b-instruct"],
+          "weight": 1
+        },
+        {
+          "name": "nvidia-nim-3",
+          "value": "env.NVIDIA_NIM_API_KEY_3",
           "models": ["meta/llama-3.3-70b-instruct"],
           "weight": 1
         }
@@ -148,6 +172,18 @@
         {
           "name": "openrouter-primary",
           "value": "env.OPENROUTER_API_KEY",
+          "models": ["openrouter/free"],
+          "weight": 1
+        },
+        {
+          "name": "openrouter-2",
+          "value": "env.OPENROUTER_API_KEY_2",
+          "models": ["openrouter/free"],
+          "weight": 1
+        },
+        {
+          "name": "openrouter-3",
+          "value": "env.OPENROUTER_API_KEY_3",
           "models": ["openrouter/free"],
           "weight": 1
         }

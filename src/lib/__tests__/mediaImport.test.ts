@@ -3,6 +3,7 @@ import {
   buildYtDlpRuntimeArgs,
   classifyMediaImportFailure,
   consumeFixedWindowQuota,
+  deriveMediaCapabilities,
   parseYtDlpMetadata,
   segmentUntimedTranscript,
   validateTranscriptCoverage,
@@ -43,6 +44,19 @@ describe('media import reliability helpers', () => {
     });
   });
 
+  it('rejects a sparse transcript that only stretches its final timestamp to minute eleven', () => {
+    const sparse = Array.from({ length: 12 }, (_, index) => ({
+      start: index * 60,
+      end: index * 60 + 3,
+      text: `Sparse sentence ${index + 1}.`,
+    }));
+
+    expect(validateTranscriptCoverage(sparse, 660)).toMatchObject({
+      valid: false,
+      issue: 'coverage_insufficient',
+    });
+  });
+
   it('never exposes raw yt-dlp commands, temp paths or stderr to the UI', () => {
     const failure = classifyMediaImportFailure(new Error(
       'Command failed: /tmp/omni-yt-dlp --print-json Sign in to confirm you’re not a bot',
@@ -56,6 +70,29 @@ describe('media import reliability helpers', () => {
     expect(JSON.stringify(failure)).not.toContain('/tmp/');
     expect(JSON.stringify(failure)).not.toContain('Command failed');
     expect(JSON.stringify(failure)).not.toContain('--print-json');
+  });
+
+  it('classifies videos over 25 minutes as a non-retryable source-size failure', () => {
+    expect(classifyMediaImportFailure(new Error('Video dài hơn 25 phút. Hãy chọn một đoạn ngắn hơn trước khi chép lời.')))
+      .toMatchObject({
+        category: 'video_too_long',
+        code: 'MEDIA_VIDEO_TOO_LONG',
+        retryable: false,
+        recoveryAction: 'upload_source',
+      });
+  });
+
+  it('disables automatic YouTube import when the PO-token provider is unavailable', () => {
+    expect(deriveMediaCapabilities({ ytDlp: true, jsRuntime: true, potProvider: false }))
+      .toMatchObject({
+        youtubeImport: {
+          available: false,
+          reason: expect.stringContaining('PO-token'),
+        },
+        uploadAudio: true,
+        uploadCaptions: true,
+        pasteTranscript: true,
+      });
   });
 
   it('turns a pasted transcript into deterministic sentence practice segments', () => {

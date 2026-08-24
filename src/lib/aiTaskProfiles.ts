@@ -39,6 +39,7 @@ const fallback = (
 });
 
 const textGatewayFallbacks = [
+  fallback('groq', 'openai/gpt-oss-120b', 'text'),
   fallback('nvidia_nim', 'meta/llama-3.3-70b-instruct', 'text'),
   fallback('openrouter', 'openrouter/free', 'text'),
 ];

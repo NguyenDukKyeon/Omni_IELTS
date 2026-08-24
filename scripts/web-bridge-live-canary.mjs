@@ -13,6 +13,7 @@ if (!enabled || !bridgeKey) {
 async function verifyArtifact(artifact) {
   const response = await fetch(`${appBaseUrl}/api/internal/ai/canary/text`, {
     method: 'POST',
+    signal: AbortSignal.timeout(90_000),
     headers: {
       'content-type': 'application/json',
       'x-omni-web-bridge-key': bridgeKey,
@@ -20,11 +21,26 @@ async function verifyArtifact(artifact) {
     body: JSON.stringify({ artifact }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.status !== 'ok' || payload.lane !== 'web_bridge' || payload.itemCount < 2) {
+  if (
+    !response.ok
+    || payload.status !== 'ok'
+    || payload.lane !== 'web_bridge'
+    || payload.sessionStatus !== 'authenticated'
+    || payload.model !== 'gemini-3.1-pro'
+    || payload.resolvedModel !== 'gemini-pro'
+    || payload.itemCount < 2
+  ) {
     const category = typeof payload.category === 'string' ? payload.category : `http_${response.status}`;
     throw new Error(`Web Bridge canary failed for ${artifact}: ${category}`);
   }
-  return { artifact, lane: payload.lane, itemCount: payload.itemCount };
+  return {
+    artifact,
+    lane: payload.lane,
+    model: payload.model,
+    resolvedModel: payload.resolvedModel,
+    sessionStatus: payload.sessionStatus,
+    itemCount: payload.itemCount,
+  };
 }
 
 const results = [];

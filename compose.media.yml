@@ -55,11 +55,17 @@ services:
       context: .
       dockerfile: infra/gemini-web2api/Dockerfile
       args:
-        GEMINI_WEB2API_COMMIT: 2bb988bfcbb82a7fab5d2c99aa5560ff40d64f7e
+        GEMINI_WEBAPI_COMMIT: 955746dad14dae37c18bd766f34c8cd397ad50d4
     init: true
     environment:
       WEB_AI_BRIDGE_API_KEY: ${WEB_AI_BRIDGE_API_KEY}
-      WEB_AI_BRIDGE_MODEL: ${WEB_AI_BRIDGE_MODEL:-gemini-3.6-flash}
+      WEB_AI_BRIDGE_MODEL: ${WEB_AI_BRIDGE_MODEL:-gemini-3.1-pro}
+      WEB_AI_BRIDGE_REQUEST_TIMEOUT_SEC: ${WEB_AI_BRIDGE_REQUEST_TIMEOUT_SEC:-75}
+    volumes:
+      - type: bind
+        source: ${WEB_AI_BRIDGE_COOKIE_HOST_PATH:-./.data/gemini-web-login-required.json}
+        target: /run/secrets/gemini-cookie.json
+        read_only: true
     expose:
       - "8081"
     healthcheck:
