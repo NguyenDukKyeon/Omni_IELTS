@@ -37,6 +37,9 @@ import {
   MockAssemblerPackage,
   MockSynthesizerInput,
   MockSynthesizerResult,
+  RealExamForecastItem,
+  LiveHubPracticeArtifact,
+  LiveHubMockBuildResponse,
 } from '../types';
 import { validateMockPackage } from '../lib/mockPackageValidator';
 import { playVoiceText } from './voiceService';
@@ -382,6 +385,41 @@ export async function evaluateFullGraderApi(
   return await res.json();
 }
 
+export async function createLiveHubPracticeArtifactApi(
+  item: RealExamForecastItem,
+  retrievedAt?: string | null,
+): Promise<LiveHubPracticeArtifact> {
+  const response = await fetch(`/api/live-hub/items/${encodeURIComponent(item.id)}/practice`, {
+    method: 'POST',
+    headers: getGeminiRequestHeaders(),
+    body: JSON.stringify({ item, retrievedAt }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.artifact) {
+    throw new Error(body.error || `Không thể tạo bài luyện từ Live Hub (HTTP ${response.status}).`);
+  }
+  await savePrivateArtifactIfAuthenticated('source', body.artifact, body.artifact.provenance).catch(() => false);
+  return body.artifact as LiveHubPracticeArtifact;
+}
+
+export async function createLiveHubMockBuildApi(
+  item: RealExamForecastItem,
+  targetBand: number,
+  retrievedAt?: string | null,
+): Promise<LiveHubMockBuildResponse> {
+  const response = await fetch(`/api/live-hub/items/${encodeURIComponent(item.id)}/mock`, {
+    method: 'POST',
+    headers: getGeminiRequestHeaders(),
+    body: JSON.stringify({ item, targetBand, retrievedAt }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.artifact || !body.mockBuild?.id) {
+    throw new Error(body.error || `Không thể tạo MockBuild từ Live Hub (HTTP ${response.status}).`);
+  }
+  await savePrivateArtifactIfAuthenticated('source', body.artifact, body.artifact.provenance).catch(() => false);
+  return body as LiveHubMockBuildResponse;
+}
+
 /**
  * Assemble Custom 4-Skill Cambridge Mock Exam Package (mock-assembler-v1)
  */
@@ -425,11 +463,17 @@ export async function assembleFullMockPackageApi(
   }
 
   if (!pending || !buildState) {
+    const effectiveParams: MockAssemblerInput = {
+      ...(pending?.params || {}),
+      ...params,
+      sourceArtifactId: pending?.params?.sourceArtifactId || params.sourceArtifactId,
+      provenance: pending?.params?.provenance || params.provenance,
+    };
     const createResponse = await fetch('/api/mock/builds', {
       method: 'POST',
       headers: getGeminiRequestHeaders(),
       body: JSON.stringify({
-        ...params,
+        ...effectiveParams,
         resumeSkills: pending?.skillData || {},
         resumeSpeakingParts: pending?.speakingParts || {},
       }),
@@ -442,7 +486,7 @@ export async function assembleFullMockPackageApi(
     pending = {
       id: buildState.id,
       createdAt: pending?.createdAt || new Date().toISOString(),
-      params,
+      params: effectiveParams,
       skillData: pending?.skillData || {},
       speakingParts: pending?.speakingParts,
       lastFailedSkill: pending?.lastFailedSkill,

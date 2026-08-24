@@ -197,6 +197,7 @@ export const WritingQuestionModule: React.FC = () => {
       });
       setEvaluation(null);
       setEssayText('');
+      setWritingSubModule('mock_practice');
       setSecondsRemaining((isTask1 ? 20 : 40) * 60);
       setIsTimerRunning(true);
     };

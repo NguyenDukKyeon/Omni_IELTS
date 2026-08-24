@@ -34,19 +34,27 @@ import {
   RealExamCouncilType,
   ForecastGroundingResponse,
   VocabCard,
+  LiveHubPracticeArtifact,
+  LiveHubMockBuildResponse,
 } from '../../types';
-import { fetchRealExamForecastApi, playTextToSpeech } from '../../services/practiceService';
+import {
+  createLiveHubMockBuildApi,
+  createLiveHubPracticeArtifactApi,
+  fetchRealExamForecastApi,
+  playTextToSpeech,
+} from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
 import { ApiResponseError, classifyApiFailure } from '../../lib/apiFailure';
 import { loadForecastSnapshot, saveForecastSnapshot } from '../../lib/forecastSnapshot';
 
 interface ForecastLiveHubProps {
   onSelectPromptForPractice?: (item: RealExamForecastItem) => void;
+  onMockBuildReady?: (item: RealExamForecastItem, result: LiveHubMockBuildResponse) => void;
   usageContext?: 'practice' | 'mock';
 }
 
-export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPromptForPractice, usageContext = 'practice' }) => {
-  const { awardXP, addVocabCard, openAITutorWithPrompt, setActiveModule } = useApp();
+export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPromptForPractice, onMockBuildReady, usageContext = 'practice' }) => {
+  const { awardXP, addVocabCard, openAITutorWithPrompt, setActiveModule, profile } = useApp();
   const [initialSnapshot] = useState<ForecastGroundingResponse | null>(() =>
     typeof window === 'undefined' ? null : loadForecastSnapshot(window.localStorage),
   );
@@ -55,7 +63,7 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   const [isGroundingLoading, setIsGroundingLoading] = useState<boolean>(false);
   const [groundingSources, setGroundingSources] = useState<Array<{ title: string; url: string }>>(initialSnapshot?.groundingSources || []);
   const [activeSearchQueries, setActiveSearchQueries] = useState<string[]>(initialSnapshot?.searchQueries || []);
-  const [summaryOverview, setSummaryOverview] = useState<string>(initialSnapshot?.summaryOverviewVi || 'Chưa có snapshot đã xác minh. Bấm “Cập nhật” để dùng Google Search Grounding.');
+  const [summaryOverview, setSummaryOverview] = useState<string>(initialSnapshot?.summaryOverviewVi || 'Chưa có snapshot đã xác minh. Bấm “Cập nhật” để tra cứu nguồn live.');
   const [snapshotStatus, setSnapshotStatus] = useState<ForecastGroundingResponse['status']>(initialSnapshot?.status || 'unavailable');
   const [activeProvider, setActiveProvider] = useState<ForecastGroundingResponse['provider']>(initialSnapshot?.provider);
   const [fallbackReason, setFallbackReason] = useState<ForecastGroundingResponse['fallbackReason']>(initialSnapshot?.fallbackReason);
@@ -78,6 +86,8 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const [addedVocabPhrases, setAddedVocabPhrases] = useState<{ [key: string]: boolean }>({});
   const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null);
+  const [artifactAction, setArtifactAction] = useState<{ itemId: string; kind: 'practice' | 'mock' } | null>(null);
+  const [artifactError, setArtifactError] = useState<{ itemId: string; message: string } | null>(null);
 
   // Preset search tags
   const currentYear = new Date().getFullYear();
@@ -125,9 +135,13 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
       setActiveProvider(response.provider);
       setFallbackReason(response.fallbackReason);
       setLastUpdated(response.lastUpdated);
+      if (response.status === 'stale' && response.failure) {
+        setHubFailure(response.failure);
+        setHubError(`${response.failure.messageVi} Đang hiển thị snapshot đã lưu.`);
+      }
       if (typeof window !== 'undefined') saveForecastSnapshot(window.localStorage, response);
       if (response.forecastItems.length > 0) {
-        awardXP(25, 'Tra cứu nguồn IELTS qua Google Search Grounding');
+        awardXP(25, 'Tra cứu nguồn IELTS có citation');
       }
     } catch (err: any) {
       const failure = err instanceof ApiResponseError && err.failure
@@ -211,7 +225,8 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   };
 
   // Practice this prompt now
-  const handlePracticeNow = (item: RealExamForecastItem) => {
+  const openPracticeArtifact = (item: RealExamForecastItem, artifact: LiveHubPracticeArtifact) => {
+    sessionStorage.setItem('omni_pending_practice_artifact', JSON.stringify(artifact));
     if (onSelectPromptForPractice) {
       onSelectPromptForPractice(item);
       return;
@@ -228,6 +243,8 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
           title: item.title,
           category: item.subCategory || 'Opinion Essay',
           taskType: item.skill === 'writing_task1' ? 'task1_academic' : 'task2_essay',
+          artifactId: artifact.id,
+          provenance: artifact.provenance,
         })
       );
       window.dispatchEvent(
@@ -238,6 +255,8 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
             title: item.title,
             category: item.subCategory || 'Opinion Essay',
             taskType: item.skill === 'writing_task1' ? 'task1_academic' : 'task2_essay',
+            artifactId: artifact.id,
+            provenance: artifact.provenance,
           },
         })
       );
@@ -252,6 +271,8 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
           title: item.title,
           cueCardPoints: item.cueCardPoints,
           part: item.skill,
+          artifactId: artifact.id,
+          provenance: artifact.provenance,
         })
       );
       window.dispatchEvent(
@@ -262,10 +283,57 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
             title: item.title,
             cueCardPoints: item.cueCardPoints,
             part: item.skill,
+            artifactId: artifact.id,
+            provenance: artifact.provenance,
           },
         })
       );
       setActiveModule('practice');
+    }
+  };
+
+  const handlePracticeNow = async (item: RealExamForecastItem) => {
+    setArtifactAction({ itemId: item.id, kind: 'practice' });
+    setArtifactError(null);
+    try {
+      const artifact = await createLiveHubPracticeArtifactApi(item, lastUpdated);
+      openPracticeArtifact(item, artifact);
+      awardXP(10, 'Tạo bài luyện có nguồn từ Live Hub');
+    } catch (error: any) {
+      setArtifactError({ itemId: item.id, message: error?.message || 'Không thể tạo bài luyện từ nguồn này.' });
+    } finally {
+      setArtifactAction(null);
+    }
+  };
+
+  const handleCreateMock = async (item: RealExamForecastItem) => {
+    setArtifactAction({ itemId: item.id, kind: 'mock' });
+    setArtifactError(null);
+    try {
+      const result = await createLiveHubMockBuildApi(item, profile.targetBand || 7, lastUpdated);
+      sessionStorage.setItem('omni_pending_mock_source', JSON.stringify(item));
+      localStorage.setItem('omni_pending_mock_build', JSON.stringify({
+        id: result.mockBuild.id,
+        createdAt: result.mockBuild.createdAt,
+        params: {
+          targetBand: profile.targetBand || 7,
+          sourceItem: item,
+          sourceArtifactId: result.artifact.id,
+          provenance: result.artifact.provenance,
+        },
+        skillData: {},
+        sourceArtifactId: result.artifact.id,
+      }));
+      if (onMockBuildReady) onMockBuildReady(item, result);
+      else {
+        sessionStorage.setItem('omni_open_mock_orchestrator', '1');
+        setActiveModule('mock_test');
+      }
+      awardXP(15, 'Tạo MockBuild có nguồn từ Live Hub');
+    } catch (error: any) {
+      setArtifactError({ itemId: item.id, message: error?.message || 'Không thể tạo Full Mock từ nguồn này.' });
+    } finally {
+      setArtifactAction(null);
     }
   };
 
@@ -307,7 +375,11 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             <div className="flex items-center gap-2.5">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
                 <Globe2 className="w-3.5 h-3.5 text-blue-400 animate-spin-slow" />
-                {activeProvider === 'groq' ? 'Groq Web Search fallback' : 'Google Search Grounding Live'}
+                {activeProvider === 'groq'
+                  ? 'Groq Web Search Live'
+                  : activeProvider === 'brave'
+                    ? 'Brave Search Live'
+                    : 'Google Search Grounding Live'}
               </span>
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2.5 py-0.5 rounded-full">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -331,11 +403,16 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
               IELTS Real Exam & Forecast Live Hub
             </h1>
             <p className="text-xs md:text-sm text-slate-300 max-w-3xl mt-1 leading-relaxed">
-              Gemini Google Search là nguồn chính; Groq Web Search tự động tiếp quản khi provider chính không khả dụng. Từng item chỉ được gắn nhãn “verified” khi URL trực tiếp hỗ trợ claim.
+              Google Grounding là nguồn chính; Groq và Brave Search tự động tiếp quản khi nguồn trước không khả dụng. Citation được ánh xạ bằng Evidence ID, không lấy URL do AI tự viết.
             </p>
             {activeProvider === 'groq' && fallbackReason === 'quota_exhausted' && (
               <p className="mt-2 text-xs font-semibold text-amber-300">
                 Gemini hết quota ngày; dữ liệu này được tra cứu bằng Groq.
+              </p>
+            )}
+            {activeProvider === 'brave' && (
+              <p className="mt-2 text-xs font-semibold text-amber-300">
+                Dữ liệu này được tra cứu bằng Brave Search; Gemini Web chỉ chuyển evidence thành bài luyện.
               </p>
             )}
           </div>
@@ -365,15 +442,29 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                     Mở cài đặt API key
                   </button>
                 )}
-                {hubFailure?.action === 'open_quota' && (
+                {hubFailure?.action === 'open_quota' && hubFailure.provider === 'bifrost' && (
+                  <button
+                    type="button"
+                    data-ux-flow="live-hub.open-quota"
+                    onClick={() => setActiveModule('profile')}
+                    className="rounded-lg border border-amber-300/50 px-2.5 py-1 font-bold hover:bg-amber-300/10"
+                  >
+                    Kiểm tra API Gateway Pool
+                  </button>
+                )}
+                {hubFailure?.action === 'open_quota' && hubFailure.provider !== 'bifrost' && (
                   <a
                     data-ux-flow="live-hub.open-quota"
-                    href={hubFailure.provider === 'groq' ? 'https://console.groq.com/settings/limits' : 'https://aistudio.google.com/app/apikey'}
+                    href={hubFailure.provider === 'groq'
+                      ? 'https://console.groq.com/settings/limits'
+                      : hubFailure.provider === 'brave'
+                        ? 'https://api-dashboard.search.brave.com/app/keys'
+                        : 'https://aistudio.google.com/app/apikey'}
                     target="_blank"
                     rel="noreferrer"
                     className="rounded-lg border border-amber-300/50 px-2.5 py-1 font-bold hover:bg-amber-300/10"
                   >
-                    Kiểm tra quota {hubFailure.provider === 'groq' ? 'Groq' : 'Gemini'}
+                    Kiểm tra quota {hubFailure.provider === 'groq' ? 'Groq' : hubFailure.provider === 'brave' ? 'Brave Search' : 'Gemini'}
                   </a>
                 )}
               </div>
@@ -680,13 +771,31 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                   {/* Quick Action Toolbar */}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <button data-ux-flow="live-hub.refresh"
-                        onClick={() => handlePracticeNow(item)}
-                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 active:scale-95 transition-all"
+                      <button data-ux-flow="live-hub.practice"
+                        onClick={() => void handlePracticeNow(item)}
+                        disabled={artifactAction?.itemId === item.id}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-500/20 active:scale-95 transition-all"
                       >
-                        <Zap className="w-3.5 h-3.5 text-amber-300" />
-                        <span>{usageContext === 'mock' ? 'Dùng làm section trong Mock' : 'Luyện tập đề này ngay'}</span>
+                        {artifactAction?.itemId === item.id && artifactAction.kind === 'practice'
+                          ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          : <Zap className="w-3.5 h-3.5 text-amber-300" />}
+                        <span>{artifactAction?.itemId === item.id && artifactAction.kind === 'practice' ? 'Đang tạo bài luyện…' : 'Luyện riêng kỹ năng này'}</span>
                         <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+                      </button>
+
+                      <button data-ux-flow="live-hub.mock"
+                        onClick={() => void handleCreateMock(item)}
+                        disabled={artifactAction?.itemId === item.id}
+                        className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 active:scale-95 transition-all disabled:opacity-50 ${
+                          usageContext === 'mock'
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                            : 'bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white'
+                        }`}
+                      >
+                        {artifactAction?.itemId === item.id && artifactAction.kind === 'mock'
+                          ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          : <Layers className="w-3.5 h-3.5" />}
+                        <span>{artifactAction?.itemId === item.id && artifactAction.kind === 'mock' ? 'Đang tạo MockBuild…' : 'Tạo Full Mock từ nguồn này'}</span>
                       </button>
 
                       <button data-ux-flow="live-hub.refresh"
@@ -713,6 +822,11 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                       </span>
                     )}
                   </div>
+                  {artifactError?.itemId === item.id && (
+                    <div role="alert" className="mt-3 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
+                      {artifactError.message}
+                    </div>
+                  )}
                 </div>
 
                 {/* Expanded Deep Analysis Tabs */}

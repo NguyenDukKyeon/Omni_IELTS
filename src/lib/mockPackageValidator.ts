@@ -45,6 +45,19 @@ const MockQuestionSchema = z.object({
   relatedVocab: z.array(nonEmpty).optional(),
 }).strict();
 
+const ListeningSectionSchema = z.object({
+  sectionNumber: z.number().int().min(1).max(4),
+  title: nonEmpty,
+  context: nonEmpty,
+  audioScriptExcerpt: nonEmpty,
+  instructionsVi: nonEmpty,
+  questions: z.array(MockQuestionSchema).min(1),
+  mapData: z.object({
+    title: nonEmpty,
+    locations: z.array(z.object({ letter: nonEmpty, name: nonEmpty, x: z.number(), y: z.number() }).strict()),
+  }).strict().optional(),
+}).strict();
+
 const ListeningSchema = z.object({
   title: nonEmpty,
   audioTranscript: nonEmpty.optional(),
@@ -57,18 +70,7 @@ const ListeningSchema = z.object({
     durationSeconds: z.number().positive().optional(),
     validation: z.object({ valid: z.literal(true), warnings: z.array(z.string()) }).strict(),
   }).strict().optional(),
-  sections: z.array(z.object({
-    sectionNumber: z.number().int().min(1).max(4),
-    title: nonEmpty,
-    context: nonEmpty,
-    audioScriptExcerpt: nonEmpty,
-    instructionsVi: nonEmpty,
-    questions: z.array(MockQuestionSchema).min(1),
-    mapData: z.object({
-      title: nonEmpty,
-      locations: z.array(z.object({ letter: nonEmpty, name: nonEmpty, x: z.number(), y: z.number() }).strict()),
-    }).strict().optional(),
-  }).strict()).length(4),
+  sections: z.array(ListeningSectionSchema).length(4),
 }).strict().superRefine((value, context) => {
   if (!value.audioTranscript && !value.audioArtifact?.audioUrl && !value.audioArtifact?.audioBase64) {
     context.addIssue({ code: 'custom', path: ['audioArtifact'], message: 'thiếu transcript hoặc audio đã kiểm định' });
@@ -181,6 +183,66 @@ export function validateSpeakingPart(part: MockSpeakingPart, value: unknown): Mo
     return { ready: false, code: 'schema_invalid', errors: formatIssues(`Speaking ${part}`, parsed.error.issues) };
   }
   return { ready: true, errors: [], data: parsed.data };
+}
+
+export function validateListeningSection(
+  sectionNumber: number,
+  value: unknown,
+): MockSkillValidationResult & { data?: unknown } {
+  const parsed = ListeningSectionSchema.safeParse(value);
+  if (!parsed.success) {
+    const count = Array.isArray((value as any)?.questions) ? (value as any).questions.length : 0;
+    return {
+      ready: false,
+      code: 'schema_invalid',
+      count,
+      errors: formatIssues(`Listening section ${sectionNumber}`, parsed.error.issues),
+    };
+  }
+
+  const expectedStart = (sectionNumber - 1) * 10 + 1;
+  const expectedNumbers = Array.from({ length: 10 }, (_, index) => expectedStart + index);
+  const actualNumbers = parsed.data.questions.map((question) => question.number);
+  const expectedSectionIndex = sectionNumber - 1;
+  const errors: string[] = [];
+  if (parsed.data.sectionNumber !== sectionNumber) {
+    errors.push(`Listening section ${sectionNumber} phải có sectionNumber=${sectionNumber}.`);
+  }
+  if (actualNumbers.length !== 10 || actualNumbers.some((number, index) => number !== expectedNumbers[index])) {
+    errors.push(`Listening section ${sectionNumber} phải có đúng câu ${expectedStart}-${expectedStart + 9} theo thứ tự.`);
+  }
+  if (parsed.data.questions.some((question) => question.sectionIndex !== expectedSectionIndex)) {
+    errors.push(`Listening section ${sectionNumber} phải dùng sectionIndex=${expectedSectionIndex}.`);
+  }
+  return {
+    ready: errors.length === 0,
+    code: errors.length ? 'count_invalid' : undefined,
+    count: actualNumbers.length,
+    errors,
+    data: parsed.data,
+  };
+}
+
+export function validateMockSourcePreservation(
+  skill: MockSkill,
+  value: unknown,
+  sourceItem?: { skill?: string; promptStatement?: string } | null,
+): string[] {
+  const prompt = sourceItem?.promptStatement?.trim();
+  if (!prompt) return [];
+  const section = value as any;
+  let preserved = true;
+
+  if (sourceItem?.skill === 'writing_task1' && skill === 'writing') preserved = section?.task1?.prompt?.trim() === prompt;
+  else if (sourceItem?.skill === 'writing_task2' && skill === 'writing') preserved = section?.task2?.prompt?.trim() === prompt;
+  else if (sourceItem?.skill === 'speaking_part1' && skill === 'speaking') {
+    preserved = Array.isArray(section?.part1?.questions) && section.part1.questions.some((question: string) => question.trim() === prompt);
+  } else if (sourceItem?.skill === 'speaking_part2' && skill === 'speaking') preserved = section?.part2?.cueCard?.prompt?.trim() === prompt;
+  else if (sourceItem?.skill === 'speaking_part3' && skill === 'speaking') {
+    preserved = Array.isArray(section?.part3?.questions) && section.part3.questions.some((question: string) => question.trim() === prompt);
+  }
+
+  return preserved ? [] : [`${skill} phải giữ nguyên nguyên văn prompt từ Live Hub trong đúng section bắt buộc.`];
 }
 
 export function validateMockSkill(skill: MockSkill, value: unknown): MockSkillValidationResult {

@@ -25,7 +25,12 @@ export type PracticeTabType = SkillType | 'forecast_hub';
 
 export const IELTSPracticeView: React.FC = () => {
   const { mistakes, openAITutorWithPrompt } = useApp();
-  const [activeTab, setActiveTab] = useState<PracticeTabType>('forecast_hub');
+  const [activeTab, setActiveTab] = useState<PracticeTabType>(() => {
+    if (typeof window === 'undefined') return 'forecast_hub';
+    if (sessionStorage.getItem('omni_pending_writing_prompt')) return 'writing';
+    if (sessionStorage.getItem('omni_pending_speaking_prompt')) return 'speaking';
+    return 'forecast_hub';
+  });
   const [isItemWriterOpen, setIsItemWriterOpen] = useState<boolean>(false);
   const [isFullGraderOpen, setIsFullGraderOpen] = useState<boolean>(false);
 

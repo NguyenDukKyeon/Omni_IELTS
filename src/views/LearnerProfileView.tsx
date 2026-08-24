@@ -53,11 +53,30 @@ export const LearnerProfileView: React.FC = () => {
   const [groqKey, setGroqKey] = useState('');
   const [hasGroqSessionKey, setHasGroqSessionKey] = useState(() => Boolean(sessionStorage.getItem('omni_groq_api_key')));
   const [dataStatus, setDataStatus] = useState<string>('');
+  const [gatewayCapabilities, setGatewayCapabilities] = useState<any>(null);
+  const [gatewayHealth, setGatewayHealth] = useState<'loading' | 'healthy' | 'disabled' | 'unavailable'>('loading');
 
   useEffect(() => {
     void getSession().then((session) => setAuthEmail(session?.user.email || null)).catch(() => undefined);
     const subscription = supabase?.auth.onAuthStateChange((_event, session) => setAuthEmail(session?.user.email || null));
     return () => subscription?.data.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      fetch('/api/ai/capabilities').then((response) => response.ok ? response.json() : null),
+      fetch('/api/ai/health').then((response) => response.ok ? response.json() : null),
+    ]).then(([capabilities, health]) => {
+      if (!active) return;
+      setGatewayCapabilities(capabilities);
+      setGatewayHealth(['healthy', 'disabled', 'unavailable'].includes(health?.status)
+        ? health.status
+        : 'unavailable');
+    }).catch(() => {
+      if (active) setGatewayHealth('unavailable');
+    });
+    return () => { active = false; };
   }, []);
 
   const saveGeminiKeyForSession = () => {
@@ -202,6 +221,48 @@ export const LearnerProfileView: React.FC = () => {
             <input data-ux-flow="profile.settings" type="password" autoComplete="off" value={groqKey} onChange={(event) => setGroqKey(event.target.value)} placeholder={hasGroqSessionKey ? 'Đã có Groq key cho phiên này' : 'Dán Groq API key'} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-950" />
             <button data-ux-flow="profile.settings" type="button" onClick={saveGroqKeyForSession} disabled={!groqKey.trim()} className="rounded-xl bg-orange-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">Lưu Groq</button>
             {hasGroqSessionKey && <button data-ux-flow="profile.settings" type="button" onClick={() => { sessionStorage.removeItem('omni_groq_api_key'); setHasGroqSessionKey(false); }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-700">Xóa Groq</button>}
+          </div>
+        </section>
+
+        <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Cloud className="h-5 w-5 text-emerald-600" />
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">API Gateway Pool</h2>
+                <p className="text-[11px] text-slate-500">Pool do server quản lý; giao diện chỉ hiển thị alias và không bao giờ trả secret.</p>
+              </div>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+              gatewayHealth === 'healthy'
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                : gatewayHealth === 'loading'
+                  ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+            }`}>
+              {gatewayHealth === 'healthy' ? 'Gateway khỏe' : gatewayHealth === 'loading' ? 'Đang kiểm tra…' : gatewayHealth === 'disabled' ? 'Gateway chưa bật' : 'Gateway không khả dụng'}
+            </span>
+          </div>
+          {gatewayCapabilities?.quotaNoteVi && (
+            <p className="rounded-xl bg-blue-50 px-3 py-2 text-[11px] text-blue-800 dark:bg-blue-950/40 dark:text-blue-200">
+              {gatewayCapabilities.quotaNoteVi}
+            </p>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {(gatewayCapabilities?.providers || []).map((provider: any) => (
+              <div key={provider.provider} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">{String(provider.provider).replace('_', ' ')}</p>
+                <p className="mt-1 text-[10px] text-slate-500">{(provider.capabilities || []).join(' · ')}</p>
+                <div className="mt-2 space-y-1">
+                  {(provider.keys || []).map((key: any) => (
+                    <div key={key.alias} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="truncate font-mono text-slate-600 dark:text-slate-300">{key.alias}</span>
+                      <span className={key.configured ? 'text-emerald-600' : 'text-slate-400'}>{key.configured ? 'đã cấu hình' : 'chưa có'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       </div>

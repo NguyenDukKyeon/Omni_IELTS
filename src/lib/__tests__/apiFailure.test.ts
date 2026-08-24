@@ -7,6 +7,7 @@ describe('classifyApiFailure', () => {
     [{ status: 429, message: 'quota_exceeded: daily quota exhausted' }, 'quota_exhausted', false, 'open_quota'],
     [{ status: 429, message: 'rate_limit_exceeded: too many requests' }, 'rate_limited', true, 'retry'],
     [{ status: 503, message: 'This model is currently experiencing high demand' }, 'provider_overloaded', true, 'retry'],
+    [new Error('AI_TIMEOUT_90000'), 'provider_overloaded', true, 'retry'],
     [new Error('fetch failed: getaddrinfo ENOTFOUND generativelanguage.googleapis.com'), 'network_failed', true, 'retry'],
     [{ code: 'SCHEMA_INVALID', message: 'Forecast payload failed validation' }, 'schema_invalid', true, 'retry'],
   ] as const)('maps provider failures to an actionable public contract', (error, category, retryable, action) => {
@@ -33,6 +34,42 @@ describe('classifyApiFailure', () => {
     });
     expect(failure.messageVi).toContain('Groq');
     expect(failure.messageVi).not.toContain('secret rejected');
+  });
+
+  it('identifies Gemini Web failures without exposing the bridge response', () => {
+    const failure = classifyApiFailure(
+      { status: 429, message: 'quota exhausted for temporary-secret' },
+      'ai',
+      'gemini_web',
+    );
+
+    expect(failure).toMatchObject({
+      provider: 'gemini_web',
+      category: 'quota_exhausted',
+      action: 'open_quota',
+    });
+    expect(failure.messageVi).toContain('Gemini Web');
+    expect(failure.messageVi).not.toContain('temporary-secret');
+  });
+
+  it.each([
+    [{ category: 'gateway_unavailable', status: 503 }, 'gateway_unavailable', true],
+    [{ category: 'all_providers_exhausted', status: 503 }, 'all_providers_exhausted', false],
+  ] as const)('preserves gateway-specific recovery states', (error, category, retryable) => {
+    const failure = classifyApiFailure(error, 'ai', 'bifrost');
+
+    expect(failure).toMatchObject({ provider: 'bifrost', category, retryable });
+    expect(failure.messageVi).not.toContain('undefined');
+  });
+
+  it('preserves a scrubbed gateway schema category so the grounded router can fall back', () => {
+    const failure = classifyApiFailure(
+      { category: 'schema_invalid', status: 502, message: 'Nguồn AI trả dữ liệu không đạt schema.' },
+      'forecast',
+      'gemini',
+    );
+
+    expect(failure).toMatchObject({ category: 'schema_invalid', retryable: true, action: 'retry' });
   });
 });
 

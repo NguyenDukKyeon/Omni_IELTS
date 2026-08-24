@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { requestGroqGroundedForecast } from '../groqGrounding';
+import { extractGroqForecastEvidence, requestGroqGroundedForecast } from '../groqGrounding';
 
 const modelPayload = {
   summaryOverviewVi: 'Một recall có nguồn trực tiếp.',
@@ -20,6 +20,39 @@ const modelPayload = {
 };
 
 describe('requestGroqGroundedForecast', () => {
+  it('keeps official Groq tool output as evidence even when the assistant content is prose', () => {
+    const evidence = extractGroqForecastEvidence({
+      payload: {
+        choices: [{
+          message: {
+            content: 'I found one useful source.',
+            executed_tools: [{
+              type: 'search',
+              arguments: JSON.stringify({ query: 'recent IELTS Vietnam recall' }),
+              output: 'Title: IELTS recall report\nURL: https://example.org/ielts-recall\nCandidates reported a recent Writing Task 2 prompt.',
+            }],
+          },
+        }],
+      },
+      model: 'groq/compound-mini',
+      originalQuery: 'IELTS Writing Task 2 Vietnam',
+      retrievedAt: '2026-08-24T12:00:00.000Z',
+    });
+
+    expect(evidence).toEqual({
+      provider: 'groq',
+      model: 'groq/compound-mini',
+      originalQuery: 'IELTS Writing Task 2 Vietnam',
+      searchQueries: ['recent IELTS Vietnam recall'],
+      retrievedAt: '2026-08-24T12:00:00.000Z',
+      sources: [{
+        title: 'IELTS recall report',
+        url: 'https://example.org/ielts-recall',
+        snippet: 'Candidates reported a recent Writing Task 2 prompt.',
+      }],
+    });
+  });
+
   it('turns Groq Web Search results into claim-level Forecast citations', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       choices: [{
