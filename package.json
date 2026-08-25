@@ -19,8 +19,12 @@
     "setup:web-bridge:pro": "tsx scripts/web-bridge-session.ts setup",
     "sync:web-bridge:session": "tsx scripts/web-bridge-session.ts sync",
     "check:ux-contracts": "tsx scripts/check-ux-contracts.ts",
-    "check:beta": "node scripts/public-beta-gate.mjs",
-    "check:release": "node scripts/public-beta-gate.mjs"
+    "check:gate": "node scripts/public-beta-gate.mjs --mode=deterministic",
+    "check:beta": "node scripts/public-beta-gate.mjs --mode=deterministic",
+    "check:release": "node scripts/public-beta-gate.mjs --mode=full",
+    "check:canary:live": "node scripts/public-beta-gate.mjs --mode=live",
+    "check:live": "node scripts/public-beta-gate.mjs --mode=live",
+    "check:release:full": "node scripts/public-beta-gate.mjs --mode=full"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

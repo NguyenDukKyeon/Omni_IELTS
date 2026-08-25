@@ -1,0 +1,29 @@
+name: Live Provider Canary
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  canary:
+    name: Live Provider Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run Live Provider Canaries
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          WEB_AI_BRIDGE_ENABLED: 'true'
+          WEB_AI_BRIDGE_API_KEY: ${{ secrets.WEB_AI_BRIDGE_API_KEY }}
+          WEB_AI_BRIDGE_MODEL: ${{ secrets.WEB_AI_BRIDGE_MODEL }}
+          OMNI_CANARY_BASE_URL: ${{ secrets.OMNI_CANARY_BASE_URL }}
+        run: npm run check:canary:live

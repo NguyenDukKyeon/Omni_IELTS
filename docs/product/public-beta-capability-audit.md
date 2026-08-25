@@ -49,8 +49,29 @@ Each journey is reviewed for: journey completion, correctness, reliability, lear
 
 ## Release verification
 
-Run `npm run check:release` (the legacy alias `check:beta` runs the same gate). The gate now executes unit/API regressions, the UX contract checker, TypeScript, the production client/server bundle, deterministic Playwright flows on desktop/mobile, WCAG AA checks, and the live-provider canary.
+Omni IELTS enforces a two-tier quality gate contract:
 
-Current UX inventory on `fix/ux-contracts-live-hub`: 645 native controls map to 18 owned contracts. The TypeScript AST checker rejects unregistered controls, unknown flow IDs, missing executable evidence, decorative buttons/links, and editable forms/fields without a handler or submit transition. Deterministic E2E keeps trace and screenshot evidence and rejects unexpected `pageerror`/console errors.
+1. **Deterministic Credential-Free Gate (`npm run check:beta` / `npm run check:gate`)**:
+   - Executes unit/API regressions (`npm test`), UX contract AST checker (`npm run check:ux-contracts`), TypeScript typecheck (`npm run lint`), production client/server bundle (`npm run build`), and deterministic Playwright E2E (`npm run test:e2e`).
+   - Hermetic and credential-free; runs on every pull request and push to `main` via `.github/workflows/public-beta-quality.yml`.
+   - Confirms code correctness, UX state transitions, accessibility, and graceful fallback handling without requiring external secrets or claiming false provider health.
 
-Release status on 2026-08-23: deterministic gates pass, but the real Gemini Search Grounding canary is blocked by `quota_exhausted`. This branch must remain unmerged until `npm run test:e2e:live` passes with a valid key/quota. A quota failure remains a truthful Vietnamese unavailable state and never produces seeded or fabricated live content.
+2. **Explicit Live Provider Canary Gate (`npm run check:canary:live` / `npm run check:live`)**:
+   - Executes private Web Bridge live verification (`npm run test:web-bridge:live`) and live Playwright provider suite (`npm run test:e2e:live`).
+   - Requires configured credentials (`GEMINI_API_KEY`, `WEB_AI_BRIDGE_API_KEY`, etc.).
+   - Runs on scheduled and manual GitHub Actions workflows (`.github/workflows/live-provider-canary.yml`) or via explicit operator invocation.
+   - Hard-fails clearly if secrets, quotas, or upstream providers are unavailable. Never produces fake success or silently passes.
+
+3. **Full Release Gate (`npm run check:release` / `npm run check:release:full`)**:
+   - Executes both the deterministic gate and the live provider canaries sequentially (`--mode=full`).
+   - A release cannot be approved from deterministic evidence alone; `npm run check:release` enforces the complete release contract.
+
+### Beta readiness and canary freshness rule
+
+Beta release readiness strictly requires **both**:
+1. A passing deterministic gate (`npm run check:beta`) on the release commit.
+2. Concrete, fresh evidence of a successful Live Provider Canary run (`npm run check:canary:live`) that is **no older than 24 hours**.
+
+#### Freshness evidence source
+- Concrete evidence must be recorded as the GitHub Actions **Live Provider Canary** workflow run URL, conclusion (`success`), and execution timestamp for the exact release commit SHA, or an equivalently recorded operator execution log with matching timestamp and commit hash.
+- Ordinary PR / push CI passing proves deterministic correctness only and explicitly does NOT claim or substitute for live provider health.
