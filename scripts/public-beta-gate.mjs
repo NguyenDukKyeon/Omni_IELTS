@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config({ quiet: true });
 
 export const DETERMINISTIC_SCRIPTS = ['test', 'check:ux-contracts', 'lint', 'build', 'test:e2e'];
-export const LIVE_CANARY_SCRIPTS = ['test:web-bridge:live', 'test:e2e:live'];
+export const LIVE_CANARY_SCRIPTS = ['test:e2e:live'];
 export const FULL_GATE_SCRIPTS = [...DETERMINISTIC_SCRIPTS, ...LIVE_CANARY_SCRIPTS];
 
 export function resolveScriptsForArgs(args = process.argv.slice(2)) {
@@ -68,7 +68,7 @@ export function runGate(args = process.argv.slice(2)) {
   }
 
   if (mode === 'live') {
-    console.log('Live provider canaries passed: private Web Bridge canary and live provider Playwright tests are clean.');
+    console.log('Live provider canaries passed: public product provider Playwright tests are clean.');
   } else if (mode === 'full') {
     console.log('Public beta full release gate passed: unit/API tests, UX contracts, TypeScript, production build, deterministic E2E, accessibility, and live provider canaries are clean.');
   } else {

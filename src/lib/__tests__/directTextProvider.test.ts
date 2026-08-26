@@ -1,7 +1,75 @@
 import { describe, expect, it, vi } from 'vitest';
-import { generateTextWithDirectProviderPool } from '../directTextProvider';
+import { computeDirectAttemptTimeoutMs, generateTextWithDirectProviderPool } from '../directTextProvider';
 
 describe('generateTextWithDirectProviderPool', () => {
+  it('includes the structured response schema in OpenAI-compatible fallback messages', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"title":"Writing","task1":{"chartData":{"labels":[],"datasets":[]}}}' } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    await generateTextWithDirectProviderPool({
+      contents: 'Create the Writing section.',
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' },
+            task1: {
+              type: 'OBJECT',
+              properties: {
+                chartData: {
+                  type: 'OBJECT',
+                  properties: {
+                    labels: { type: 'ARRAY', items: { type: 'STRING' } },
+                    datasets: { type: 'ARRAY', items: { type: 'OBJECT' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      routes: [{
+        provider: 'groq',
+        model: 'openai/gpt-oss-120b',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        keys: [{ alias: 'groq-primary', apiKey: 'groq-secret' }],
+      }],
+      fetchImpl,
+    });
+
+    const request = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(request.messages).toEqual([
+      expect.objectContaining({
+        role: 'system',
+        content: expect.stringContaining('"chartData"'),
+      }),
+      { role: 'user', content: 'Create the Writing section.' },
+    ]);
+    expect(request.messages[0].content).toContain('"labels"');
+    expect(request.messages[0].content).toContain('Do not add keys');
+  });
+
+  it('shares the fallback budget across configured keys, not only provider count', () => {
+    const timeout = computeDirectAttemptTimeoutMs(90_000, [
+      {
+        provider: 'groq',
+        model: 'openai/gpt-oss-120b',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        keys: Array.from({ length: 4 }, (_, index) => ({ alias: `groq-${index + 1}`, apiKey: `secret-${index + 1}` })),
+      },
+      {
+        provider: 'openrouter',
+        model: 'openrouter/free',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        keys: Array.from({ length: 4 }, (_, index) => ({ alias: `openrouter-${index + 1}`, apiKey: `secret-or-${index + 1}` })),
+      },
+    ]);
+
+    expect(timeout).toBe(11_250);
+  });
+
   it('supports the current Groq production text model as a schema-validated route', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '{"cards":[{"word":"learn"}]}' } }],
@@ -130,6 +198,36 @@ describe('generateTextWithDirectProviderPool', () => {
     });
 
     expect(result.provider).toBe('openrouter');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('rotates to the next key of the same provider after a per-key timeout', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: '{"ok":true}' } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const result = await generateTextWithDirectProviderPool({
+      contents: 'Return JSON.',
+      config: { responseMimeType: 'application/json' },
+      routes: [{
+        provider: 'groq',
+        model: 'openai/gpt-oss-120b',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        keys: [
+          { alias: 'groq-primary', apiKey: 'first-secret' },
+          { alias: 'groq-2', apiKey: 'second-secret' },
+        ],
+      }],
+      totalTimeoutMs: 1_000,
+      perAttemptTimeoutMs: 20,
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ provider: 'groq', keyAlias: 'groq-2' });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 

@@ -11,7 +11,7 @@ test('global navigation opens every public beta learning module without runtime 
     ['vocabulary', 'Kho Từ Vựng & Thuật Toán SRS FSRS-6'],
     ['grammar', 'Ngữ Pháp Trọng Điểm IELTS (Grammar for Band 7.0 - 8.5+)'],
     ['media', 'Media Lab: Shadowing & Nghe Chép Chính Tả (Dictation)'],
-    ['practice', 'Luyện Tập IELTS & Kho Đề Thi Thật Forecast'],
+    ['practice', 'Luyện Tập IELTS & Kho Nguồn/Dự Báo'],
     ['mock_test', 'Phòng Thi Thử IELTS-style (Full Mock Exam)'],
     ['knowledge', 'Học Kiến Thức & Chiến Thuật Làm Bài IELTS'],
     ['profile', 'Nguyễn Minh Anh'],

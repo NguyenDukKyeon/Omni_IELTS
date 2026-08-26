@@ -10,6 +10,14 @@ export interface DirectTextRoute {
   keys: ProviderApiKeyCandidate[];
 }
 
+export function computeDirectAttemptTimeoutMs(
+  totalTimeoutMs: number,
+  routes: DirectTextRoute[],
+): number {
+  const candidateCount = Math.max(1, routes.reduce((sum, route) => sum + route.keys.length, 0));
+  return Math.min(25_000, Math.max(5_000, Math.floor(totalTimeoutMs / candidateCount)));
+}
+
 type DirectTextAttempt = {
   provider: DirectTextProvider;
   model: string;
@@ -31,6 +39,12 @@ function buildMessages(contents: unknown, config: Record<string, unknown> = {}) 
   const messages: Array<{ role: string; content: string }> = [];
   if (config.systemInstruction) {
     messages.push({ role: 'system', content: textFromPart(config.systemInstruction) || String(config.systemInstruction) });
+  }
+  if (config.responseMimeType === 'application/json' && config.responseSchema) {
+    messages.push({
+      role: 'system',
+      content: `Return exactly one JSON object matching this response schema. Do not add keys that are not declared by the schema.\n${JSON.stringify(config.responseSchema)}`,
+    });
   }
   if (Array.isArray(contents)) {
     const roleMessages = contents.flatMap((entry) => {
@@ -122,7 +136,10 @@ export async function generateTextWithDirectProviderPool(input: {
             category: failure.category,
             latencyMs: Date.now() - startedAt,
           });
-          if (failure.category === 'provider_overloaded' || failure.category === 'network_failed') {
+          // Rate limits, overloads and timeouts can be key-specific. Keep rotating
+          // through the configured key pool; only skip a provider when its shared
+          // network endpoint is unreachable.
+          if (failure.category === 'network_failed') {
             unavailableProviders.add(route.provider);
           }
           continue;
@@ -166,7 +183,7 @@ export async function generateTextWithDirectProviderPool(input: {
           category: failure.category,
           latencyMs: Date.now() - startedAt,
         });
-        if (timedOut || failure.category === 'provider_overloaded' || failure.category === 'network_failed') {
+        if (failure.category === 'network_failed') {
           unavailableProviders.add(route.provider);
         }
       } finally {

@@ -57,10 +57,12 @@ Omni IELTS enforces a two-tier quality gate contract:
    - Confirms code correctness, UX state transitions, accessibility, and graceful fallback handling without requiring external secrets or claiming false provider health.
 
 2. **Explicit Live Provider Canary Gate (`npm run check:canary:live` / `npm run check:live`)**:
-   - Executes private Web Bridge live verification (`npm run test:web-bridge:live`) and live Playwright provider suite (`npm run test:e2e:live`).
-   - Requires configured credentials (`GEMINI_API_KEY`, `WEB_AI_BRIDGE_API_KEY`, etc.).
+   - Executes the live Playwright provider suite (`npm run test:e2e:live`) against the public product lanes: grounded Forecast, YouTube import, adaptive Vocabulary, and staged Mock assembly.
+   - Requires the official/free-first provider credentials configured for those product lanes (for example `GEMINI_API_KEY`, `GROQ_API_KEY`, and search credentials).
    - Runs on scheduled and manual GitHub Actions workflows (`.github/workflows/live-provider-canary.yml`) or via explicit operator invocation.
    - Hard-fails clearly if secrets, quotas, or upstream providers are unavailable. Never produces fake success or silently passes.
+
+   The authenticated private Web Bridge remains an opt-in local fallback and has its own strict canary (`npm run check:web-bridge:live`). It is not a public beta release dependency because it relies on a private browser session rather than the supported public provider contract.
 
 3. **Full Release Gate (`npm run check:release` / `npm run check:release:full`)**:
    - Executes both the deterministic gate and the live provider canaries sequentially (`--mode=full`).

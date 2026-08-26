@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:web-bridge:live": "node scripts/web-bridge-live-canary.mjs",
+    "check:web-bridge:live": "npm run test:web-bridge:live",
     "setup:web-bridge": "npm run setup:web-bridge:pro",
     "setup:web-bridge:pro": "tsx scripts/web-bridge-session.ts setup",
     "sync:web-bridge:session": "tsx scripts/web-bridge-session.ts sync",

@@ -183,7 +183,7 @@ test('staged Mock Orchestrator opens a validated package in the exam room', asyn
   await expect(page).toHaveTitle(/Omni IELTS/);
   await navigateToModule(page, 'mock_test');
   await expect(page.getByRole('heading', { name: /Phòng Thi Thử IELTS-style/ })).toBeVisible();
-  await page.getByRole('button', { name: /Mở Mock Test Orchestrator/ }).click();
+  await page.getByRole('button', { name: /AI tạo Full Mock \(Mock Orchestrator\)/ }).click();
   await page.getByRole('button', { name: 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)', exact: true }).click();
 
   await expect(page.getByText('Bộ Đề Đã Lắp Ráp Thành Công')).toBeVisible();
@@ -213,7 +213,7 @@ test.describe('controlled Mock repair failure', () => {
 
     await page.goto('/');
     await navigateToModule(page, 'mock_test');
-    await page.getByRole('button', { name: /Mở Mock Test Orchestrator/ }).click();
+    await page.getByRole('button', { name: /AI tạo Full Mock \(Mock Orchestrator\)/ }).click();
     await page.getByRole('button', { name: 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)', exact: true }).click();
 
     await expect(page.getByText(/Speaking part2\.cueCard/)).toBeVisible();

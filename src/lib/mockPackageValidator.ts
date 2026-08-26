@@ -178,6 +178,38 @@ export function normalizeMockSkill(skill: MockSkill, value: unknown): unknown {
   return { ...speaking, part1: normalizeTopicAlias(speaking.part1), part3: normalizeTopicAlias(speaking.part3) };
 }
 
+export function expectedMockQuestionRange(
+  skill: 'listening' | 'reading',
+  segmentNumber: number,
+): { start: number; end: number; count: number } {
+  const counts = skill === 'listening' ? [10, 10, 10, 10] : [13, 13, 14];
+  const count = counts[segmentNumber - 1];
+  if (!count) throw new Error(`Unsupported ${skill} segment number: ${segmentNumber}`);
+  const start = counts.slice(0, segmentNumber - 1).reduce((total, item) => total + item, 0) + 1;
+  return { start, end: start + count - 1, count };
+}
+
+export function normalizeGeneratedQuestionMetadata(
+  skill: 'listening' | 'reading',
+  segmentNumber: number,
+  value: unknown,
+): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const segment = value as Record<string, unknown>;
+  if (!Array.isArray(segment.questions)) return value;
+
+  const { start: expectedStart } = expectedMockQuestionRange(skill, segmentNumber);
+  const segmentKey = skill === 'listening' ? 'sectionNumber' : 'passageNumber';
+  return {
+    ...segment,
+    [segmentKey]: segmentNumber,
+    questions: segment.questions.map((question, index) =>
+      question && typeof question === 'object' && !Array.isArray(question)
+        ? { ...question, number: expectedStart + index, sectionIndex: segmentNumber - 1 }
+        : question),
+  };
+}
+
 export function validateSpeakingPart(part: MockSpeakingPart, value: unknown): MockSpeakingPartValidationResult {
   const normalized = part === 'part1' || part === 'part3' ? normalizeTopicAlias(value) : value;
   const parsed = SpeakingPartSchemas[part].safeParse(normalized);
@@ -202,16 +234,16 @@ export function validateListeningSection(
     };
   }
 
-  const expectedStart = (sectionNumber - 1) * 10 + 1;
-  const expectedNumbers = Array.from({ length: 10 }, (_, index) => expectedStart + index);
+  const { start: expectedStart, count: expectedCount } = expectedMockQuestionRange('listening', sectionNumber);
+  const expectedNumbers = Array.from({ length: expectedCount }, (_, index) => expectedStart + index);
   const actualNumbers = parsed.data.questions.map((question) => question.number);
   const expectedSectionIndex = sectionNumber - 1;
   const errors: string[] = [];
   if (parsed.data.sectionNumber !== sectionNumber) {
     errors.push(`Listening section ${sectionNumber} phải có sectionNumber=${sectionNumber}.`);
   }
-  if (actualNumbers.length !== 10 || actualNumbers.some((number, index) => number !== expectedNumbers[index])) {
-    errors.push(`Listening section ${sectionNumber} phải có đúng câu ${expectedStart}-${expectedStart + 9} theo thứ tự.`);
+  if (actualNumbers.length !== expectedCount || actualNumbers.some((number, index) => number !== expectedNumbers[index])) {
+    errors.push(`Listening section ${sectionNumber} phải có đúng câu ${expectedStart}-${expectedStart + expectedCount - 1} theo thứ tự.`);
   }
   if (parsed.data.questions.some((question) => question.sectionIndex !== expectedSectionIndex)) {
     errors.push(`Listening section ${sectionNumber} phải dùng sectionIndex=${expectedSectionIndex}.`);
@@ -240,9 +272,7 @@ export function validateReadingPassage(
     };
   }
 
-  const counts = [13, 13, 14] as const;
-  const expectedCount = counts[passageNumber - 1] || 0;
-  const expectedStart = counts.slice(0, passageNumber - 1).reduce((total, count) => total + count, 0) + 1;
+  const { start: expectedStart, count: expectedCount } = expectedMockQuestionRange('reading', passageNumber);
   const expectedNumbers = Array.from({ length: expectedCount }, (_, index) => expectedStart + index);
   const actualNumbers = parsed.data.questions.map((question) => question.number);
   const expectedSectionIndex = passageNumber - 1;

@@ -182,7 +182,7 @@ export const WritingQuestionModule: React.FC = () => {
         id: data.id || `custom_forecast_${Date.now()}`,
         type: data.taskType || 'task2_essay',
         category: data.category || 'Opinion Essay',
-        title: data.title || 'Đề thi thật IELTS Real Exam',
+        title: data.title || 'Nguồn luyện tập IELTS Live Hub',
         topic: 'IELTS Real Exam Forecast 2026',
         difficulty: 'Band 7.0-8.0',
         targetWords: isTask1 ? 150 : 250,

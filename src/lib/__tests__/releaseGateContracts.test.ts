@@ -33,7 +33,8 @@ describe('public beta release gate and CI contracts', () => {
       const viaModeFlag = resolveScriptsForArgs(['--mode=live']);
       expect(viaModeFlag.mode).toBe('live');
       expect(viaModeFlag.scripts).toEqual(LIVE_CANARY_SCRIPTS);
-      expect(viaModeFlag.scripts).toEqual(['test:web-bridge:live', 'test:e2e:live']);
+      expect(viaModeFlag.scripts).toEqual(['test:e2e:live']);
+      expect(viaModeFlag.scripts).not.toContain('test:web-bridge:live');
 
       expect(resolveScriptsForArgs(['--mode=canary']).mode).toBe('live');
       expect(resolveScriptsForArgs(['--live']).mode).toBe('live');
@@ -51,7 +52,6 @@ describe('public beta release gate and CI contracts', () => {
         'lint',
         'build',
         'test:e2e',
-        'test:web-bridge:live',
         'test:e2e:live',
       ]);
 
@@ -91,6 +91,7 @@ describe('public beta release gate and CI contracts', () => {
 
     it('preserves granular live test targets', () => {
       expect(scripts['test:web-bridge:live']).toBe('node scripts/web-bridge-live-canary.mjs');
+      expect(scripts['check:web-bridge:live']).toBe('npm run test:web-bridge:live');
       expect(scripts['test:e2e:live']).toBe('playwright test --config=playwright.live.config.ts');
       expect(scripts['test:e2e']).toBe('playwright test');
     });
@@ -117,8 +118,8 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryWorkflow).toContain('GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}');
       expect(canaryWorkflow).toContain('GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}');
       expect(canaryWorkflow).toContain('BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}');
-      expect(canaryWorkflow).toContain("WEB_AI_BRIDGE_ENABLED: 'true'");
-      expect(canaryWorkflow).toContain('WEB_AI_BRIDGE_API_KEY: ${{ secrets.WEB_AI_BRIDGE_API_KEY }}');
+      expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_ENABLED');
+      expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_API_KEY');
     });
   });
 
@@ -131,6 +132,24 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryCode).toContain('if (!enabled || !bridgeKey)');
       expect(canaryCode).toContain('throw new Error(');
       expect(canaryCode).not.toContain('return { status: "ok" }');
+    });
+  });
+
+  describe('staged Mock provider fallback contract', () => {
+    it('does not block Groq/NVIDIA/OpenRouter fallback when Gemini is absent', () => {
+      const server = readFileSync(resolve(root, 'server.ts'), 'utf8');
+      const generateRoute = server.slice(
+        server.indexOf("app.post('/api/mock/builds/:id/skills/:skill/generate'"),
+        server.indexOf("app.post('/api/mock/builds/:id/retry'"),
+      );
+      const retryRoute = server.slice(
+        server.indexOf("app.post('/api/mock/builds/:id/retry'"),
+        server.indexOf("app.post('/api/mock/builds/:id/finalize'"),
+      );
+
+      expect(generateRoute).not.toContain("if (!ai) return res.status(503)");
+      expect(retryRoute).not.toContain("if (!ai) return res.status(503)");
+      expect(server).toContain('async function generateMockSkill(ai: GoogleGenAI | null');
     });
   });
 });

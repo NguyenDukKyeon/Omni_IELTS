@@ -27,7 +27,12 @@ test('a real text provider preserves a Live Hub source, builds all skills and op
     citations: [],
   };
   const createResponse = await request.post(`/api/live-hub/items/${sourceItem.id}/mock`, {
-    data: { item: sourceItem, targetBand: 7, retrievedAt: new Date().toISOString() },
+    data: {
+      item: sourceItem,
+      targetBand: 7,
+      retrievedAt: new Date().toISOString(),
+      consentAction: 'ai_fill_missing',
+    },
   });
   const created = await createResponse.json();
   expect(createResponse.ok(), JSON.stringify(created)).toBe(true);
@@ -49,7 +54,7 @@ test('a real text provider preserves a Live Hub source, builds all skills and op
     }));
   }, { created, sourceItem });
   await navigateToModule(page, 'mock_test');
-  await page.getByRole('button', { name: /Mở Mock Test Orchestrator/ }).click();
+  await page.getByRole('button', { name: /AI tạo Full Mock \(Mock Orchestrator\)/ }).click();
   await page.getByRole('button', { name: 'Lắp Ráp Bộ Đề 4 Kỹ Năng (Orchestrator)', exact: true }).click();
 
   const successHeading = page.getByText('Bộ Đề Đã Lắp Ráp Thành Công');

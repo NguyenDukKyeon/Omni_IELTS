@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   Sparkles,
@@ -36,7 +36,16 @@ import {
   VocabCard,
   LiveHubPracticeArtifact,
   LiveHubMockBuildResponse,
+  ConsentAction,
+  ContentOrigin,
+  CompletenessCheckResult,
 } from '../../types';
+import {
+  checkPracticeCompleteness,
+  checkMockCompleteness,
+  getContentOriginBadge,
+  filterSupportedCitations,
+} from '../../lib/contentOrigin';
 import {
   createLiveHubMockBuildApi,
   createLiveHubPracticeArtifactApi,
@@ -88,11 +97,73 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
   const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null);
   const [artifactAction, setArtifactAction] = useState<{ itemId: string; kind: 'practice' | 'mock' } | null>(null);
   const [artifactError, setArtifactError] = useState<{ itemId: string; message: string } | null>(null);
+  const [consentModal, setConsentModal] = useState<{
+    isOpen: boolean;
+    item: RealExamForecastItem;
+    target: 'practice' | 'mock';
+    completeness: CompletenessCheckResult;
+  } | null>(null);
+
+  const triggerElementRef = useRef<HTMLElement | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!consentModal?.isOpen) return;
+
+    const modalEl = modalRef.current;
+    if (!modalEl) return;
+    const focusable = modalEl.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length > 0) {
+      focusable[0].focus();
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeConsentModal();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const focusableElements = Array.from(modalEl.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ));
+        if (focusableElements.length === 0) return;
+        const first = focusableElements[0] as HTMLElement | undefined;
+        const last = focusableElements[focusableElements.length - 1] as HTMLElement | undefined;
+        if (e.shiftKey) {
+          if (document.activeElement === first && last) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last && first) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [consentModal?.isOpen]);
+
+  const closeConsentModal = () => {
+    setConsentModal(null);
+    if (triggerElementRef.current) {
+      triggerElementRef.current.focus();
+      triggerElementRef.current = null;
+    }
+  };
 
   // Preset search tags
   const currentYear = new Date().getFullYear();
   const PRESET_SEARCH_QUERIES = [
-    { label: '🔥 Đề thi thật mới nhất tuần này', query: `IELTS real exam reports this week ${currentYear} IDP British Council Vietnam` },
+    { label: '🔥 Nguồn & dự báo mới nhất tuần này', query: `IELTS real exam reports this week ${currentYear} IDP British Council Vietnam` },
     { label: '🤖 AI & Tự động hóa việc làm', query: `IELTS Writing Task 2 AI automation employment forecast ${currentYear}` },
     { label: '🌱 Môi trường & Thuế Carbon', query: `IELTS Task 2 environment carbon tax green energy ${currentYear}` },
     { label: '🎙️ Speaking Part 2 Dự đoán Quý', query: `IELTS Speaking Part 2 cue cards latest quarter ${currentYear} IDP BC` },
@@ -292,32 +363,92 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
     }
   };
 
-  const handlePracticeNow = async (item: RealExamForecastItem) => {
+  const handlePracticeNow = async (item: RealExamForecastItem, consentAction?: ConsentAction) => {
+    const completeness = checkPracticeCompleteness(item.skill, item);
+    if (!completeness.isComplete && !consentAction) {
+      triggerElementRef.current = (document.activeElement as HTMLElement) || null;
+      setConsentModal({
+        isOpen: true,
+        item,
+        target: 'practice',
+        completeness,
+      });
+      return;
+    }
+
     setArtifactAction({ itemId: item.id, kind: 'practice' });
     setArtifactError(null);
     try {
-      const artifact = await createLiveHubPracticeArtifactApi(item, lastUpdated);
-      openPracticeArtifact(item, artifact);
-      awardXP(10, 'Tạo bài luyện có nguồn từ Live Hub');
-    } catch (error: any) {
-      setArtifactError({ itemId: item.id, message: error?.message || 'Không thể tạo bài luyện từ nguồn này.' });
+      const artifact = await createLiveHubPracticeArtifactApi(item, lastUpdated, consentAction || 'direct');
+      if (artifact.requiresGeneration || artifact.status === 'draft_generation_required') {
+        setArtifactError({
+          itemId: item.id,
+          message: 'Bản nháp yêu cầu bổ sung AI đã được ghi nhận. Bài luyện chỉ mở và tính điểm sau khi nội dung được tạo hoàn chỉnh.',
+        });
+      } else {
+        openPracticeArtifact(item, artifact);
+        if (artifact.isGradeable) {
+          awardXP(10, 'Tạo bài luyện có nguồn từ Live Hub');
+        }
+      }
+    } catch (error: unknown) {
+      const apiError = error as { code?: string; completeness?: CompletenessCheckResult; message?: string };
+      if (apiError.code === 'INCOMPLETE_SOURCE_CONSENT_REQUIRED' && apiError.completeness) {
+        triggerElementRef.current = (document.activeElement as HTMLElement) || null;
+        setConsentModal({
+          isOpen: true,
+          item,
+          target: 'practice',
+          completeness: apiError.completeness,
+        });
+      } else {
+        setArtifactError({ itemId: item.id, message: apiError.message || 'Không thể tạo bài luyện từ nguồn này.' });
+      }
     } finally {
       setArtifactAction(null);
     }
   };
 
-  const handleCreateMock = async (item: RealExamForecastItem) => {
+  const handleCreateMock = async (item: RealExamForecastItem, consentAction?: ConsentAction) => {
+    const mockCompleteness = checkMockCompleteness(item);
+    if (!mockCompleteness.isComplete && !consentAction) {
+      triggerElementRef.current = (document.activeElement as HTMLElement) || null;
+      setConsentModal({
+        isOpen: true,
+        item,
+        target: 'mock',
+        completeness: mockCompleteness,
+      });
+      return;
+    }
+
+    const effectiveConsent = consentAction || (mockCompleteness.isComplete ? 'direct' : undefined);
+    if (!effectiveConsent) {
+      triggerElementRef.current = (document.activeElement as HTMLElement) || null;
+      setConsentModal({
+        isOpen: true,
+        item,
+        target: 'mock',
+        completeness: mockCompleteness,
+      });
+      return;
+    }
+
     setArtifactAction({ itemId: item.id, kind: 'mock' });
     setArtifactError(null);
     try {
-      const result = await createLiveHubMockBuildApi(item, profile.targetBand || 7, lastUpdated);
-      sessionStorage.setItem('omni_pending_mock_source', JSON.stringify(item));
+      const result = await createLiveHubMockBuildApi(item, profile.targetBand || 7, lastUpdated, effectiveConsent);
+      if (effectiveConsent === 'create_ai_variant') {
+        sessionStorage.removeItem('omni_pending_mock_source');
+      } else {
+        sessionStorage.setItem('omni_pending_mock_source', JSON.stringify(item));
+      }
       localStorage.setItem('omni_pending_mock_build', JSON.stringify({
         id: result.mockBuild.id,
         createdAt: result.mockBuild.createdAt,
         params: {
           targetBand: profile.targetBand || 7,
-          sourceItem: item,
+          sourceItem: effectiveConsent === 'create_ai_variant' ? undefined : item,
           sourceArtifactId: result.artifact.id,
           provenance: result.artifact.provenance,
         },
@@ -329,18 +460,47 @@ export const ForecastLiveHub: React.FC<ForecastLiveHubProps> = ({ onSelectPrompt
         sessionStorage.setItem('omni_open_mock_orchestrator', '1');
         setActiveModule('mock_test');
       }
-      awardXP(15, 'Tạo MockBuild có nguồn từ Live Hub');
-    } catch (error: any) {
-      setArtifactError({ itemId: item.id, message: error?.message || 'Không thể tạo Full Mock từ nguồn này.' });
+      if (!result.artifact.requiresGeneration && result.mockBuild.status === 'ready') {
+        awardXP(15, 'Tạo MockBuild có nguồn từ Live Hub');
+      }
+    } catch (error: unknown) {
+      const apiError = error as { message?: string };
+      setArtifactError({ itemId: item.id, message: apiError.message || 'Không thể tạo Full Mock từ nguồn này.' });
     } finally {
       setArtifactAction(null);
+    }
+  };
+
+  const handleExecuteConsent = (action: ConsentAction) => {
+    if (!consentModal) return;
+    const { item, target } = consentModal;
+    closeConsentModal();
+
+    if (action === 'search_more') {
+      setCustomSearchQuery(item.topicDomain || item.title);
+      handleTriggerGroundingSearch(item.topicDomain || item.title);
+      return;
+    }
+
+    if (target === 'practice') {
+      void handlePracticeNow(item, action);
+    } else {
+      if (action === 'practice_available') {
+        void handlePracticeNow(item, 'practice_available');
+      } else {
+        void handleCreateMock(item, action);
+      }
     }
   };
 
   // Ask AI Tutor about this prompt
   const handleAskAITutor = (item: RealExamForecastItem) => {
     openAITutorWithPrompt(
-      `Hãy phân tích chuyên sâu đề thi thật IELTS [${item.councilLabel} - ${item.examDate}]:
+      `Hãy phân tích chuyên sâu ${item.evidenceType === 'verified_report'
+        ? 'nguồn IELTS đã xác minh'
+        : item.evidenceType === 'reported_recall'
+          ? 'nguồn hồi tưởng IELTS có dẫn chứng'
+          : 'chủ đề dự báo/luyện tập IELTS chưa được xác minh là đề thi thật'} [${item.councilLabel} - ${item.examDate}]:
 "${item.promptStatement}"
 Chủ đề: ${item.topicDomain} (${item.subCategory || item.skill})
 Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ ra 3 bẫy tư duy dễ mất điểm và 5 cụm Collocations C1/C2 tự nhiên nhất!`
@@ -394,7 +554,7 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-indigo-600/30 active:scale-95"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isGroundingLoading ? 'animate-spin' : ''}`} />
-              <span>{isGroundingLoading ? 'Đang tra cứu thời gian thực...' : 'Làm mới đề thi thật'}</span>
+              <span>{isGroundingLoading ? 'Đang tra cứu thời gian thực...' : 'Làm mới nguồn & dự báo'}</span>
             </button>
           </div>
 
@@ -662,6 +822,16 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
             const isAudioActive = isPlayingAudio === item.id;
             const hasEnrichment = item.enrichmentStatus === 'ready'
               || Boolean(item.outlinePEEL || item.band8ModelAnswer || item.topicVocabularyC1C2?.length);
+            const hasDirectEvidence = (item.evidenceType === 'verified_report' || item.evidenceType === 'reported_recall') &&
+              Boolean(item.groundingSourceUrl || (item.citations && item.citations.some(c => Boolean(c.url))));
+            const itemOrigin: ContentOrigin = item.origin || 'authentic_source';
+            const originBadge = getContentOriginBadge(
+              itemOrigin,
+              usageContext,
+              itemOrigin === 'authentic_source'
+                ? (hasDirectEvidence ? (item.evidenceType || 'reported_recall') : 'forecast')
+                : undefined
+            );
 
             return (
               <div
@@ -689,6 +859,14 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
                       >
                         <Flame className="w-3 h-3" />
                         {item.trendBadge}
+                      </span>
+
+                      {/* Origin Badge */}
+                      <span
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1 ${originBadge.badgeClass}`}
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                        {originBadge.labelVi}
                       </span>
 
                       {/* Council Badge */}
@@ -1146,6 +1324,149 @@ Vui lòng hướng dẫn tôi cách brainstorm ý tưởng độc đáo, chỉ r
           })
         )}
       </div>
+
+      {/* Explicit Consent Action Modal for Incomplete Source or Mock */}
+      {consentModal?.isOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="consent-modal-title"
+          aria-describedby="consent-modal-description"
+          ref={modalRef}
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+        >
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-xl w-full shadow-2xl p-6 space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold text-xs border border-amber-300 dark:border-amber-800">
+                    Kiểm tra tính hoàn chỉnh
+                  </span>
+                </div>
+                <h3 id="consent-modal-title" className="text-lg font-black text-slate-900 dark:text-white">
+                  {consentModal.target === 'mock'
+                    ? 'Tùy chọn tạo Mock Test từ nguồn Live Hub'
+                    : 'Xác nhận xử lý nguồn chưa hoàn chỉnh'}
+                </h3>
+              </div>
+              <button
+                data-ux-control="live-hub.consent.close-button"
+                data-ux-flow="live-hub.consent.dismiss"
+                onClick={closeConsentModal}
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                aria-label="Đóng hộp thoại"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div id="consent-modal-description" className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 space-y-2 text-xs text-amber-900 dark:text-amber-200">
+              <p className="font-semibold">{consentModal.completeness.summaryVi}</p>
+              {consentModal.completeness.missingComponents.length > 0 && (
+                <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                  <strong>Phần còn thiếu:</strong> {consentModal.completeness.missingComponents.join(', ')}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2.5">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                Vui lòng chọn hướng xử lý (Omni IELTS không tự động gọi AI khi chưa có sự đồng ý):
+              </p>
+
+              <div className="grid grid-cols-1 gap-2.5">
+                {/* Action 1: Search More */}
+                <button
+                  data-ux-control="live-hub.consent.search-more-button"
+                  data-ux-flow="live-hub.consent.search-more"
+                  onClick={() => handleExecuteConsent('search_more')}
+                  className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-left transition-all group flex items-start gap-3"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <Search className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                      🔍 Tra cứu thêm từ Live Hub
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Tìm kiếm thêm nguồn tài liệu đầy đủ hơn từ các nguồn khảo thí và đề thi thực tế đã ghi nhận trong Live Hub.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Action 2: Practice Available Portion (only shown when availableComponents has usable content) */}
+                {consentModal.completeness.availableComponents && consentModal.completeness.availableComponents.length > 0 && (
+                  <button
+                    data-ux-control="live-hub.consent.practice-available-button"
+                    data-ux-flow="live-hub.consent.practice-available"
+                    onClick={() => handleExecuteConsent('practice_available')}
+                    className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-left transition-all group flex items-start gap-3"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                        📖 {consentModal.target === 'mock'
+                          ? `Luyện riêng kỹ năng có sẵn (${consentModal.item.evidenceType === 'verified_report' ? 'nguồn đã xác minh' : consentModal.item.evidenceType === 'reported_recall' ? 'nguồn hồi tưởng có dẫn chứng' : 'nguồn Live Hub chưa xác minh'})`
+                          : 'Luyện phần có sẵn (Không chấm điểm phần thiếu)'}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Luyện trực tiếp phần nội dung đã tìm được, không biến đổi hoặc thêm thắt; mức độ xác minh vẫn giữ đúng theo citation của item.
+                      </p>
+                    </div>
+                  </button>
+                )}
+
+                {/* Action 3: AI Fill Missing */}
+                <button
+                  data-ux-control="live-hub.consent.ai-fill-missing-button"
+                  data-ux-flow="live-hub.consent.ai-fill-missing"
+                  onClick={() => handleExecuteConsent('ai_fill_missing')}
+                  className="p-3.5 rounded-2xl border border-amber-300 dark:border-amber-800/80 bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/80 dark:hover:bg-amber-950/40 text-left transition-all group flex items-start gap-3"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-amber-200 dark:bg-amber-900/80 text-amber-800 dark:text-amber-200 flex items-center justify-center shrink-0 mt-0.5">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-amber-700 dark:group-hover:text-amber-300">
+                      🤖 {consentModal.item.evidenceType === 'verified_report'
+                        ? 'Nguồn đã xác minh'
+                        : consentModal.item.evidenceType === 'reported_recall'
+                          ? 'Nguồn hồi tưởng có dẫn chứng'
+                          : 'Nguồn Live Hub chưa xác minh'} + AI bổ sung ({consentModal.target === 'mock' ? 'Ghép đề 4 kỹ năng' : 'Bổ sung phần thiếu'})
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Giữ nguyên phần lấy từ nguồn và citation hiện có; AI chỉ tạo phần còn thiếu. Artifact sẽ ghi riêng provenance của nguồn và phần AI.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Action 4: Create AI Variant */}
+                <button
+                  data-ux-control="live-hub.consent.create-ai-variant-button"
+                  data-ux-flow="live-hub.consent.create-ai-variant"
+                  onClick={() => handleExecuteConsent('create_ai_variant')}
+                  className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-left transition-all group flex items-start gap-3"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                      ✨ {consentModal.target === 'mock' ? 'Tạo Full Mock hoàn toàn mới bằng AI' : 'Tạo bài AI riêng biệt'}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Tạo bài luyện/mock test mới chuẩn IELTS bằng AI, giữ nguyên bài nguồn gốc độc lập. Gắn nhãn: <em>AI-generated IELTS-style Practice/Mock</em>.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
