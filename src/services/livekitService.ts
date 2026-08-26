@@ -59,11 +59,23 @@ export async function endLivekitSession(id: string): Promise<LivekitSessionRespo
   return parse(res);
 }
 
-export async function transitionLivekitSession(id: string, state: SpeakingSessionState) {
+export async function transitionLivekitSession(
+  id: string,
+  state: SpeakingSessionState,
+  extras?: { questionIndex?: number; question?: string },
+) {
   const res = await fetch(`/api/livekit/session/${encodeURIComponent(id)}/transition`, {
     method: 'POST',
     headers: await authHeaders(),
-    body: JSON.stringify({ state }),
+    body: JSON.stringify({ state, ...extras }),
+  });
+  return parse(res);
+}
+
+export async function cutoffLivekitProvider(id: string) {
+  const res = await fetch(`/api/livekit/session/${encodeURIComponent(id)}/provider-cutoff`, {
+    method: 'POST',
+    headers: await authHeaders(),
   });
   return parse(res);
 }

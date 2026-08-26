@@ -3,7 +3,11 @@ import { Play, Volume2 } from 'lucide-react';
 import { VoiceDescriptor } from '../../types';
 import { GEMINI_VOICES, getBrowserVoices, playVoiceText, subscribeToBrowserVoices, VoiceUseCase } from '../../services/voiceService';
 
-export const VoicePicker: React.FC<{ useCase?: VoiceUseCase; compact?: boolean }> = ({ useCase = 'examiner', compact = false }) => {
+export const VoicePicker: React.FC<{
+  useCase?: VoiceUseCase;
+  compact?: boolean;
+  onVoiceChange?: (voice: VoiceDescriptor) => void;
+}> = ({ useCase = 'examiner', compact = false, onVoiceChange }) => {
   const [browserVoices, setBrowserVoices] = useState<VoiceDescriptor[]>(getBrowserVoices);
   const storageKey = `omni_voice_${useCase}`;
   const settingsKey = `omni_voice_settings_${useCase}`;
@@ -13,6 +17,9 @@ export const VoicePicker: React.FC<{ useCase?: VoiceUseCase; compact?: boolean }
   useEffect(() => subscribeToBrowserVoices(setBrowserVoices), []);
   const voices = useMemo(() => [...browserVoices, ...GEMINI_VOICES], [browserVoices]);
   const selected = voices.find((voice) => JSON.stringify(voice) === selectedKey) || browserVoices[0] || GEMINI_VOICES[3];
+  useEffect(() => {
+    if (selected) onVoiceChange?.(selected);
+  }, [selected, onVoiceChange]);
 
   const choose = (voice: VoiceDescriptor) => {
     const serialized = JSON.stringify(voice);

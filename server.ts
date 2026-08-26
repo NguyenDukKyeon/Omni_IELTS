@@ -4768,16 +4768,6 @@ Please listen carefully to the attached full audio recording and generate the au
     }
     const transcript = (conversationHistory || []).map((turn: any) => turn.userTranscript || "").join(" ");
     parsed.telemetry = telemetryOverride ?? calculateSpeakingTelemetry({ transcript, durationSeconds: totalDurationSeconds, speechSegments, vadVersion: speechSegments ? "silero-vad-web-0.0.30" : undefined });
-    if (req.body?.consentStorage === true) {
-      speakingArtifactStore.write({
-        sessionId: String(req.body?.sessionId || 'anonymous'),
-        userId: String(req.header('x-omni-user-id') || 'anonymous'),
-        kind: 'telemetry',
-        payload: parsed.telemetry,
-        consent: true,
-      });
-    }
-
     return res.json(parsed);
   } catch (error: any) {
     logSafeAiError("Speaking Live Audio Evaluation API Error:", error);

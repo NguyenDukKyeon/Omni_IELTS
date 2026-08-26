@@ -81,8 +81,11 @@ LiveKit Agent worker (Node)
 - `POST /api/livekit/session` — auth required, rate-limited, max 1 concurrent session per user, TTL 20 minutes.
 - `GET /api/livekit/session/:id` — owner-only status.
 - `DELETE /api/livekit/session/:id` — end exam, destroy credential, delete room.
+- `POST /api/livekit/session/:id/transition` — learner-owned state change; server is canonical.
+- `POST /api/livekit/session/:id/agent-event` — agent-only, constant-time secret, generic 404 if unauthorized.
+- `POST /api/livekit/session/:id/provider-cutoff` — learner-owned; destroys credential and enters `fallback_turn_based`.
 - `POST /api/livekit/credentials/redeem` — agent-only, one-shot.
-- `POST /api/speaking/analyze` — Zod-validated; no audio ⇒ acoustic metrics `unavailable` and no invented band.
+- `POST /api/speaking/analyze` — Zod-validated; identity from verified Bearer token (never `x-omni-user-id`); no audio ⇒ acoustic metrics `unavailable` and no invented band; consent false ⇒ no artifact write.
 
 ### LiveKit Agent
 

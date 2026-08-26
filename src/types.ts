@@ -1698,6 +1698,8 @@ export interface SpeakingLiveAudioScoringInput {
   targetBand?: number;
   totalDurationSeconds?: number;
   speechSegments?: Array<{ start: number; end: number }> | null;
+  consentStorage?: boolean;
+  sessionId?: string;
 }
 
 // ==========================================

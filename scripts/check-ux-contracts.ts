@@ -29,6 +29,29 @@ const REQUIRED_CONSENT_CONTROL_MAPPINGS: Record<string, string> = {
   'live-hub.consent.create-ai-variant-button': 'live-hub.consent.create-ai-variant',
 };
 
+const REQUIRED_SPEAKING_CONTROL_MAPPINGS: Record<string, string> = {
+  'start-realtime-session': 'speaking.realtime',
+  'switch-to-turn-based': 'speaking.realtime',
+  'switch-to-turn-based-from-permission': 'speaking.realtime',
+  'switch-to-turn-based-from-quota': 'speaking.realtime',
+  'switch-to-turn-based-from-provider': 'speaking.realtime',
+  'microphone-permission': 'speaking.realtime',
+  'begin-recording': 'speaking.realtime',
+  'retry-provider': 'speaking.realtime',
+  'retry-failed': 'speaking.realtime',
+  'reconnect': 'speaking.realtime',
+  'resume-interrupted-session': 'speaking.realtime',
+  'end-answer': 'speaking.realtime',
+  'end-exam': 'speaking.realtime',
+  'consent-storage': 'speaking.realtime',
+  'restart-exam': 'speaking.realtime',
+};
+
+const REQUIRED_CONTROL_MAPPINGS = {
+  ...REQUIRED_CONSENT_CONTROL_MAPPINGS,
+  ...REQUIRED_SPEAKING_CONTROL_MAPPINGS,
+};
+
 for (const file of collectTsxFiles(path.join(root, 'src'))) {
   const relative = path.relative(root, file).replaceAll('\\', '/');
   const source = readFileSync(file, 'utf8');
@@ -47,7 +70,7 @@ for (const file of collectTsxFiles(path.join(root, 'src'))) {
   }
 }
 
-for (const [requiredControl, declaredFlowId] of Object.entries(REQUIRED_CONSENT_CONTROL_MAPPINGS)) {
+for (const [requiredControl, declaredFlowId] of Object.entries(REQUIRED_CONTROL_MAPPINGS)) {
   if (!seenUxControls.has(requiredControl)) {
     issues.push(`Required consent control "${requiredControl}" is missing from the codebase.`);
     continue;
@@ -84,5 +107,5 @@ if (issues.length) {
 }
 
 console.log(
-  `UX flow contract gate passed: ${controls} native controls mapped to ${UX_FLOW_CONTRACTS.length} contracts; ${Object.keys(REQUIRED_CONSENT_CONTROL_MAPPINGS).length} consent controls verified with flow mapping and test evidence.`
+  `UX flow contract gate passed: ${controls} native controls mapped to ${UX_FLOW_CONTRACTS.length} contracts; ${Object.keys(REQUIRED_CONTROL_MAPPINGS).length} required controls verified with flow mapping and test evidence.`
 );

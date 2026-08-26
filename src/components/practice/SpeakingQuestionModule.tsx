@@ -30,7 +30,36 @@ import {
   speakExaminerText,
 } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
-import { SpeakingRealtimeRoom } from '../speaking/SpeakingRealtimeRoom';
+
+const SpeakingRealtimeRoom = React.lazy(async () => {
+  const module = await import('../speaking/SpeakingRealtimeRoom');
+  return { default: module.SpeakingRealtimeRoom };
+});
+
+class SpeakingRoomErrorBoundary extends React.Component<
+  { children: React.ReactNode; onFallback: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div data-ux-state="fallback" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm">
+          Không tải được phòng realtime. Đây không phải realtime.
+          <button data-ux-flow="practice.skills" type="button" onClick={this.props.onFallback} className="ml-2 font-bold underline">
+            Luyện từng phần
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const SPEAKING_PARTS: Array<{
   part: SpeakingPracticePart;
@@ -431,7 +460,11 @@ export const SpeakingQuestionModule: React.FC = () => {
 
       {/* Mode 1: Virtual Examiner Room */}
       {speakingMode === 'virtual_room' && (
-        <SpeakingRealtimeRoom onBackToPractice={() => setSpeakingMode('drill')} />
+        <SpeakingRoomErrorBoundary onFallback={() => setSpeakingMode('drill')}>
+          <React.Suspense fallback={<div data-ux-state="loading" className="rounded-2xl border border-slate-200 p-6 text-sm">Đang tải phòng thi realtime…</div>}>
+            <SpeakingRealtimeRoom onBackToPractice={() => setSpeakingMode('drill')} />
+          </React.Suspense>
+        </SpeakingRoomErrorBoundary>
       )}
 
       {/* Mode 2: Drill View */}

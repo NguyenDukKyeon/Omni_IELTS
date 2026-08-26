@@ -21,6 +21,9 @@ const NEXT: Record<SpeakingSessionState, readonly SpeakingSessionState[]> = {
   requesting_permission: ['connecting', 'permission_denied', 'fallback_turn_based', 'failed'],
   connecting: [
     'part_1',
+    'part_2_preparation',
+    'part_2_speaking',
+    'part_3',
     'connection_lost',
     'provider_unavailable',
     'quota_exhausted',

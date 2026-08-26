@@ -13,6 +13,11 @@ import type {
   SpeakingSessionState,
 } from './speakingRealtimeTypes';
 import { assertNoSecretLeak, collectSecretValues } from './secretRedaction';
+import {
+  questionForPart,
+  resolveGeminiLiveVoiceId,
+  type ExamAgentEvent,
+} from './speakingExamProtocol';
 
 export const LIVEKIT_SESSION_TTL_MS = 20 * 60 * 1000;
 export const LIVEKIT_SESSION_RATE_LIMIT = 5;
@@ -177,9 +182,11 @@ export class LivekitSessionService {
       livekitUrl: null,
       participantIdentity,
       currentPart: 'part_1',
+      questionIndex: 0,
+      currentQuestion: questionForPart('part_1', 0),
       fallbackReason: null,
       consentStorage: input.consentStorage,
-      voiceId: input.voiceId ?? null,
+      voiceId: resolveGeminiLiveVoiceId(input.voiceId),
       createdAt: new Date(createdAt).toISOString(),
       expiresAt: new Date(createdAt + (this.options.ttlMs ?? LIVEKIT_SESSION_TTL_MS)).toISOString(),
       lastEventAt: new Date(createdAt).toISOString(),
@@ -228,7 +235,7 @@ export class LivekitSessionService {
           metadata: {
             sessionId,
             credentialId: credentialId ?? '',
-            voiceId: input.voiceId ?? 'Kore',
+            voiceId: resolveGeminiLiveVoiceId(input.voiceId),
             requestId,
           },
         });
@@ -279,18 +286,55 @@ export class LivekitSessionService {
     }
   }
 
-  transition(sessionId: string, userId: string, to: SpeakingSessionState): SpeakingRealtimeSession {
+  transition(sessionId: string, userId: string, to: SpeakingSessionState, extras?: {
+    questionIndex?: number;
+    question?: string;
+  }): SpeakingRealtimeSession {
     const internal = this.requireOwned(sessionId, userId);
-    const next = transitionSpeakingState(internal.public.state, to);
+    const next = internal.public.state === to ? to : transitionSpeakingState(internal.public.state, to);
     const currentPart = examPartFromState(next) ?? internal.public.currentPart;
+    const questionIndex = extras?.questionIndex ?? internal.public.questionIndex ?? 0;
     internal.public = {
       ...internal.public,
       state: next,
       currentPart,
+      questionIndex,
+      currentQuestion: extras?.question
+        ?? (currentPart ? questionForPart(currentPart, questionIndex) : internal.public.currentQuestion ?? null),
       lastEventAt: new Date(this.now()).toISOString(),
       mode: next === 'fallback_turn_based' ? 'turn_based' : internal.public.mode,
     };
     return internal.public;
+  }
+
+  applyAgentEvent(sessionId: string, event: ExamAgentEvent): SpeakingRealtimeSession {
+    const internal = this.sessions.get(sessionId);
+    if (!internal) {
+      throw new LivekitUnavailableError('network_failed', 'Speaking session was not found');
+    }
+    const from = internal.public.state;
+    const next = from === event.state ? event.state : transitionSpeakingState(from, event.state);
+    const currentPart = examPartFromState(next) ?? internal.public.currentPart;
+    const questionIndex = event.questionIndex ?? internal.public.questionIndex ?? 0;
+    internal.public = {
+      ...internal.public,
+      state: next,
+      currentPart,
+      questionIndex,
+      currentQuestion: event.question
+        ?? (currentPart ? questionForPart(currentPart, questionIndex) : internal.public.currentQuestion ?? null),
+      lastEventAt: new Date(this.now()).toISOString(),
+    };
+    return internal.public;
+  }
+
+  cutOffProvider(sessionId: string, userId: string): SpeakingRealtimeSession {
+    const internal = this.requireOwned(sessionId, userId);
+    this.options.credentials.destroyForSession(sessionId);
+    if (internal.public.roomName) {
+      void this.options.infrastructure.deleteRoom?.(internal.public.roomName);
+    }
+    return this.storeFallback(internal.public, 'provider_unavailable', internal.credentialId);
   }
 
   markLost(sessionId: string, userId: string): SpeakingRealtimeSession {
@@ -387,6 +431,7 @@ export class LivekitSessionService {
     credentialId: string | null,
   ): SpeakingRealtimeSession {
     if (credentialId) this.options.credentials.destroy(credentialId);
+    this.options.credentials.destroyForSession(base.id);
     const session: SpeakingRealtimeSession = {
       ...base,
       state: 'fallback_turn_based',
@@ -406,6 +451,11 @@ export class LivekitSessionService {
       if (Date.parse(session.public.expiresAt) <= now) {
         this.options.credentials.destroyForSession(id);
         this.sessions.delete(id);
+      }
+    }
+    for (const [userId, usage] of this.createWindows) {
+      if (usage.startedAt + LIVEKIT_SESSION_RATE_WINDOW_MS <= now) {
+        this.createWindows.delete(userId);
       }
     }
   }

@@ -91,6 +91,66 @@ describe('livekit HTTP router', () => {
     expect(logs.join('\n')).not.toContain(KEY);
   });
 
+  it('applies agent-event with the internal secret and 404s otherwise', async () => {
+    const { app, sessions } = appWith(true);
+    const origin = await listen(app);
+    const created = await fetch(`${origin}/api/livekit/session`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${CANARY}`,
+      },
+      body: JSON.stringify({ consentStorage: false, voiceId: 'Puck' }),
+    });
+    const createdBody = await created.json();
+    expect(createdBody.session.voiceId).toBe('Puck');
+    sessions.transition(createdBody.session.id, createdBody.session.userId, 'part_1');
+
+    const unauthorized = await fetch(`${origin}/api/livekit/session/${createdBody.session.id}/agent-event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'exam_state', state: 'part_2_preparation' }),
+    });
+    expect(unauthorized.status).toBe(404);
+
+    const ok = await fetch(`${origin}/api/livekit/session/${createdBody.session.id}/agent-event`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer agent-secret' },
+      body: JSON.stringify({
+        type: 'exam_state',
+        state: 'part_2_preparation',
+        questionIndex: 0,
+        question: 'Describe a local facility.',
+      }),
+    });
+    const okBody = await ok.json();
+    expect(ok.status).toBe(200);
+    expect(okBody.session.state).toBe('part_2_preparation');
+    expect(JSON.stringify(okBody)).not.toContain(KEY);
+  });
+
+  it('provider-cutoff moves an authenticated session into fallback_turn_based', async () => {
+    const { app } = appWith(true);
+    const origin = await listen(app);
+    const created = await fetch(`${origin}/api/livekit/session`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${CANARY}`,
+      },
+      body: JSON.stringify({ consentStorage: false }),
+    });
+    const createdBody = await created.json();
+    const cutoff = await fetch(`${origin}/api/livekit/session/${createdBody.session.id}/provider-cutoff`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${CANARY}` },
+    });
+    const cutoffBody = await cutoff.json();
+    expect(cutoff.status).toBe(200);
+    expect(cutoffBody.session.state).toBe('fallback_turn_based');
+    expect(cutoffBody.fallbackReason).toBe('provider_unavailable');
+  });
+
   it('redeems a credential once for the agent and then rejects', async () => {
     const { app, credentials } = appWith(true);
     const issued = credentials.issue({ sessionId: 'sess-1', secret: KEY });

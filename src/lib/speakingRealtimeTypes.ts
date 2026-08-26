@@ -106,6 +106,8 @@ export const SpeakingRealtimeSessionSchema = z.object({
   livekitUrl: z.string().nullable(),
   participantIdentity: z.string(),
   currentPart: z.enum(['part_1', 'part_2_preparation', 'part_2_speaking', 'part_3']).nullable(),
+  questionIndex: z.number().int().nonnegative().default(0),
+  currentQuestion: z.string().nullable().optional(),
   fallbackReason: SpeakingFallbackReasonSchema.nullable(),
   consentStorage: z.boolean(),
   voiceId: z.string().nullable(),

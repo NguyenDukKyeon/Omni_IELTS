@@ -8,7 +8,7 @@ const livekitReady = Boolean(
 );
 
 test.describe('live speaking canary', () => {
-  test.skip(!livekitReady, 'Dedicated test:speaking:live script fails closed when LiveKit credentials are missing.');
+  test.skip(!livekitReady, 'Dedicated test:speaking:live script fails closed when LiveKit credentials are missing. Duplex Examiner -> Learner -> Examiner proof lives in scripts/livekit-speaking-canary.mjs so Media/Forecast/Mock/Vocabulary live tests keep running.');
 
   test('mints a real LiveKit room token without leaking Gemini keys', async ({ request }) => {
     const canary = process.env.OMNI_SPEAKING_CANARY_TOKEN!.trim();

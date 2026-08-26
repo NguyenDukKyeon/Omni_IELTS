@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseAgentJobMetadata, redeemGeminiKey } from '../livekitSpeakingAgent';
+import { examinerDataMessage, parseAgentJobMetadata, redeemGeminiKey } from '../livekitSpeakingAgent';
+import { parseExamDataMessage } from '../../lib/speakingExamProtocol';
 
 describe('livekit speaking agent helpers', () => {
   it('parses job metadata and rejects embedded API keys', () => {
@@ -28,5 +29,19 @@ describe('livekit speaking agent helpers', () => {
       fetchImpl,
     });
     expect(redeemed.apiKey).toBe('AIzaSyRedeemedOnce');
+  });
+
+  it('publishes Zod-validated examiner exam_state data messages', () => {
+    const payload = examinerDataMessage('part_1', {
+      questionIndex: 0,
+      question: 'Let us begin. Could you tell me your full name, please?',
+    });
+    const parsed = parseExamDataMessage(payload);
+    expect(parsed).toMatchObject({
+      type: 'exam_state',
+      state: 'part_1',
+      questionIndex: 0,
+    });
+    expect(JSON.stringify(parsed)).not.toMatch(/AIza/);
   });
 });

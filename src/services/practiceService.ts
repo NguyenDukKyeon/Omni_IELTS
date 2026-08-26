@@ -218,9 +218,14 @@ export async function callSpeakingExaminerTurnApi(params: {
 export async function evaluateSpeakingLiveAudioApi(
   params: SpeakingLiveAudioScoringInput
 ): Promise<SpeakingLiveEvaluationReport> {
+  const { getSession } = await import('./supabase');
+  const session = await getSession().catch(() => null);
   const res = await fetch('/api/speaking/analyze', {
     method: 'POST',
-    headers: getGeminiRequestHeaders(),
+    headers: {
+      ...getGeminiRequestHeaders(),
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    },
     body: JSON.stringify(params),
   });
   if (!res.ok) {

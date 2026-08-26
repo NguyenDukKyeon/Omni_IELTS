@@ -12,6 +12,7 @@ import {
   LivekitUnavailableError,
 } from '../../lib/livekitSessionService';
 import { CredentialUnavailableError, OneTimeCredentialStore } from '../../lib/oneTimeCredentialStore';
+import { ExamAgentEventSchema } from '../../lib/speakingExamProtocol';
 import { assertNoSecretLeak, collectSecretValues, redactText, safeErrorMessage } from '../../lib/secretRedaction';
 
 export interface LivekitRouterDeps {
@@ -133,7 +134,10 @@ export function createLivekitRouter(deps: LivekitRouterDeps) {
       return json(res, 400, { error: 'Thiếu trạng thái.', code: 'STATE_REQUIRED' }, secrets);
     }
     try {
-      const session = deps.sessions.transition(req.params.id, identity.userId, to);
+      const session = deps.sessions.transition(req.params.id, identity.userId, to, {
+        questionIndex: typeof req.body?.questionIndex === 'number' ? req.body.questionIndex : undefined,
+        question: typeof req.body?.question === 'string' ? req.body.question : undefined,
+      });
       return json(res, 200, { session }, secrets);
     } catch (error) {
       if (error instanceof LivekitUnavailableError) {
@@ -143,6 +147,37 @@ export function createLivekitRouter(deps: LivekitRouterDeps) {
         error: redactText(error instanceof Error ? error.message : 'Illegal transition'),
         code: 'ILLEGAL_TRANSITION',
       }, secrets);
+    }
+  });
+
+  router.post('/session/:id/agent-event', async (req, res) => {
+    const secrets = requestSecrets(req, deps.env);
+    const expected = deps.env.LIVEKIT_AGENT_INTERNAL_SECRET?.trim() || deps.env.LIVEKIT_API_SECRET?.trim();
+    const provided = extractBearerToken(req.header('authorization')) || req.header('x-omni-agent-key')?.trim();
+    if (!expected || !provided || !timingSafeEqualString(provided, expected)) {
+      return res.sendStatus(404);
+    }
+    const parsed = ExamAgentEventSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return json(res, 400, { error: 'Agent event is invalid.', code: 'AGENT_EVENT_INVALID' }, secrets);
+    }
+    try {
+      const session = deps.sessions.applyAgentEvent(req.params.id, parsed.data);
+      return json(res, 200, { session }, secrets);
+    } catch {
+      return json(res, 404, { error: 'Không tìm thấy phiên Speaking.', code: 'SESSION_NOT_FOUND' }, secrets);
+    }
+  });
+
+  router.post('/session/:id/provider-cutoff', async (req, res) => {
+    const secrets = requestSecrets(req, deps.env);
+    const identity = await authenticate(req, res);
+    if (!identity) return;
+    try {
+      const session = deps.sessions.cutOffProvider(req.params.id, identity.userId);
+      return json(res, 200, { session, fallbackReason: session.fallbackReason }, secrets);
+    } catch {
+      return json(res, 404, { error: 'Không tìm thấy phiên Speaking.', code: 'SESSION_NOT_FOUND' }, secrets);
     }
   });
 

@@ -1,6 +1,7 @@
 import type express from 'express';
 import { interpretSpeakingAnalyzeRequest, unavailableAnalyzeBody } from '../../lib/speakingAnalyze';
 import { SpeakingArtifactStore } from '../../lib/speakingConsent';
+import { extractBearerToken, verifyLearnerAccessToken, type LearnerAuthEnv } from '../../lib/learnerAuth';
 import { assertNoSecretLeak, collectSecretValues, safeErrorMessage } from '../../lib/secretRedaction';
 
 export interface SpeakingAnalyzeDeps {
@@ -10,6 +11,7 @@ export interface SpeakingAnalyzeDeps {
   }) => Promise<express.Response | void>;
   artifacts?: SpeakingArtifactStore;
   env?: NodeJS.ProcessEnv;
+  verifyLearner?: typeof verifyLearnerAccessToken;
 }
 
 export function createSpeakingAnalyzeHandler(deps: SpeakingAnalyzeDeps) {
@@ -26,21 +28,39 @@ export function createSpeakingAnalyzeHandler(deps: SpeakingAnalyzeDeps) {
         return res.status(interpretation.status).json(body);
       }
 
-      if (interpretation.persist && interpretation.request && deps.artifacts) {
+      const token = extractBearerToken(req.header('authorization'));
+      const identity = token
+        ? await (deps.verifyLearner ?? verifyLearnerAccessToken)(token, (deps.env || {}) as LearnerAuthEnv)
+        : null;
+
+      if (interpretation.persist && interpretation.request && deps.artifacts && identity?.userId) {
+        const sessionId = interpretation.request.sessionId || 'anonymous';
         deps.artifacts.write({
-          sessionId: interpretation.request.sessionId || 'anonymous',
-          userId: String(req.header('x-omni-user-id') || 'anonymous'),
+          sessionId,
+          userId: identity.userId,
           kind: 'telemetry',
           payload: interpretation.telemetry,
           consent: true,
         });
-      } else if (interpretation.request && deps.artifacts && interpretation.request.consentStorage === false) {
-        // Explicitly do not write. Covered by tests.
+        deps.artifacts.write({
+          sessionId,
+          userId: identity.userId,
+          kind: 'transcript',
+          payload: {
+            turns: (interpretation.request.conversationHistory || []).map((turn) => ({
+              part: turn.part,
+              question: turn.question,
+              userTranscript: turn.userTranscript,
+              durationSeconds: turn.durationSeconds,
+            })),
+          },
+          consent: true,
+        });
       }
 
       return await deps.evaluateWithAudio(req, res, {
         telemetry: interpretation.telemetry,
-        persist: interpretation.persist,
+        persist: Boolean(interpretation.persist && identity?.userId),
       });
     } catch (error) {
       return res.status(500).json({ error: safeErrorMessage(error), code: 'SPEAKING_ANALYZE_FAILED' });
