@@ -80,6 +80,12 @@ import {
   validateTranscriptCoverage,
 } from "./src/lib/mediaImport";
 import type { MediaCapabilities, MediaImportJob, MediaImportPhase, MediaSession } from "./src/types";
+import { OneTimeCredentialStore } from "./src/lib/oneTimeCredentialStore";
+import { LivekitSessionService, readLivekitEnv } from "./src/lib/livekitSessionService";
+import { createLivekitInfrastructure } from "./src/lib/livekitInfrastructure";
+import { createLivekitRouter } from "./src/server/routes/livekit";
+import { createSpeakingAnalyzeHandler } from "./src/server/routes/speakingAnalyze";
+import { SpeakingArtifactStore } from "./src/lib/speakingConsent";
 
 dotenv.config({ quiet: true });
 
@@ -172,6 +178,20 @@ function percentile(values: number[], ratio: number) {
 }
 
 app.use(express.json({ limit: "15mb" }));
+
+const livekitEnv = readLivekitEnv(process.env);
+const speakingCredentialStore = new OneTimeCredentialStore();
+const speakingArtifactStore = new SpeakingArtifactStore();
+const livekitSessionService = new LivekitSessionService({
+  credentials: speakingCredentialStore,
+  infrastructure: createLivekitInfrastructure(livekitEnv),
+  env: livekitEnv,
+});
+app.use('/api/livekit', createLivekitRouter({
+  env: process.env,
+  sessions: livekitSessionService,
+  credentials: speakingCredentialStore,
+}));
 
 // Initialize GoogleGenAI client lazily or safely with User-Agent telemetry
 function getGeminiClient(request?: express.Request): GoogleGenAI | null {
@@ -4558,6 +4578,10 @@ Generate Dr. Jonathan Vance's immediate spoken response and next question accord
 // Separate Speaking Scoring Call with FULL RAW AUDIO TRACK (Dr. Jonathan Vance)
 // =========================================================================
 app.post("/api/gemini/speaking-live-audio-evaluation", async (req, res) => {
+  return handleSpeakingLiveAudioEvaluation(req, res);
+});
+
+async function handleSpeakingLiveAudioEvaluation(req: express.Request, res: express.Response, telemetryOverride?: ReturnType<typeof calculateSpeakingTelemetry>) {
   try {
     const {
       fullAudioBase64,
@@ -4730,7 +4754,16 @@ Please listen carefully to the attached full audio recording and generate the au
         "Đây là điểm AI ước tính để tham khảo, không phải kết quả thi chính thức.";
     }
     const transcript = (conversationHistory || []).map((turn: any) => turn.userTranscript || "").join(" ");
-    parsed.telemetry = calculateSpeakingTelemetry({ transcript, durationSeconds: totalDurationSeconds, speechSegments, vadVersion: speechSegments ? "silero-vad-web-0.0.30" : undefined });
+    parsed.telemetry = telemetryOverride ?? calculateSpeakingTelemetry({ transcript, durationSeconds: totalDurationSeconds, speechSegments, vadVersion: speechSegments ? "silero-vad-web-0.0.30" : undefined });
+    if (req.body?.consentStorage === true) {
+      speakingArtifactStore.write({
+        sessionId: String(req.body?.sessionId || 'anonymous'),
+        userId: String(req.header('x-omni-user-id') || 'anonymous'),
+        kind: 'telemetry',
+        payload: parsed.telemetry,
+        consent: true,
+      });
+    }
 
     return res.json(parsed);
   } catch (error: any) {
@@ -4741,7 +4774,7 @@ Please listen carefully to the attached full audio recording and generate the au
         "Lỗi trong quá trình chấm điểm audio Speaking với Gemini.",
     });
   }
-});
+}
 
 // Transcript-only grading cannot assess pronunciation or pauses; keep the old route unavailable.
 app.post('/api/gemini/speaking-evaluation', (_req, res) => res.status(410).json({
@@ -8437,7 +8470,11 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
 // Public-beta canonical endpoints. Legacy /api/gemini routes stay available during migration.
 app.post('/api/forecast/refresh', handleForecastRefresh);
 app.post('/api/gemini/forecast-grounding', handleForecastRefresh);
-app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/speaking-live-audio-evaluation'));
+app.post('/api/speaking/analyze', createSpeakingAnalyzeHandler({
+  env: process.env,
+  artifacts: speakingArtifactStore,
+  evaluateWithAudio: (req, res, extras) => handleSpeakingLiveAudioEvaluation(req, res, extras.telemetry),
+}));
 
 const LiveHubArtifactItemSchema = z.object({
   id: z.string().min(1),

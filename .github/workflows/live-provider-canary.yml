@@ -26,4 +26,10 @@ jobs:
           WEB_AI_BRIDGE_API_KEY: ${{ secrets.WEB_AI_BRIDGE_API_KEY }}
           WEB_AI_BRIDGE_MODEL: ${{ secrets.WEB_AI_BRIDGE_MODEL }}
           OMNI_CANARY_BASE_URL: ${{ secrets.OMNI_CANARY_BASE_URL }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          LIVEKIT_AGENT_INTERNAL_SECRET: ${{ secrets.LIVEKIT_AGENT_INTERNAL_SECRET }}
+          OMNI_SPEAKING_CANARY_TOKEN: ${{ secrets.OMNI_SPEAKING_CANARY_TOKEN }}
+          GEMINI_LIVE_MODEL: gemini-2.5-flash-native-audio-preview-12-2025
         run: npm run check:canary:live

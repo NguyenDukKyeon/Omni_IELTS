@@ -30,7 +30,7 @@ import {
   speakExaminerText,
 } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
-import { SpeakingExaminerRoom } from '../speaking/SpeakingExaminerRoom';
+import { SpeakingRealtimeRoom } from '../speaking/SpeakingRealtimeRoom';
 
 const SPEAKING_PARTS: Array<{
   part: SpeakingPracticePart;
@@ -431,7 +431,7 @@ export const SpeakingQuestionModule: React.FC = () => {
 
       {/* Mode 1: Virtual Examiner Room */}
       {speakingMode === 'virtual_room' && (
-        <SpeakingExaminerRoom onBackToPractice={() => setSpeakingMode('drill')} />
+        <SpeakingRealtimeRoom onBackToPractice={() => setSpeakingMode('drill')} />
       )}
 
       {/* Mode 2: Drill View */}

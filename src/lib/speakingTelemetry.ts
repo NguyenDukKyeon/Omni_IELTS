@@ -2,6 +2,14 @@ export interface SpeechSegment {
   start: number;
   end: number;
 }
+export interface SpeakingPartTrend {
+  part: 'part_1' | 'part_2' | 'part_3';
+  rawWpm: number;
+  fillerCount: number;
+  fillerRatePer100Words: number;
+  speechRatio: number | null;
+  acousticStatus: 'measured' | 'unavailable';
+}
 export interface SpeakingTelemetry {
   rawWpm: number;
   articulationRate: number | null;
@@ -13,6 +21,7 @@ export interface SpeakingTelemetry {
   speechRatio: number | null;
   acousticStatus: 'measured' | 'unavailable';
   vadVersion: string | null;
+  partTrends: SpeakingPartTrend[] | null;
 }
 
 const WORD_PATTERN = /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu;
@@ -23,6 +32,7 @@ export function calculateSpeakingTelemetry(input: {
   durationSeconds: number;
   speechSegments: SpeechSegment[] | null;
   vadVersion?: string;
+  partTrends?: SpeakingPartTrend[] | null;
 }): SpeakingTelemetry {
   const words = input.transcript.match(WORD_PATTERN) ?? [];
   const duration = Math.max(0, input.durationSeconds);
@@ -42,6 +52,7 @@ export function calculateSpeakingTelemetry(input: {
       speechRatio: null,
       acousticStatus: 'unavailable',
       vadVersion: null,
+      partTrends: input.partTrends ?? null,
     };
   }
 
@@ -69,5 +80,27 @@ export function calculateSpeakingTelemetry(input: {
     speechRatio: Number((speechSeconds / duration).toFixed(3)),
     acousticStatus: 'measured',
     vadVersion: input.vadVersion ?? 'client-vad',
+    partTrends: input.partTrends ?? null,
+  };
+}
+
+export function calculatePartTrend(input: {
+  part: SpeakingPartTrend['part'];
+  transcript: string;
+  durationSeconds: number;
+  speechSegments: SpeechSegment[] | null;
+}): SpeakingPartTrend {
+  const metrics = calculateSpeakingTelemetry({
+    transcript: input.transcript,
+    durationSeconds: input.durationSeconds,
+    speechSegments: input.speechSegments,
+  });
+  return {
+    part: input.part,
+    rawWpm: metrics.rawWpm,
+    fillerCount: metrics.fillerCount,
+    fillerRatePer100Words: metrics.fillerRatePer100Words,
+    speechRatio: metrics.speechRatio,
+    acousticStatus: metrics.acousticStatus,
   };
 }

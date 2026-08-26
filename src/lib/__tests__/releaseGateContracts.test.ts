@@ -33,7 +33,7 @@ describe('public beta release gate and CI contracts', () => {
       const viaModeFlag = resolveScriptsForArgs(['--mode=live']);
       expect(viaModeFlag.mode).toBe('live');
       expect(viaModeFlag.scripts).toEqual(LIVE_CANARY_SCRIPTS);
-      expect(viaModeFlag.scripts).toEqual(['test:web-bridge:live', 'test:e2e:live']);
+      expect(viaModeFlag.scripts).toEqual(['test:web-bridge:live', 'test:e2e:live', 'test:speaking:live']);
 
       expect(resolveScriptsForArgs(['--mode=canary']).mode).toBe('live');
       expect(resolveScriptsForArgs(['--live']).mode).toBe('live');
@@ -53,6 +53,7 @@ describe('public beta release gate and CI contracts', () => {
         'test:e2e',
         'test:web-bridge:live',
         'test:e2e:live',
+        'test:speaking:live',
       ]);
 
       expect(resolveScriptsForArgs(['--all']).mode).toBe('full');
@@ -91,6 +92,8 @@ describe('public beta release gate and CI contracts', () => {
 
     it('preserves granular live test targets', () => {
       expect(scripts['test:web-bridge:live']).toBe('node scripts/web-bridge-live-canary.mjs');
+      expect(scripts['test:speaking:live']).toBe('node scripts/livekit-speaking-canary.mjs');
+      expect(scripts['livekit:agent']).toBe('tsx src/server/livekitSpeakingAgent.ts');
       expect(scripts['test:e2e:live']).toBe('playwright test --config=playwright.live.config.ts');
       expect(scripts['test:e2e']).toBe('playwright test');
     });
@@ -131,6 +134,17 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryCode).toContain('if (!enabled || !bridgeKey)');
       expect(canaryCode).toContain('throw new Error(');
       expect(canaryCode).not.toContain('return { status: "ok" }');
+    });
+
+    it('hard-fails the speaking realtime canary when LiveKit or Gemini credentials are missing', () => {
+      const canaryCode = readFileSync(resolve(root, 'scripts/livekit-speaking-canary.mjs'), 'utf8');
+      expect(canaryCode).toContain('LIVEKIT_URL');
+      expect(canaryCode).toContain('LIVEKIT_API_KEY');
+      expect(canaryCode).toContain('GEMINI_API_KEY');
+      expect(canaryCode).toContain('OMNI_SPEAKING_CANARY_TOKEN');
+      expect(canaryCode).toContain('throw new Error(');
+      expect(canaryCode).toContain('Refusing to fake a pass');
+      expect(canaryCode).toContain('quota_exhausted');
     });
   });
 });
