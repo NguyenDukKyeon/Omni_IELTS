@@ -118,6 +118,9 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryWorkflow).toContain('GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}');
       expect(canaryWorkflow).toContain('GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}');
       expect(canaryWorkflow).toContain('BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}');
+      expect(canaryWorkflow).toContain('docker compose -f compose.media.yml up -d bgutil-provider');
+      expect(canaryWorkflow).toContain('curl --fail --silent http://127.0.0.1:4416/ping');
+      expect(canaryWorkflow).toContain('YT_DLP_POT_PROVIDER_URL: http://127.0.0.1:4416');
       expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_ENABLED');
       expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_API_KEY');
     });
