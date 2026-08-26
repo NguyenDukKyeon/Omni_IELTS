@@ -17,10 +17,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Start YouTube PO-token provider
+        run: |
+          docker compose -f compose.media.yml up -d bgutil-provider
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4416/ping >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose.media.yml logs bgutil-provider
+          exit 1
       - name: Run Live Provider Canaries
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           OMNI_CANARY_BASE_URL: ${{ secrets.OMNI_CANARY_BASE_URL }}
+          YT_DLP_POT_PROVIDER_URL: http://127.0.0.1:4416
         run: npm run check:canary:live
