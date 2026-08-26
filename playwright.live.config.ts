@@ -1,10 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveLiveCanaryTarget } from './src/lib/liveCanaryConfig';
 
-const playwrightLivePort = Number(process.env.PLAYWRIGHT_LIVE_PORT || 3200);
-const externalLiveBaseUrl = process.env.PLAYWRIGHT_LIVE_BASE_URL?.trim().replace(/\/$/, '');
-const playwrightLiveBaseUrl = externalLiveBaseUrl || `http://127.0.0.1:${playwrightLivePort}`;
+const liveTarget = resolveLiveCanaryTarget(process.env);
 
 export default defineConfig({
   testDir: './e2e-live',
@@ -14,22 +13,23 @@ export default defineConfig({
   outputDir: path.join(os.tmpdir(), 'omni-ielts-playwright-live-results'),
   reporter: [['list']],
   use: {
-    baseURL: playwrightLiveBaseUrl,
+    baseURL: liveTarget.baseURL,
     trace: 'on',
     screenshot: 'on',
     video: 'off',
   },
   projects: [{ name: 'live-provider-chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: externalLiveBaseUrl ? undefined : {
+  webServer: liveTarget.startsLocalServer ? {
     command: 'npm run dev',
-    url: `${playwrightLiveBaseUrl}/api/health`,
+    url: `${liveTarget.baseURL}/api/health`,
     env: {
       ...process.env,
-      PORT: String(playwrightLivePort),
+      PORT: String(liveTarget.port),
       DISABLE_HMR: 'true',
+      LIVE_HUB_RECEIPT_SECRET: process.env.LIVE_HUB_RECEIPT_SECRET || 'omni-live-canary-receipt-secret',
       YT_DLP_POT_PROVIDER_URL: process.env.PLAYWRIGHT_YT_DLP_POT_PROVIDER_URL || 'http://127.0.0.1:4416',
     },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
-  },
+  } : undefined,
 });

@@ -106,7 +106,7 @@ export const IELTSPracticeView: React.FC = () => {
             </span>
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            Luyện Tập IELTS & Kho Đề Thi Thật Forecast
+            Luyện Tập IELTS & Kho Nguồn/Dự Báo
           </h1>
           <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
             Tra cứu đề thi thật IDP/BC thời gian thực qua <strong>Google Search Grounding</strong> hoặc luyện tập chuyên sâu 4 kỹ năng với AI chấm điểm 4 tiêu chí chuẩn Cambridge.
@@ -128,7 +128,7 @@ export const IELTSPracticeView: React.FC = () => {
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer"
           >
             <Target className="w-4 h-4 text-amber-300" />
-            <span>🎯 Cambridge Item Writer (Sinh Đề)</span>
+            <span>🎯 Cambridge Item Writer (AI tạo bài mới)</span>
           </button>
 
           <button data-ux-flow="practice.skills"
@@ -151,7 +151,7 @@ export const IELTSPracticeView: React.FC = () => {
           {
             id: 'forecast_hub',
             title: '🔥 Forecast Live Hub',
-            subtitle: 'Đề thi thật IDP & BC 2026',
+            subtitle: 'Nguồn đề thi & dự đoán Live Hub',
             icon: Globe2,
             badge: 'Grounding Search Live',
             highlight: true,

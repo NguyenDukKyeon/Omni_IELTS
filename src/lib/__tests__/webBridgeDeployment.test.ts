@@ -45,7 +45,7 @@ describe('private Gemini Web bridge deployment', () => {
     expect(section).not.toMatch(/WEB_AI_BRIDGE_COOKIE(?:=|:)/);
   });
 
-  it('requires live generation evidence from the authenticated Flash-first extended-thinking chain', () => {
+  it('keeps authenticated Flash-first live evidence as an explicit private canary, not a public release blocker', () => {
     const canary = readFileSync(resolve(root, 'scripts/web-bridge-live-canary.mjs'), 'utf8');
     const server = readFileSync(resolve(root, 'server.ts'), 'utf8');
     const releaseGate = readFileSync(resolve(root, 'scripts/public-beta-gate.mjs'), 'utf8');
@@ -58,7 +58,8 @@ describe('private Gemini Web bridge deployment', () => {
     expect(canary).toContain("!['gemini-flash', 'gemini-pro'].includes(payload.resolvedModel)");
     expect(server).toContain("sessionStatus: 'authenticated'");
     expect(server).toContain("resolvedModel: result.bridgeMetadata.resolvedModel");
-    expect(releaseGate).toContain("'test:web-bridge:live'");
+    expect(releaseGate).not.toContain("export const LIVE_CANARY_SCRIPTS = ['test:web-bridge:live'");
+    expect(canary).toContain('Private Web Bridge canary is not configured');
   });
 
   it('ships the AGPL source notice required by the maintained bridge dependency', () => {
@@ -101,7 +102,8 @@ describe('private Gemini Web bridge deployment', () => {
   it('bounds the complete official fallback chain after a deep Web failure', () => {
     const server = readFileSync(resolve(root, 'server.ts'), 'utf8');
 
-    expect(server).toContain('const directFallbackBudgetMs = officialLaneBudgetMs || profile.timeoutMs');
+    expect(server).toContain("webBridgeSessionStatus === 'authenticated'");
+    expect(server).toContain(': profile.timeoutMs');
     expect(server).toContain('totalTimeoutMs: directFallbackBudgetMs');
   });
 
@@ -113,7 +115,8 @@ describe('private Gemini Web bridge deployment', () => {
     expect(releaseGate).toContain('dotenv.config({ quiet: true })');
     expect(releaseGate).toContain('PLAYWRIGHT_LIVE_BASE_URL');
     expect(releaseGate).toContain('OMNI_CANARY_BASE_URL');
-    expect(liveConfig).toContain('process.env.PLAYWRIGHT_LIVE_BASE_URL');
-    expect(liveConfig).toContain('webServer: externalLiveBaseUrl ? undefined');
+    expect(liveConfig).toContain("import { resolveLiveCanaryTarget } from './src/lib/liveCanaryConfig'");
+    expect(liveConfig).toContain('resolveLiveCanaryTarget(process.env)');
+    expect(liveConfig).toContain('webServer: liveTarget.startsLocalServer ?');
   });
 });

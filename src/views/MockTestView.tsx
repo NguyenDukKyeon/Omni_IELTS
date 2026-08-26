@@ -19,7 +19,7 @@ import {
   Compass,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { FullMockTestPackage, MockExamSkill, MockResult, ExamColorScheme } from '../types';
+import { FullMockTestPackage, MockExamSkill, MockResult, ExamColorScheme, ContentOrigin } from '../types';
 import { ALL_FULL_MOCK_TESTS, CAM_19_TEST_01 } from '../data/mockTestsData';
 import { ExamHeader } from '../components/mock/ExamHeader';
 import { ExamFooterNav } from '../components/mock/ExamFooterNav';
@@ -35,6 +35,7 @@ import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
 import { getGeminiRequestHeaders } from '../services/aiTutor';
 import { persistInitialMockAttempt, PersistedMockAttemptSnapshot } from '../lib/mockAttemptPersistence';
 import { savePrivateArtifactIfAuthenticated } from '../services/supabase';
+import { getContentOriginBadge } from '../lib/contentOrigin';
 
 type ExamPhase = 'idle' | 'in_progress' | 'evaluating' | 'report_view';
 
@@ -648,7 +649,7 @@ export const MockTestView: React.FC = () => {
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                Live Hub
+                Tìm nguyên đề từ Live Hub
               </button>
               <button data-ux-flow="mock.exam"
                 onClick={() => setActiveTab('progress')}
@@ -719,13 +720,16 @@ export const MockTestView: React.FC = () => {
                   className="px-5 py-3 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md transition-all cursor-pointer shrink-0"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-                  <span>🧭 Mở Mock Test Orchestrator</span>
+                  <span>🧭 AI tạo Full Mock (Mock Orchestrator)</span>
                 </button>
               </div>
 
               {/* Cambridge Full Mock Packages Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {ALL_FULL_MOCK_TESTS.map((pkg) => (
+                {ALL_FULL_MOCK_TESTS.map((pkg) => {
+                  const pkgOrigin: ContentOrigin = pkg.origin || (pkg.provenance ? (pkg.provenance.origin || 'source_plus_ai') : 'fully_ai_generated');
+                  const pkgBadge = getContentOriginBadge(pkgOrigin, 'mock');
+                  return (
                   <div
                     key={pkg.id}
                     className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 shadow-sm hover:border-blue-500/80 transition-all flex flex-col justify-between space-y-5 group"
@@ -737,8 +741,8 @@ export const MockTestView: React.FC = () => {
                           <span className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-mono font-bold text-xs border border-blue-200 dark:border-blue-800">
                             {pkg.code}
                           </span>
-                          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded">
-                            Cambridge Format
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${pkgBadge.badgeClass}`}>
+                            {pkgBadge.labelVi}
                           </span>
                         </div>
 
@@ -799,7 +803,8 @@ export const MockTestView: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

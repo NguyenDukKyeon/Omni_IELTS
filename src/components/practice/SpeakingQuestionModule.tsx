@@ -157,12 +157,12 @@ export const SpeakingQuestionModule: React.FC = () => {
       setPrompt({
         id: data.id || `custom_speaking_${Date.now()}`,
         part: targetPart,
-        title: data.title || 'Đề thi thật IELTS Speaking Real Exam',
+        title: data.title || 'Nguồn luyện Speaking từ Live Hub',
         topic: 'IELTS Real Exam Forecast 2026',
         difficulty: 'Band 7.0-8.0',
         examinerPersona: 'Dr. Jonathan Vance - Cambridge Senior Speaking Examiner',
         cueCard: {
-          prompt: data.promptStatement || 'Describe a topic from real exam',
+          prompt: data.promptStatement || 'Describe an IELTS-style practice topic',
           bulletPoints: data.cueCardPoints || [
             'What it is and when it occurred',
             'Who was involved',

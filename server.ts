@@ -17,9 +17,18 @@ import {
   validateMockSourcePreservation,
   validateSpeakingPart,
   validateReadingPassage,
+  normalizeGeneratedQuestionMetadata,
+  expectedMockQuestionRange,
   MockSkill,
   MockSpeakingPart,
 } from "./src/lib/mockPackageValidator";
+import {
+  checkPracticeCompleteness,
+  checkMockCompleteness,
+  buildLearningArtifactProvenance,
+} from "./src/lib/contentOrigin";
+import { signLiveHubItem, verifyLiveHubItemReceipt } from "./src/lib/liveHubReceipt";
+import type { ConsentAction } from "./src/types";
 import { alignTranscriptSentences, normalizeAndAlignVtt, NormalizedTranscriptSegment } from "./src/lib/transcriptNormalizer";
 import { calculateSpeakingTelemetry } from "./src/lib/speakingTelemetry";
 import { finalizeMediaShadowingEvaluation } from "./src/lib/mediaShadowingEvaluation";
@@ -62,7 +71,7 @@ import {
   type GroqGroundedModel,
 } from "./src/lib/groqGrounding";
 import { getProviderApiKeyPool } from "./src/lib/providerKeyPool";
-import { generateTextWithDirectProviderPool } from "./src/lib/directTextProvider";
+import { computeDirectAttemptTimeoutMs, generateTextWithDirectProviderPool } from "./src/lib/directTextProvider";
 import {
   createSerialExecutor,
   executeWithPreferredWebBridge,
@@ -92,6 +101,11 @@ dotenv.config({ quiet: true });
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const execFileAsync = promisify(execFile);
+const configuredLiveHubReceiptSecret = process.env.LIVE_HUB_RECEIPT_SECRET?.trim();
+const liveHubReceiptSecret = configuredLiveHubReceiptSecret || crypto.randomBytes(32).toString('hex');
+if (!configuredLiveHubReceiptSecret) {
+  console.warn('[Live Hub receipt] using_ephemeral_secret');
+}
 const groundedProviderRouter = new GroundedProviderRouter({
   onAttemptFailure: ({ provider, model, category }) => {
     console.warn(`[Grounded router] provider=${provider} model=${model} category=${category}`);
@@ -356,16 +370,15 @@ async function callOfficialProvidersResiliently(
     if (directTextRoutes.length) {
       try {
         const startedAt = Date.now();
-        const directFallbackBudgetMs = officialLaneBudgetMs || profile.timeoutMs;
+        const directFallbackBudgetMs = webBridgeSessionStatus === 'authenticated'
+          ? (officialLaneBudgetMs || profile.timeoutMs)
+          : profile.timeoutMs;
         const result = await generateTextWithDirectProviderPool({
           contents: options.contents,
           config: options.config,
           routes: directTextRoutes,
           totalTimeoutMs: directFallbackBudgetMs,
-          perAttemptTimeoutMs: Math.min(
-            25_000,
-            Math.max(5_000, Math.floor(directFallbackBudgetMs / directTextRoutes.length)),
-          ),
+          perAttemptTimeoutMs: computeDirectAttemptTimeoutMs(directFallbackBudgetMs, directTextRoutes),
           validateText: options.validateText,
           onAttempt: (attempt) => {
             const status = attempt.category ? ` category=${attempt.category}` : '';
@@ -7398,7 +7411,8 @@ const mockQuestionResponseSchema = {
   required: ['id', 'number', 'sectionIndex', 'type', 'prompt', 'correctAnswer', 'explanationVi'],
 };
 
-function listeningSectionResponseSchema(): any {
+function listeningSectionResponseSchema(sectionNumber: number): any {
+  const { count } = expectedMockQuestionRange('listening', sectionNumber);
   return {
     type: Type.OBJECT,
     properties: {
@@ -7407,13 +7421,14 @@ function listeningSectionResponseSchema(): any {
       context: { type: Type.STRING },
       audioScriptExcerpt: { type: Type.STRING },
       instructionsVi: { type: Type.STRING },
-      questions: { type: Type.ARRAY, items: mockQuestionResponseSchema },
+      questions: { type: Type.ARRAY, minItems: count, maxItems: count, items: mockQuestionResponseSchema },
     },
     required: ['sectionNumber', 'title', 'context', 'audioScriptExcerpt', 'instructionsVi', 'questions'],
   };
 }
 
-function readingPassageResponseSchema(): any {
+function readingPassageResponseSchema(passageNumber: number): any {
+  const { count } = expectedMockQuestionRange('reading', passageNumber);
   return {
     type: Type.OBJECT,
     properties: {
@@ -7437,7 +7452,7 @@ function readingPassageResponseSchema(): any {
           required: ['id', 'text'],
         },
       },
-      questions: { type: Type.ARRAY, items: mockQuestionResponseSchema },
+      questions: { type: Type.ARRAY, minItems: count, maxItems: count, items: mockQuestionResponseSchema },
     },
     required: ['passageNumber', 'title', 'subtitle', 'wordCount', 'paragraphs', 'questions'],
   };
@@ -7496,7 +7511,29 @@ function mockSkillResponseSchema(skill: Exclude<MockSkill, 'speaking'>): any {
         type: Type.OBJECT,
         properties: {
           category: { type: Type.STRING, enum: ['Bar Chart', 'Line Graph', 'Pie Chart', 'Table', 'Process', 'Map'] },
-          prompt: { type: Type.STRING }, minWords: { type: Type.NUMBER }, suggestedMinutes: { type: Type.NUMBER },
+          prompt: { type: Type.STRING },
+          chartData: {
+            type: Type.OBJECT,
+            properties: {
+              labels: { type: Type.ARRAY, items: { type: Type.STRING } },
+              datasets: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    label: { type: Type.STRING },
+                    data: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                    unit: { type: Type.STRING },
+                    color: { type: Type.STRING },
+                  },
+                  required: ['label', 'data'],
+                },
+              },
+              description: { type: Type.STRING },
+            },
+            required: ['labels', 'datasets'],
+          },
+          minWords: { type: Type.NUMBER }, suggestedMinutes: { type: Type.NUMBER },
         },
         required: ['category', 'prompt', 'minWords', 'suggestedMinutes'],
       },
@@ -7557,7 +7594,16 @@ type MockSkillGenerationResult = {
   partial?: Partial<Record<MockSpeakingPart, any>>;
 };
 
-async function generateMockListening(ai: GoogleGenAI, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
+function isJsonObjectText(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text);
+    return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+  } catch {
+    return false;
+  }
+}
+
+async function generateMockListening(ai: GoogleGenAI | null, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
   let totalAttempts = 0;
   for (const sectionNumber of MOCK_LISTENING_SECTIONS) {
     const existing = validateListeningSection(sectionNumber, build.listeningSections[sectionNumber]);
@@ -7573,16 +7619,20 @@ async function generateMockListening(ai: GoogleGenAI, build: ServerMockBuild): P
       const result = await callGeminiResiliently(ai, {
         taskTier: 'deep',
         contents: `${mockListeningSectionInstructions(sectionNumber, build)}${repair}`,
-        config: { responseMimeType: 'application/json', responseSchema: listeningSectionResponseSchema() },
+        config: { responseMimeType: 'application/json', responseSchema: listeningSectionResponseSchema(sectionNumber) },
         maxRetriesPerModel: 1,
-        validateText: (text) => validateListeningSection(sectionNumber, JSON.parse(text)).ready,
+        // The task-level validator below must see schema-invalid JSON so it can
+        // produce a precise repair prompt. The provider router only guarantees
+        // a syntactically valid JSON object here.
+        validateText: isJsonObjectText,
       });
       if (!result.text) {
         lastErrors = [result.error || 'AI_UNAVAILABLE'];
         repair = ' The provider returned no valid section. Generate the complete section again.';
         continue;
       }
-      const validation = validateListeningSection(sectionNumber, JSON.parse(result.text));
+      const candidate = normalizeGeneratedQuestionMetadata('listening', sectionNumber, JSON.parse(result.text));
+      const validation = validateListeningSection(sectionNumber, candidate);
       if (validation.ready) {
         build.listeningSections[sectionNumber] = validation.data;
         touchMockBuild(build);
@@ -7608,7 +7658,7 @@ async function generateMockListening(ai: GoogleGenAI, build: ServerMockBuild): P
   return { section: validation.ready ? section : null, validation, attempts: totalAttempts, failedParts: [], readyParts: [] };
 }
 
-async function generateMockReading(ai: GoogleGenAI, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
+async function generateMockReading(ai: GoogleGenAI | null, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
   let totalAttempts = 0;
   for (const passageNumber of [1, 2, 3] as const) {
     const existing = validateReadingPassage(passageNumber, build.readingPassages[passageNumber]);
@@ -7624,16 +7674,17 @@ async function generateMockReading(ai: GoogleGenAI, build: ServerMockBuild): Pro
       const result = await callGeminiResiliently(ai, {
         taskTier: 'deep',
         contents: `${mockReadingPassageInstructions(passageNumber, build)}${repair}`,
-        config: { responseMimeType: 'application/json', responseSchema: readingPassageResponseSchema() },
+        config: { responseMimeType: 'application/json', responseSchema: readingPassageResponseSchema(passageNumber) },
         maxRetriesPerModel: 1,
-        validateText: (text) => validateReadingPassage(passageNumber, JSON.parse(text)).ready,
+        validateText: isJsonObjectText,
       });
       if (!result.text) {
         lastErrors = [result.error || 'AI_UNAVAILABLE'];
         repair = ' The provider returned no valid passage. Generate the complete passage again.';
         continue;
       }
-      const validation = validateReadingPassage(passageNumber, JSON.parse(result.text));
+      const candidate = normalizeGeneratedQuestionMetadata('reading', passageNumber, JSON.parse(result.text));
+      const validation = validateReadingPassage(passageNumber, candidate);
       if (validation.ready) {
         build.readingPassages[passageNumber] = validation.data;
         touchMockBuild(build);
@@ -7657,7 +7708,7 @@ async function generateMockReading(ai: GoogleGenAI, build: ServerMockBuild): Pro
   return { section: validation.ready ? section : null, validation, attempts: totalAttempts, failedParts: [], readyParts: [] };
 }
 
-async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild, part: MockSpeakingPart) {
+async function generateMockSpeakingPart(ai: GoogleGenAI | null, build: ServerMockBuild, part: MockSpeakingPart) {
   const existing = validateSpeakingPart(part, build.speakingParts[part]);
   if (existing.ready) return { part, data: existing.data, validation: existing, attempts: 0, reused: true };
 
@@ -7672,13 +7723,7 @@ async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild,
       contents: `${mockSpeakingPartInstructions(part, build)}${repair}`,
       config: { responseMimeType: 'application/json', responseSchema: speakingPartResponseSchema(part) },
       maxRetriesPerModel: 2,
-      validateText: (text) => {
-        const validation = validateSpeakingPart(part, JSON.parse(text));
-        if (!validation.ready) return false;
-        const sourcePart = ({ speaking_part1: 'part1', speaking_part2: 'part2', speaking_part3: 'part3' } as const)[build.input.sourceItem?.skill as 'speaking_part1' | 'speaking_part2' | 'speaking_part3'];
-        return sourcePart !== part
-          || validateMockSourcePreservation('speaking', { [part]: validation.data }, build.input.sourceItem).length === 0;
-      },
+      validateText: isJsonObjectText,
     });
     if (!result.text) {
       lastErrors = [result.error || 'AI_UNAVAILABLE'];
@@ -7713,7 +7758,7 @@ async function generateMockSpeakingPart(ai: GoogleGenAI, build: ServerMockBuild,
   };
 }
 
-async function generateMockSpeaking(ai: GoogleGenAI, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
+async function generateMockSpeaking(ai: GoogleGenAI | null, build: ServerMockBuild): Promise<MockSkillGenerationResult> {
   const results = [];
   for (const part of MOCK_SPEAKING_PARTS) {
     const result = await generateMockSpeakingPart(ai, build, part);
@@ -7746,7 +7791,7 @@ async function generateMockSpeaking(ai: GoogleGenAI, build: ServerMockBuild): Pr
   return { section, partial: build.speakingParts, failedParts: [], readyParts: MOCK_SPEAKING_PARTS, validation, attempts: results.reduce((total, result) => total + result.attempts, 0) };
 }
 
-async function generateMockSpeakingStep(ai: GoogleGenAI, build: ServerMockBuild, part: MockSpeakingPart) {
+async function generateMockSpeakingStep(ai: GoogleGenAI | null, build: ServerMockBuild, part: MockSpeakingPart) {
   const result = await generateMockSpeakingPart(ai, build, part);
   const readyParts = MOCK_SPEAKING_PARTS.filter((candidate) =>
     validateSpeakingPart(candidate, build.speakingParts[candidate]).ready,
@@ -7800,7 +7845,7 @@ async function generateMockSpeakingStep(ai: GoogleGenAI, build: ServerMockBuild,
   };
 }
 
-async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill: MockSkill): Promise<MockSkillGenerationResult> {
+async function generateMockSkill(ai: GoogleGenAI | null, build: ServerMockBuild, skill: MockSkill): Promise<MockSkillGenerationResult> {
   if (skill === 'speaking') return generateMockSpeaking(ai, build);
   if (skill === 'listening') return generateMockListening(ai, build);
   if (skill === 'reading') return generateMockReading(ai, build);
@@ -7817,12 +7862,7 @@ async function generateMockSkill(ai: GoogleGenAI, build: ServerMockBuild, skill:
       contents: `${mockSkillInstructions(skill, build)}${repair}`,
       config: { responseMimeType: 'application/json', responseSchema: mockSkillResponseSchema(skill as Exclude<MockSkill, 'speaking'>) },
       maxRetriesPerModel: 2,
-      validateText: (text) => {
-        const section = normalizeMockSkill(skill, JSON.parse(text));
-        const validation = validateMockSkill(skill, section);
-        return validation.ready
-          && validateMockSourcePreservation(skill, section, build.input.sourceItem).length === 0;
-      },
+      validateText: isJsonObjectText,
     });
     if (!result.text) {
       lastErrors = [result.error || 'AI_UNAVAILABLE'];
@@ -7860,6 +7900,7 @@ function assembleMockBuild(build: ServerMockBuild) {
       ...build.input.provenance,
       sourceArtifactId: build.input.sourceArtifactId,
     } : undefined,
+    origin: build.input.provenance?.origin || (build.input.sourceItem ? 'source_plus_ai' : 'fully_ai_generated'),
     ...build.skills,
   };
   const baseValidation = validateMockPackage(fullPackage);
@@ -7915,6 +7956,8 @@ function publicMockBuildSummary(build: ServerMockBuild) {
     status: build.status,
     skillStates: Object.fromEntries(MOCK_SKILLS.map(skill => [skill, build.skills[skill] ? 'ready' : 'pending'])),
     createdAt: build.createdAt,
+    provenance: build.input.provenance,
+    sourceMode: build.input.sourceItem ? 'preserve' : 'lineage_only',
   };
 }
 
@@ -7953,7 +7996,6 @@ app.post('/api/mock/builds/:id/skills/:skill/generate', async (req, res) => {
   if (!build) return res.status(404).json({ error: 'Mock build không tồn tại hoặc đã hết phiên.' });
   if (!MOCK_SKILLS.includes(skill)) return res.status(400).json({ error: 'Kỹ năng không hợp lệ.' });
   const ai = getGeminiClient(req);
-  if (!ai) return res.status(503).json({ error: 'Chưa cấu hình Gemini API key.' });
 
   if (build.status === 'failed') {
     return res.status(409).json({ error: 'Kỹ năng đã lỗi; hãy dùng thao tác retry để giữ các phần đã đạt.', code: 'RETRY_REQUIRED' });
@@ -8038,7 +8080,6 @@ app.post('/api/mock/builds/:id/retry', async (req, res) => {
     return res.status(400).json({ error: 'Speaking Part không hợp lệ.', code: 'INVALID_SPEAKING_PART' });
   }
   const ai = getGeminiClient(req);
-  if (!ai) return res.status(503).json({ error: 'Chưa cấu hình Gemini API key.', code: 'AUTH_MISSING' });
 
   if (skill === 'speaking' && part) {
     delete build.speakingParts[part];
@@ -8178,8 +8219,17 @@ const handleForecastRefresh: express.RequestHandler = async (req, res) => {
       customQuery: String(req.body?.customQuery || '').trim().toLowerCase(),
     }))
     .digest('hex');
+  const issueSourceReceipts = <T extends { forecastItems?: object[] }>(response: T): T => ({
+    ...response,
+    forecastItems: Array.isArray(response.forecastItems)
+      ? response.forecastItems.map((item) => ({
+          ...item,
+          sourceReceipt: signLiveHubItem(item as Record<string, unknown>, liveHubReceiptSecret),
+        }))
+      : response.forecastItems,
+  } as T);
   const cachedForecast = await forecastServerCache.getFresh(forecastCacheKey);
-  if (cachedForecast) return res.json(cachedForecast);
+  if (cachedForecast) return res.json(issueSourceReceipts(cachedForecast));
   const hasGeminiByok = Boolean(req.header('x-gemini-api-key')?.trim());
   const hasGroqByok = Boolean(req.header('x-groq-api-key')?.trim());
   const gateway = await getHealthyGatewayClient();
@@ -8425,14 +8475,14 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
     };
 
     const routed = await runPrimaryForecast();
-    const response = {
+    const response = issueSourceReceipts({
       ...routed.value,
       ...(routed.lane ? { gatewayLane: routed.lane } : {}),
       provider: routed.provider,
       model: routed.model,
       fallbackReason: routed.fallbackReason,
       cacheStatus: 'miss' as const,
-    };
+    });
     await forecastServerCache.set(forecastCacheKey, response).catch(() => {
       console.warn('[Forecast cache] write_failed');
     });
@@ -8447,11 +8497,11 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
     console.warn(`[Forecast Grounding] provider=${failure.provider || 'gemini'} category=${failure.category} requestId=${failure.requestId}`);
     const staleSnapshot = await forecastServerCache.getStale(forecastCacheKey);
     if (staleSnapshot) {
-      return res.json({
+      return res.json(issueSourceReceipts({
         ...staleSnapshot,
         error: failure.messageVi,
         failure,
-      });
+      }));
     }
     return res.status(failure.httpStatus).json({
       status: 'unavailable',
@@ -8476,24 +8526,124 @@ app.post('/api/speaking/analyze', createSpeakingAnalyzeHandler({
   evaluateWithAudio: (req, res, extras) => handleSpeakingLiveAudioEvaluation(req, res, extras.telemetry),
 }));
 
-const LiveHubArtifactItemSchema = z.object({
+const ConsentActionSchema = z.enum(['direct', 'search_more', 'practice_available', 'ai_fill_missing', 'create_ai_variant']);
+
+const BaseLiveHubArtifactItemSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
-  skill: z.enum(['writing_task1', 'writing_task2', 'speaking_part1', 'speaking_part2', 'speaking_part3']),
-  promptStatement: z.string().min(1),
-  evidenceType: z.enum(['verified_report', 'reported_recall', 'forecast', 'derived_practice']).default('forecast'),
+  evidenceType: z.enum(['verified_report', 'reported_recall', 'forecast', 'derived_practice', 'ai_generated']).default('forecast'),
   groundingSourceTitle: z.string().optional(),
   groundingSourceUrl: z.string().url().optional(),
   citations: z.array(z.object({ claimId: z.string(), title: z.string(), url: z.string().url(), snippet: z.string().optional() })).optional(),
+  sourceReceipt: z.string().optional(),
+  isComplete: z.boolean().optional(),
+  missingComponents: z.array(z.string()).optional(),
+  availableComponents: z.array(z.string()).optional(),
 }).passthrough();
 
-function parseLiveHubArtifactItem(req: express.Request, res: express.Response) {
-  const parsed = LiveHubArtifactItemSchema.safeParse(req.body?.item);
-  if (!parsed.success || parsed.data.id !== req.params.id) {
+const WritingArtifactItemSchema = BaseLiveHubArtifactItemSchema.extend({
+  skill: z.enum(['writing', 'writing_task1', 'writing_task2']),
+  promptStatement: z.string().min(1).optional(),
+  task1: z.object({ prompt: z.string().optional() }).passthrough().optional(),
+  task2: z.object({ prompt: z.string().optional() }).passthrough().optional(),
+}).passthrough();
+
+const SpeakingArtifactItemSchema = BaseLiveHubArtifactItemSchema.extend({
+  skill: z.enum(['speaking', 'speaking_part1', 'speaking_part2', 'speaking_part3']),
+  promptStatement: z.string().optional(),
+  cueCardPoints: z.array(z.string()).optional(),
+  cueCard: z.object({ topic: z.string().optional(), prompt: z.string().optional() }).passthrough().optional(),
+  questions: z.array(z.union([
+    z.string(),
+    z.object({ id: z.string().optional(), question: z.string().optional(), prompt: z.string().optional() }).passthrough(),
+  ])).optional(),
+}).passthrough();
+
+const ReadingArtifactItemSchema = BaseLiveHubArtifactItemSchema.extend({
+  skill: z.literal('reading'),
+  promptStatement: z.string().optional(),
+  passage: z.object({
+    title: z.string().optional(),
+    paragraphs: z.array(z.object({ label: z.string(), text: z.string() })).optional(),
+    text: z.string().optional(),
+  }).passthrough().optional(),
+  questions: z.array(z.object({
+    id: z.string().optional(),
+    questionNumber: z.number().optional(),
+    prompt: z.string().optional(),
+    statementOrQuestion: z.string().optional(),
+    correctAnswer: z.string().optional(),
+  }).passthrough()).optional(),
+}).passthrough();
+
+const ListeningArtifactItemSchema = BaseLiveHubArtifactItemSchema.extend({
+  skill: z.literal('listening'),
+  promptStatement: z.string().optional(),
+  audioUrl: z.string().optional(),
+  audioBase64: z.string().optional(),
+  mediaUrl: z.string().optional(),
+  audioArtifact: z.object({
+    audioUrl: z.string().optional(),
+    audioBase64: z.string().optional(),
+    isValidated: z.boolean().optional(),
+    status: z.enum(['validated', 'invalid', 'truncated', 'pending']).optional(),
+  }).passthrough().optional(),
+  audioTranscript: z.string().optional(),
+  questions: z.array(z.object({
+    id: z.string().optional(),
+    questionNumber: z.number().optional(),
+    prompt: z.string().optional(),
+    correctAnswer: z.string().optional(),
+  }).passthrough()).optional(),
+}).passthrough();
+
+const LiveHubArtifactItemSchema = z.union([
+  WritingArtifactItemSchema,
+  SpeakingArtifactItemSchema,
+  ReadingArtifactItemSchema,
+  ListeningArtifactItemSchema,
+]);
+
+const LiveHubPracticeRequestBodySchema = z.object({
+  item: LiveHubArtifactItemSchema,
+  consentAction: ConsentActionSchema.optional(),
+  retrievedAt: z.string().optional(),
+});
+
+const LiveHubMockRequestBodySchema = z.object({
+  item: LiveHubArtifactItemSchema,
+  consentAction: ConsentActionSchema.optional(),
+  targetBand: z.number().optional(),
+  retrievedAt: z.string().optional(),
+});
+
+const INCOMPLETE_PRACTICE_CONSENT_ACTIONS = new Set<z.infer<typeof ConsentActionSchema>>([
+  'practice_available',
+  'ai_fill_missing',
+  'create_ai_variant',
+]);
+
+const INCOMPLETE_MOCK_CONSENT_ACTIONS = new Set<z.infer<typeof ConsentActionSchema>>([
+  'ai_fill_missing',
+  'create_ai_variant',
+]);
+
+function parseLiveHubRequestBody(req: express.Request, res: express.Response, isMock = false) {
+  if (req.body?.consentAction && !ConsentActionSchema.safeParse(req.body.consentAction).success) {
+    res.status(400).json({ error: 'consentAction không hợp lệ.', code: 'INVALID_CONSENT_ACTION' });
+    return null;
+  }
+  const schema = isMock ? LiveHubMockRequestBodySchema : LiveHubPracticeRequestBodySchema;
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success || parsed.data.item.id !== req.params.id) {
     res.status(400).json({ error: 'Thiếu Live Hub item hợp lệ.', code: 'LIVE_HUB_ITEM_INVALID' });
     return null;
   }
-  const item = parsed.data;
+  const item = parsed.data.item;
+  const consentAction = parsed.data.consentAction;
+  const retrievedAt = parsed.data.retrievedAt;
+  const targetBand = isMock ? (parsed.data as z.infer<typeof LiveHubMockRequestBodySchema>).targetBand : undefined;
+
   const citationUrls = [...new Set((item.citations || []).map((citation) => citation.url))];
   if (item.evidenceType === 'verified_report' && !item.groundingSourceUrl && citationUrls.length === 0) {
     res.status(422).json({
@@ -8502,53 +8652,134 @@ function parseLiveHubArtifactItem(req: express.Request, res: express.Response) {
     });
     return null;
   }
+  if (
+    (item.evidenceType === 'verified_report' || item.evidenceType === 'reported_recall')
+    && !verifyLiveHubItemReceipt(item, liveHubReceiptSecret)
+  ) {
+    res.status(422).json({
+      error: 'Nguồn Live Hub không còn khớp với dữ liệu do server xác minh. Hãy làm mới nguồn trước khi tạo bài.',
+      code: 'SOURCE_RECEIPT_INVALID',
+    });
+    return null;
+  }
   return {
     item,
-    provenance: {
-      sourceItemId: item.id,
-      evidenceType: item.evidenceType,
-      sourceTitle: item.groundingSourceTitle || null,
-      sourceUrl: item.groundingSourceUrl || citationUrls[0] || null,
-      citationUrls,
-      retrievedAt: req.body?.retrievedAt || null,
-    },
+    consentAction,
+    retrievedAt,
+    targetBand,
   };
 }
 
 app.post('/api/live-hub/items/:id/practice', (req, res) => {
-  const parsed = parseLiveHubArtifactItem(req, res);
+  const parsed = parseLiveHubRequestBody(req, res, false);
   if (!parsed) return;
-  const { item, provenance } = parsed;
+  const { item, consentAction, retrievedAt } = parsed;
+
+  const completeness = checkPracticeCompleteness(item.skill, item);
+
+  if (
+    !completeness.isComplete &&
+    (!consentAction || !INCOMPLETE_PRACTICE_CONSENT_ACTIONS.has(consentAction))
+  ) {
+    return res.status(422).json({
+      error: 'Nguồn bài tập chưa hoàn chỉnh. Vui lòng chọn hành động xử lý.',
+      code: 'INCOMPLETE_SOURCE_CONSENT_REQUIRED',
+      completeness,
+    });
+  }
+
+  // Deterministic gradeability: only true if source is actually complete and validated.
+  // Merely requesting ai_fill_missing without completed deterministic payload does NOT mark isGradeable=true.
+  const isGradeable = completeness.gradeable;
+  let status: 'ready' | 'draft_generation_required' | 'available_portion_only' = 'ready';
+  let requiresGeneration = false;
+
+  if (!completeness.isComplete) {
+    if (consentAction === 'ai_fill_missing' || consentAction === 'create_ai_variant') {
+      status = 'draft_generation_required';
+      requiresGeneration = true;
+    } else if (consentAction === 'practice_available') {
+      status = 'available_portion_only';
+      requiresGeneration = false;
+    }
+  }
+
+  const updatedProvenance = buildLearningArtifactProvenance({
+    sourceItem: item,
+    consentAction: consentAction || 'direct',
+    retrievedAt: retrievedAt || null,
+    filledComponents: consentAction === 'ai_fill_missing' ? completeness.missingComponents : undefined,
+    aiModel: consentAction && consentAction !== 'direct' && consentAction !== 'practice_available' ? 'gemini-3.1-pro' : undefined,
+    taskTier: 'balanced',
+  });
+
   const artifact = {
     id: `practice_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
     kind: 'derived_practice',
     skill: item.skill,
     prompt: item.promptStatement,
     sourceItem: item,
-    provenance,
+    provenance: updatedProvenance,
+    status,
+    requiresGeneration,
+    isGradeable,
+    completeness,
     createdAt: new Date().toISOString(),
   };
   return res.status(201).json({ artifact });
 });
 
 const handleCreateLiveHubMock: express.RequestHandler = (req, res) => {
-  const parsed = parseLiveHubArtifactItem(req, res);
+  const parsed = parseLiveHubRequestBody(req, res, true);
   if (!parsed) return;
-  const { item, provenance } = parsed;
+  const { item, consentAction, retrievedAt, targetBand } = parsed;
+
+  const mockCompleteness = checkMockCompleteness(item);
+
+  // Require explicit consent if the source is not a complete 4-skill mock package
+  if (
+    !mockCompleteness.isComplete &&
+    (!consentAction || !INCOMPLETE_MOCK_CONSENT_ACTIONS.has(consentAction))
+  ) {
+    return res.status(422).json({
+      error: 'Nguồn chưa đủ cấu trúc Full Mock 4 kỹ năng. Cần sự đồng ý để thực hiện hành động tiếp theo.',
+      code: 'INCOMPLETE_SOURCE_CONSENT_REQUIRED',
+      completeness: mockCompleteness,
+    });
+  }
+
+  const effectiveConsentAction = consentAction || 'direct';
+  const requiresGeneration = !mockCompleteness.isComplete;
+
+  const updatedProvenance = buildLearningArtifactProvenance({
+    sourceItem: item,
+    consentAction: effectiveConsentAction,
+    retrievedAt: retrievedAt || null,
+    filledComponents: effectiveConsentAction === 'ai_fill_missing' ? mockCompleteness.missingComponents : undefined,
+    aiModel: 'gemini-3.1-pro',
+    taskTier: 'analytical_heavy',
+  });
+
   const artifact = {
     id: `mock_section_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
     kind: 'derived_mock_section',
     skill: item.skill,
     sourceItem: item,
     requiresPreview: !['verified_report', 'reported_recall'].includes(item.evidenceType),
-    provenance,
+    status: requiresGeneration ? 'draft_generation_required' : 'ready',
+    requiresGeneration,
+    provenance: updatedProvenance,
+    completeness: mockCompleteness,
     createdAt: new Date().toISOString(),
   };
+  // A separate AI variant keeps lineage in provenance only. It must not feed
+  // the source prompt into generation or the source-preservation validator.
+  const generationSourceItem = effectiveConsentAction === 'create_ai_variant' ? undefined : item;
   const mockBuild = createServerMockBuild({
-    targetBand: req.body?.targetBand || 7,
-    sourceItem: item,
+    targetBand: targetBand || 7,
+    sourceItem: generationSourceItem,
     sourceArtifactId: artifact.id,
-    provenance,
+    provenance: updatedProvenance,
   });
   return res.status(201).json({ artifact, mockBuild: publicMockBuildSummary(mockBuild) });
 };

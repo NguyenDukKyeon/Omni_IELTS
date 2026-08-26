@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:web-bridge:live": "node scripts/web-bridge-live-canary.mjs",
+    "check:web-bridge:live": "npm run test:web-bridge:live",
     "test:speaking:live": "node scripts/livekit-speaking-canary.mjs",
     "livekit:agent": "tsx src/server/livekitSpeakingAgent.ts",
     "setup:web-bridge": "npm run setup:web-bridge:pro",
