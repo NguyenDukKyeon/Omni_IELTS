@@ -29,5 +29,6 @@ test('a real grounded provider returns a fresh sourced Forecast snapshot', async
   expect(body.groundingSources?.length).toBeGreaterThan(0);
   for (const item of body.forecastItems) {
     expect(item.citations?.length, `Item ${item.id} must have claim-level citations`).toBeGreaterThan(0);
+    expect(item.sourceReceipt, `Item ${item.id} must carry a server-issued source receipt`).toMatch(/^v1\./);
   }
 });

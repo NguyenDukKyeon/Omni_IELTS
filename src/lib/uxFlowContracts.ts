@@ -117,6 +117,36 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     errorStates: ['provenance_required', 'build_unavailable'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
   },
   {
+    id: 'live-hub.consent.dismiss', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'Incomplete source consent modal is visible', trigger: 'Learner closes or dismisses the consent modal',
+    expectedTransition: 'consent modal -> dismissed', sideEffect: 'Close modal state without API call',
+    errorStates: [], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
+  },
+  {
+    id: 'live-hub.consent.search-more', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'Incomplete source consent modal is visible', trigger: 'Learner chooses to search for additional authentic sources',
+    expectedTransition: 'consent modal -> search query / refresh trigger', sideEffect: 'Trigger grounded search query',
+    errorStates: ['network_failed'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
+  },
+  {
+    id: 'live-hub.consent.practice-available', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'Incomplete source has usable available components', trigger: 'Learner consents to practice only available portion without grading',
+    expectedTransition: 'consent modal -> practice view (isGradeable: false)', sideEffect: 'POST /api/live-hub/items/:id/practice with practice_available',
+    errorStates: ['artifact_unavailable'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
+  },
+  {
+    id: 'live-hub.consent.ai-fill-missing', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'Incomplete source is missing components', trigger: 'Learner approves AI fill for missing components',
+    expectedTransition: 'consent modal -> hybrid artifact / mock orchestrator', sideEffect: 'POST /api/live-hub/items/:id/practice or mock with ai_fill_missing',
+    errorStates: ['generation_unavailable', 'artifact_unavailable'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
+  },
+  {
+    id: 'live-hub.consent.create-ai-variant', module: 'live-hub', owner: 'ForecastLiveHub',
+    precondition: 'Source is incomplete or learner prefers independent AI variant', trigger: 'Learner requests an AI-generated variant referencing the source',
+    expectedTransition: 'consent modal -> pure AI artifact / mock orchestrator', sideEffect: 'POST /api/live-hub/items/:id/practice or mock with create_ai_variant',
+    errorStates: ['generation_unavailable', 'artifact_unavailable'], evidence: ['e2e/live-hub.spec.ts', 'e2e/live-hub-artifacts-api.spec.ts'],
+  },
+  {
     id: 'mock.exam', module: 'mock', owner: 'MockTestView',
     precondition: 'Mock module is visible', trigger: 'Learner builds, resumes, completes, or reviews a mock',
     expectedTransition: 'package -> attempt -> report -> history', sideEffect: 'Persist validated build and attempt',

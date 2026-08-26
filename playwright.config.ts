@@ -28,7 +28,12 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev',
     url: `${playwrightBaseUrl}/api/health`,
-    env: { ...process.env, PORT: String(playwrightPort), DISABLE_HMR: 'true' },
+    env: {
+      ...process.env,
+      PORT: String(playwrightPort),
+      DISABLE_HMR: 'true',
+      LIVE_HUB_RECEIPT_SECRET: process.env.LIVE_HUB_RECEIPT_SECRET || 'omni-e2e-live-hub-receipt-secret',
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

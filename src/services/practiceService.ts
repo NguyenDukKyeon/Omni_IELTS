@@ -40,6 +40,8 @@ import {
   RealExamForecastItem,
   LiveHubPracticeArtifact,
   LiveHubMockBuildResponse,
+  ConsentAction,
+  CompletenessCheckResult,
 } from '../types';
 import { validateMockPackage } from '../lib/mockPackageValidator';
 import { playVoiceText } from './voiceService';
@@ -388,15 +390,22 @@ export async function evaluateFullGraderApi(
 export async function createLiveHubPracticeArtifactApi(
   item: RealExamForecastItem,
   retrievedAt?: string | null,
+  consentAction?: ConsentAction,
 ): Promise<LiveHubPracticeArtifact> {
   const response = await fetch(`/api/live-hub/items/${encodeURIComponent(item.id)}/practice`, {
     method: 'POST',
     headers: getGeminiRequestHeaders(),
-    body: JSON.stringify({ item, retrievedAt }),
+    body: JSON.stringify({ item, retrievedAt, consentAction }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.artifact) {
-    throw new Error(body.error || `Không thể tạo bài luyện từ Live Hub (HTTP ${response.status}).`);
+    const err = new Error(body.error || `Không thể tạo bài luyện từ Live Hub (HTTP ${response.status}).`) as Error & {
+      code?: string;
+      completeness?: CompletenessCheckResult;
+    };
+    err.code = body.code;
+    err.completeness = body.completeness;
+    throw err;
   }
   await savePrivateArtifactIfAuthenticated('source', body.artifact, body.artifact.provenance).catch(() => false);
   return body.artifact as LiveHubPracticeArtifact;
@@ -406,15 +415,22 @@ export async function createLiveHubMockBuildApi(
   item: RealExamForecastItem,
   targetBand: number,
   retrievedAt?: string | null,
+  consentAction?: ConsentAction,
 ): Promise<LiveHubMockBuildResponse> {
   const response = await fetch(`/api/live-hub/items/${encodeURIComponent(item.id)}/mock`, {
     method: 'POST',
     headers: getGeminiRequestHeaders(),
-    body: JSON.stringify({ item, targetBand, retrievedAt }),
+    body: JSON.stringify({ item, targetBand, retrievedAt, consentAction }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.artifact || !body.mockBuild?.id) {
-    throw new Error(body.error || `Không thể tạo MockBuild từ Live Hub (HTTP ${response.status}).`);
+    const err = new Error(body.error || `Không thể tạo MockBuild từ Live Hub (HTTP ${response.status}).`) as Error & {
+      code?: string;
+      completeness?: CompletenessCheckResult;
+    };
+    err.code = body.code;
+    err.completeness = body.completeness;
+    throw err;
   }
   await savePrivateArtifactIfAuthenticated('source', body.artifact, body.artifact.provenance).catch(() => false);
   return body as LiveHubMockBuildResponse;

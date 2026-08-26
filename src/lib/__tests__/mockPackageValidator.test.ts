@@ -5,6 +5,8 @@ import {
   validateMockSkill,
   validateListeningSection,
   validateReadingPassage,
+  normalizeGeneratedQuestionMetadata,
+  expectedMockQuestionRange,
   validateSpeakingPart,
   validateMockSourcePreservation,
 } from '../mockPackageValidator';
@@ -36,6 +38,13 @@ const validSpeaking = {
 };
 
 describe('validateMockPackage', () => {
+  it('defines exact staged question counts for provider response schemas', () => {
+    expect(expectedMockQuestionRange('listening', 4)).toEqual({ start: 31, end: 40, count: 10 });
+    expect(expectedMockQuestionRange('reading', 1)).toEqual({ start: 1, end: 13, count: 13 });
+    expect(expectedMockQuestionRange('reading', 2)).toEqual({ start: 14, end: 26, count: 13 });
+    expect(expectedMockQuestionRange('reading', 3)).toEqual({ start: 27, end: 40, count: 14 });
+  });
+
   it('accepts only a complete ten-question Listening section with its assigned number range', () => {
     const section = {
       sectionNumber: 2,
@@ -72,6 +81,30 @@ describe('validateMockPackage', () => {
       ...passage,
       questions: passage.questions.slice(0, 13),
     })).toMatchObject({ ready: false, count: 13, code: 'count_invalid' });
+  });
+
+  it('normalizes generated question numbering without changing semantic content', () => {
+    const generated = {
+      passageNumber: 99,
+      title: 'Passage 1',
+      subtitle: 'An academic argument',
+      wordCount: 760,
+      paragraphs: [{ label: 'A', text: 'A sufficiently detailed academic paragraph.' }],
+      questions: Array.from({ length: 13 }, (_, index) => ({
+        ...question(index, 9),
+        prompt: `Generated prompt ${index + 1}`,
+        correctAnswer: `generated answer ${index + 1}`,
+      })),
+    };
+
+    const normalized = normalizeGeneratedQuestionMetadata('reading', 1, generated) as typeof generated;
+
+    expect(normalized.passageNumber).toBe(1);
+    expect(normalized.questions.map((item) => item.number)).toEqual(Array.from({ length: 13 }, (_, index) => index + 1));
+    expect(normalized.questions.every((item) => item.sectionIndex === 0)).toBe(true);
+    expect(normalized.questions[0].prompt).toBe('Generated prompt 1');
+    expect(normalized.questions[0].correctAnswer).toBe('generated answer 1');
+    expect(validateReadingPassage(1, normalized).ready).toBe(true);
   });
 
   it('rejects summary-only assembler output that cannot enter the exam room', () => {

@@ -19,6 +19,7 @@ import {
   Play,
   TrendingUp,
   FileCheck2,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   MockAssemblerPackage,
@@ -31,6 +32,7 @@ import {
 } from '../../services/practiceService';
 import { useApp } from '../../context/AppContext';
 import { XP_REWARDS } from '../../services/gamification';
+import { getContentOriginBadge } from '../../lib/contentOrigin';
 
 interface MockOrchestratorModalProps {
   isOpen: boolean;
@@ -102,7 +104,12 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
         setBuildProgress(state === 'building' ? `Đang tạo ${labels[skill]}${partLabel}…` : `${labels[skill]} đã đạt quality gate`);
       });
 
-      if (pendingSource) sessionStorage.removeItem('omni_pending_mock_source');
+      if (pendingSource) {
+        sessionStorage.removeItem('omni_pending_mock_source');
+      }
+      if (data.fullPackage && !data.fullPackage.origin) {
+        data.fullPackage.origin = data.fullPackage.provenance?.origin || (pendingSource ? 'source_plus_ai' : 'fully_ai_generated');
+      }
       setAssembledPackage(data);
       awardXP(XP_REWARDS.EXERCISE_COMPLETED, 'Lắp ráp bộ đề thi 4 kỹ năng với Mock Test Orchestrator');
     } catch (err: any) {
@@ -329,7 +336,19 @@ export const MockOrchestratorModal: React.FC<MockOrchestratorModalProps> = ({
                       <h4 className="text-lg sm:text-xl font-black text-white mt-0.5">
                         {assembledPackage.testTitle || 'Cambridge IELTS Custom Mock Exam'}
                       </h4>
-                      <p className="text-xs text-slate-300">Mã đề: {assembledPackage.testId}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-xs text-slate-300">Mã đề: {assembledPackage.testId}</p>
+                        {(() => {
+                          const origin = assembledPackage.fullPackage?.origin || assembledPackage.origin || 'fully_ai_generated';
+                          const badge = getContentOriginBadge(origin, 'mock', assembledPackage.fullPackage?.provenance?.evidenceType);
+                          return (
+                            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${badge.badgeClass}`}>
+                              <ShieldCheck className="w-3 h-3" />
+                              {badge.labelVi}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     <button data-ux-flow="mock.exam"

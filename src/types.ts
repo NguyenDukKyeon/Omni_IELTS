@@ -257,6 +257,9 @@ export interface ReadingPracticeExercise {
   difficulty: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.5+';
   targetTimeMinutes: number;
   instructionsVi: string;
+  origin?: ContentOrigin;
+  provenance?: LiveHubArtifactProvenance;
+  isGradeable?: boolean;
   passage: {
     title: string;
     paragraphs: Array<{
@@ -297,8 +300,13 @@ export interface ListeningPracticeExercise {
   section: 'Section 1 (Social/Form)' | 'Section 2 (Monologue/Map)' | 'Section 3 (Academic Discussion)' | 'Section 4 (Academic Lecture)';
   targetTimeMinutes: number;
   instructionsVi: string;
+  origin?: ContentOrigin;
+  provenance?: LiveHubArtifactProvenance;
+  isGradeable?: boolean;
   wordLimit?: string; // e.g. "NO MORE THAN TWO WORDS AND/OR A NUMBER"
   audioTranscript: string;
+  audioUrl?: string;
+  audioBase64?: string;
   audioSpeakers?: Array<{ role: string; name: string }>;
   // Dành riêng cho Map / Plan / Diagram Labelling
   mapDiagramData?: {
@@ -345,6 +353,9 @@ export interface WritingPracticePrompt {
   targetWords: number; // 150 for Task 1, 250 for Task 2
   timeLimitMinutes: number; // 20 or 40
   promptStatement: string;
+  origin?: ContentOrigin;
+  provenance?: LiveHubArtifactProvenance;
+  isGradeable?: boolean;
   academicChartData?: {
     type: 'bar' | 'line' | 'pie' | 'table' | 'process' | 'map';
     labels: string[];
@@ -420,6 +431,9 @@ export interface SpeakingPracticePrompt {
   title: string;
   topic: string;
   difficulty: 'Band 5.5-6.5' | 'Band 7.0-8.0' | 'Band 8.5+';
+  origin?: ContentOrigin;
+  provenance?: LiveHubArtifactProvenance;
+  isGradeable?: boolean;
   // Cho Part 1 & 3
   questions?: Array<{
     id: string;
@@ -853,6 +867,8 @@ export interface FullMockTestPackage {
   difficulty: 'IELTS-style Standard' | 'Hard (Band 7.5 - 8.5+)' | 'Diagnostic Standard';
   description: string;
   estimatedMinutes: number; // ~170 mins
+  origin?: ContentOrigin;
+  isGradeable?: boolean;
   provenance?: LiveHubArtifactProvenance & { sourceArtifactId?: string };
   // 1. Listening
   listening: {
@@ -862,6 +878,15 @@ export interface FullMockTestPackage {
       sectionNumber: number;
       title: string;
       context: string;
+      audioUrl?: string;
+      audioBase64?: string;
+      mediaUrl?: string;
+      audioArtifact?: {
+        audioUrl?: string;
+        audioBase64?: string;
+        isValidated?: boolean;
+        status?: 'validated' | 'invalid' | 'truncated' | 'pending';
+      };
       audioScriptExcerpt: string;
       instructionsVi: string;
       questions: FullMockTestQuestion[];
@@ -1277,6 +1302,8 @@ export interface RealExamForecastItem {
   evidenceType?: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice';
   citations?: ClaimCitation[];
   enrichmentStatus?: 'not_requested' | 'loading' | 'ready' | 'unavailable';
+  origin?: ContentOrigin;
+  sourceReceipt?: string;
 }
 
 export interface ForecastGroundingResponse {
@@ -1297,33 +1324,207 @@ export interface ForecastGroundingResponse {
   failure?: ApiFailure;
 }
 
-export interface LiveHubArtifactProvenance {
-  sourceItemId: string;
-  evidenceType: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice';
+export type ContentOrigin = 'authentic_source' | 'source_plus_ai' | 'fully_ai_generated';
+
+export type ConsentAction =
+  | 'direct'
+  | 'search_more'
+  | 'practice_available'
+  | 'ai_fill_missing'
+  | 'create_ai_variant';
+
+export interface ComponentProvenance {
+  origin: ContentOrigin;
+  sourceItemId?: string;
   sourceTitle?: string | null;
   sourceUrl?: string | null;
   citationUrls?: string[];
   retrievedAt?: string | null;
+  evidenceType?: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice' | 'ai_generated';
+  aiMetadata?: {
+    model?: string;
+    generatedAt?: string;
+    taskTier?: string;
+    promptVersion?: string;
+    fillReason?: string;
+  };
 }
+
+export interface CompletenessCheckResult {
+  isComplete: boolean;
+  gradeable: boolean;
+  missingComponents: string[];
+  availableComponents: string[];
+  summaryVi: string;
+  actionOptions: Array<'search_more' | 'practice_available' | 'ai_fill_missing' | 'create_ai_variant'>;
+}
+
+export interface LiveHubArtifactProvenance {
+  sourceItemId: string;
+  evidenceType: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice' | 'ai_generated';
+  sourceTitle?: string | null;
+  sourceUrl?: string | null;
+  citationUrls?: string[];
+  retrievedAt?: string | null;
+  origin?: ContentOrigin;
+  aiMetadata?: {
+    model?: string;
+    generatedAt?: string;
+    taskTier?: string;
+    promptVersion?: string;
+    filledComponents?: string[];
+    fillReason?: string;
+    derivedFromSourceId?: string;
+  };
+  components?: Record<string, ComponentProvenance>;
+}
+
+export type LiveHubLearningSkill =
+  | 'writing'
+  | 'writing_task1'
+  | 'writing_task2'
+  | 'speaking'
+  | 'speaking_part1'
+  | 'speaking_part2'
+  | 'speaking_part3'
+  | 'reading'
+  | 'listening';
+
+export interface BaseLiveHubLearningItem {
+  id: string;
+  title: string;
+  skill: LiveHubLearningSkill;
+  council?: string;
+  councilLabel?: string;
+  examDate?: string;
+  topicDomain?: string;
+  subCategory?: string;
+  evidenceType?: 'verified_report' | 'reported_recall' | 'forecast' | 'derived_practice' | 'ai_generated';
+  trendStatus?: 'recent_real_exam' | 'quarter_forecast' | 'hot_trend' | 'high_frequency';
+  trendBadge?: string;
+  groundingSourceTitle?: string;
+  groundingSourceUrl?: string;
+  citations?: ClaimCitation[];
+  isComplete?: boolean;
+  missingComponents?: string[];
+  availableComponents?: string[];
+  origin?: ContentOrigin;
+  sourceReceipt?: string;
+}
+
+export interface WritingLiveHubItem extends BaseLiveHubLearningItem {
+  skill: 'writing' | 'writing_task1' | 'writing_task2';
+  promptStatement?: string;
+  task1?: { prompt?: string; minWords?: number; suggestedMinutes?: number; category?: string };
+  task2?: { prompt?: string; minWords?: number; suggestedMinutes?: number; category?: string };
+}
+
+export interface SpeakingLiveHubItem extends BaseLiveHubLearningItem {
+  skill: 'speaking' | 'speaking_part1' | 'speaking_part2' | 'speaking_part3';
+  promptStatement?: string;
+  cueCardPoints?: string[];
+  cueCard?: { topic?: string; prompt?: string; bulletPoints?: string[]; prepTimeSeconds?: number; speakTimeSeconds?: number };
+  questions?: Array<string | { id?: string; question?: string; prompt?: string }>;
+}
+
+export interface ReadingLiveHubItem extends BaseLiveHubLearningItem {
+  skill: 'reading';
+  promptStatement?: string;
+  passage?: {
+    title?: string;
+    subtitle?: string;
+    wordCount?: number;
+    paragraphs?: Array<{ label: string; text: string }>;
+    text?: string;
+  };
+  questions?: Array<{
+    id?: string;
+    number?: number;
+    questionNumber?: number;
+    sectionIndex?: number;
+    type?: string;
+    prompt?: string;
+    statementOrQuestion?: string;
+    correctAnswer?: string;
+    explanationVi?: string;
+    options?: string[];
+  }>;
+}
+
+export interface ListeningLiveHubItem extends BaseLiveHubLearningItem {
+  skill: 'listening';
+  promptStatement?: string;
+  audioUrl?: string;
+  audioBase64?: string;
+  mediaUrl?: string;
+  audioTranscript?: string;
+  audioArtifact?: {
+    audioUrl?: string;
+    audioBase64?: string;
+    isValidated?: boolean;
+    status?: 'validated' | 'invalid' | 'truncated' | 'pending';
+  };
+  sections?: Array<{
+    sectionNumber?: number;
+    title?: string;
+    context?: string;
+    audioUrl?: string;
+    audioBase64?: string;
+    mediaUrl?: string;
+    audioArtifact?: {
+      audioUrl?: string;
+      audioBase64?: string;
+      isValidated?: boolean;
+      status?: 'validated' | 'invalid' | 'truncated' | 'pending';
+    };
+    audioScriptExcerpt?: string;
+    instructionsVi?: string;
+    questions?: FullMockTestQuestion[];
+  }>;
+  questions?: Array<{
+    id?: string;
+    number?: number;
+    questionNumber?: number;
+    sectionIndex?: number;
+    type?: string;
+    prompt?: string;
+    correctAnswer?: string;
+    explanationVi?: string;
+    options?: string[];
+  }>;
+}
+
+export type LiveHubLearningItem =
+  | WritingLiveHubItem
+  | SpeakingLiveHubItem
+  | ReadingLiveHubItem
+  | ListeningLiveHubItem;
 
 export interface LiveHubPracticeArtifact {
   id: string;
   kind: 'derived_practice';
-  skill: RealExamSkillType;
+  skill: LiveHubLearningSkill;
   prompt: string;
-  sourceItem: RealExamForecastItem;
+  sourceItem?: LiveHubLearningItem | RealExamForecastItem;
   provenance: LiveHubArtifactProvenance;
   createdAt: string;
+  isGradeable?: boolean;
+  status?: 'ready' | 'draft_generation_required' | 'available_portion_only';
+  requiresGeneration?: boolean;
+  completeness?: CompletenessCheckResult;
 }
 
 export interface LiveHubMockArtifact {
   id: string;
   kind: 'derived_mock_section';
-  skill: RealExamSkillType;
-  sourceItem: RealExamForecastItem;
+  skill: LiveHubLearningSkill;
+  sourceItem?: LiveHubLearningItem | RealExamForecastItem;
   requiresPreview: boolean;
   provenance: LiveHubArtifactProvenance;
   createdAt: string;
+  status?: 'ready' | 'draft_generation_required';
+  requiresGeneration?: boolean;
+  completeness?: CompletenessCheckResult;
 }
 
 export interface LiveHubMockBuildResponse {
@@ -1333,6 +1534,8 @@ export interface LiveHubMockBuildResponse {
     status: 'draft' | 'generating' | 'validating' | 'repairing' | 'ready' | 'failed';
     skillStates: Record<'listening' | 'reading' | 'writing' | 'speaking', 'pending' | 'ready'>;
     createdAt: string;
+    provenance?: LiveHubArtifactProvenance;
+    sourceMode?: 'preserve' | 'lineage_only';
   };
 }
 
@@ -1963,6 +2166,7 @@ export interface MockAssemblerPackage {
   fullPackage?: FullMockTestPackage;
   validation?: MockValidationReport;
   mockBuildId?: string;
+  origin?: ContentOrigin;
 }
 
 export interface AiTaskProfile {
