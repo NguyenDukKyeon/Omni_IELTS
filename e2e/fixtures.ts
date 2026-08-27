@@ -8,7 +8,12 @@ export const test = base.extend<UxProofFixtures>({
   expectedConsoleErrors: [[], { option: true }],
   page: async ({ page, expectedConsoleErrors }, use) => {
     const runtimeErrors: string[] = [];
-    page.on('pageerror', (error) => runtimeErrors.push(`pageerror: ${error.message}`));
+    page.on('pageerror', (error) => {
+      const rendered = `pageerror: ${error.message}`;
+      if (!expectedConsoleErrors.some((expected) => rendered.includes(expected))) {
+        runtimeErrors.push(rendered);
+      }
+    });
     page.on('console', (message) => {
       if (message.type() === 'error') {
         const location = message.location();

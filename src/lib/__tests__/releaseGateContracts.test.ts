@@ -148,6 +148,24 @@ describe('public beta release gate and CI contracts', () => {
       expect(ensure).toContain('LiveKit agent worker registration');
     });
 
+    it('implements a real speaking room error boundary without aliasing react in tsconfig', () => {
+      const tsconfig = readFileSync(resolve(root, 'tsconfig.json'), 'utf8');
+      const moduleSource = readFileSync(resolve(root, 'src/components/practice/SpeakingQuestionModule.tsx'), 'utf8');
+      const roomSource = readFileSync(resolve(root, 'src/components/speaking/SpeakingRealtimeRoom.tsx'), 'utf8');
+      const spec = readFileSync(resolve(root, 'e2e/speaking-realtime.spec.ts'), 'utf8');
+
+      expect(tsconfig).not.toContain('"./node_modules/react"');
+      expect(tsconfig).not.toContain('"./node_modules/react-dom"');
+      expect(moduleSource).toContain('class SpeakingRoomErrorBoundary extends React.Component');
+      expect(moduleSource).toContain('static getDerivedStateFromError');
+      expect(moduleSource).toContain('this.props.onFallback');
+      expect(moduleSource).not.toMatch(/function SpeakingRoomErrorBoundary\(\{ children \}/);
+      expect(roomSource).toContain('shouldThrowAfterSpeakingRoomLoad');
+      expect(spec).toContain('switch-to-turn-based-from-room-error');
+      expect(spec).toContain('SPEAKING_ROOM_RENDER_THROW_QUERY');
+      expect(spec).toContain('lazy room render error recovery');
+    });
+
     it('runs live canary on scheduled/manual triggers with configured secrets', () => {
       const canaryWorkflow = readFileSync(resolve(root, '.github/workflows/live-provider-canary.yml'), 'utf8');
 

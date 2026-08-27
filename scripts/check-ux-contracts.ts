@@ -35,6 +35,7 @@ const REQUIRED_SPEAKING_CONTROL_MAPPINGS: Record<string, string> = {
   'switch-to-turn-based-from-permission': 'speaking.realtime',
   'switch-to-turn-based-from-quota': 'speaking.realtime',
   'switch-to-turn-based-from-provider': 'speaking.realtime',
+  'switch-to-turn-based-from-room-error': 'speaking.realtime',
   'microphone-permission': 'speaking.realtime',
   'begin-recording': 'speaking.realtime',
   'retry-provider': 'speaking.realtime',

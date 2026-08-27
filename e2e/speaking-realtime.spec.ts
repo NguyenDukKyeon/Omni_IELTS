@@ -1,5 +1,9 @@
 import { expect, test } from './fixtures';
 import { navigateToModule } from './helpers/navigation';
+import {
+  SPEAKING_ROOM_RENDER_THROW_MESSAGE,
+  SPEAKING_ROOM_RENDER_THROW_QUERY,
+} from '../src/lib/speakingRoomLoadProbe';
 
 const sessionStub = (overrides: Record<string, unknown> = {}) => ({
   id: 'sess-1',
@@ -342,4 +346,27 @@ test('completing all parts shows a report with unavailable acoustic metrics when
   await page.locator('[data-ux-control="end-exam"]').isVisible().catch(() => false);
   await page.locator('[data-ux-control="restart-exam"]').click();
   await expect(page.locator('[data-ux-control="start-realtime-session"]')).toBeVisible();
+});
+
+test.describe('lazy room render error recovery', () => {
+  test.use({
+    expectedConsoleErrors: [
+      SPEAKING_ROOM_RENDER_THROW_MESSAGE,
+      'The above error occurred',
+    ],
+  });
+
+  test('a render throw after the lazy room loads shows turn-based recovery', async ({ page }) => {
+    await page.goto(`/?${SPEAKING_ROOM_RENDER_THROW_QUERY}=1`);
+    await navigateToModule(page, 'practice');
+    await page.getByRole('button', { name: /IELTS Speaking/ }).click();
+    const recovery = page.locator('[data-ux-control="switch-to-turn-based-from-room-error"]');
+    await expect(recovery).toBeVisible();
+    await expect(page.getByText(/Không tải được phòng realtime/)).toBeVisible();
+    await expect(page.getByText(/Đây không phải realtime/)).toBeVisible();
+    await expect(page.locator('#ai_speaking_realtime_room')).toHaveCount(0);
+    await recovery.click();
+    await expect(page.getByText(/Speaking Part 1: Hỏi đáp ngắn/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Luyện Từng Dạng Bài/ })).toBeVisible();
+  });
 });

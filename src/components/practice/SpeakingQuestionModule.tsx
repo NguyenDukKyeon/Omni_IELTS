@@ -44,24 +44,51 @@ const SpeakingRealtimeRoom = React.lazy(async () => {
   }
 });
 
-type SpeakingRoomErrorBoundaryProps = {
-  children: React.ReactNode;
-  onFallback: () => void;
-};
-
 function SpeakingRealtimeUnavailable({ onFallback }: { onFallback: () => void }) {
   return (
     <div data-ux-state="fallback" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm">
       Không tải được phòng realtime. Đây không phải realtime.
-      <button data-ux-flow="practice.skills" type="button" onClick={onFallback} className="ml-2 font-bold underline">
+      <button
+        data-ux-flow="practice.skills"
+        data-ux-control="switch-to-turn-based-from-room-error"
+        type="button"
+        onClick={onFallback}
+        className="ml-2 font-bold underline"
+      >
         Luyện từng phần
       </button>
     </div>
   );
 }
 
-function SpeakingRoomErrorBoundary({ children }: SpeakingRoomErrorBoundaryProps) {
-  return children;
+type SpeakingRoomErrorBoundaryProps = {
+  children: React.ReactNode;
+  onFallback: () => void;
+};
+
+type SpeakingRoomErrorBoundaryState = {
+  failed: boolean;
+};
+
+class SpeakingRoomErrorBoundary extends React.Component<SpeakingRoomErrorBoundaryProps, SpeakingRoomErrorBoundaryState> {
+  declare props: SpeakingRoomErrorBoundaryProps;
+  declare state: SpeakingRoomErrorBoundaryState;
+
+  constructor(props: SpeakingRoomErrorBoundaryProps) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError(): SpeakingRoomErrorBoundaryState {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) {
+      return <SpeakingRealtimeUnavailable onFallback={this.props.onFallback} />;
+    }
+    return this.props.children;
+  }
 }
 
 const SPEAKING_PARTS: Array<{

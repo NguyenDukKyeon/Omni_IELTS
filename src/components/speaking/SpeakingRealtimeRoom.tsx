@@ -44,6 +44,10 @@ import {
 import { evaluateSpeakingLiveAudioApi, speakExaminerText } from '../../services/practiceService';
 import { calculateSpeakingTelemetry } from '../../lib/speakingTelemetry';
 import { useApp } from '../../context/AppContext';
+import {
+  SPEAKING_ROOM_RENDER_THROW_MESSAGE,
+  shouldThrowAfterSpeakingRoomLoad,
+} from '../../lib/speakingRoomLoadProbe';
 
 const PART_LABELS: Record<string, string> = {
   part_1: 'Part 1 · Hỏi đáp ngắn',
@@ -402,6 +406,10 @@ export const SpeakingRealtimeRoom: React.FC<RoomProps> = ({ onBackToPractice }) 
     || state === 'fallback_turn_based';
   const showExam = ['part_1', 'part_2_preparation', 'part_2_speaking', 'part_3', 'fallback_turn_based'].includes(state);
   const examPart = examPartFromState(state) || heldPartRef.current;
+
+  if (typeof window !== 'undefined' && shouldThrowAfterSpeakingRoomLoad(window.location.search)) {
+    throw new Error(SPEAKING_ROOM_RENDER_THROW_MESSAGE);
+  }
 
   return (
     <div id="ai_speaking_realtime_room" data-ux-state={state} className="space-y-6 pb-12">
