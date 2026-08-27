@@ -244,8 +244,9 @@ test('Live Hub practice-available action creates an ungradeable artifact and ope
   await page.locator('[data-ux-control="live-hub.consent.practice-available-button"]').click();
   await expect(page.locator('div[role="dialog"]')).not.toBeVisible();
   await expect.poll(() => practiceRequest?.consentAction).toBe('practice_available');
-  const storedArtifact = await page.evaluate(() => JSON.parse(sessionStorage.getItem('omni_pending_practice_artifact') || 'null'));
-  expect(storedArtifact).toMatchObject({
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    sessionStorage.getItem('omni_pending_practice_artifact') || 'null',
+  ))).toMatchObject({
     id: 'practice_available_artifact',
     status: 'available_portion_only',
     isGradeable: false,

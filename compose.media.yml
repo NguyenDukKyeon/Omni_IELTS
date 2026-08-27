@@ -19,6 +19,7 @@ services:
         condition: service_started
       bifrost:
         condition: service_healthy
+    restart: unless-stopped
 
   bifrost:
     image: maximhq/bifrost:v1.6.11@sha256:a0f3e53c0558846ae3103a90de1c2be312ae646c76566af885e200b5f9f9edf7
@@ -50,6 +51,7 @@ services:
       - "127.0.0.1:4416:4416"
     expose:
       - "4416"
+    restart: unless-stopped
 
   gemini-web2api:
     profiles: ["private-web-bridge"]
