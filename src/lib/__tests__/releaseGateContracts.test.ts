@@ -129,6 +129,25 @@ describe('public beta release gate and CI contracts', () => {
       expect(qualityWorkflow).not.toMatch(/check:canary:live/);
     });
 
+    it('starts the LiveKit agent worker with a matching redeem URL and fails if it does not register', () => {
+      const canaryWorkflow = readFileSync(resolve(root, '.github/workflows/live-provider-canary.yml'), 'utf8');
+      const ensure = readFileSync(resolve(root, 'scripts/ensure-livekit-speaking-stack.mjs'), 'utf8');
+
+      expect(canaryWorkflow).toContain('node scripts/ensure-livekit-speaking-stack.mjs');
+      expect(canaryWorkflow).toContain('docker compose -f compose.media.yml up -d bgutil-provider');
+      expect(canaryWorkflow).toContain('PLAYWRIGHT_LIVE_PORT: 3200');
+      expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_ENABLED');
+      expect(ensure).toContain("spawnNpm('livekit:agent'");
+      expect(ensure).toContain('/api/livekit/credentials/redeem');
+      expect(ensure).toContain('registered worker');
+      expect(ensure).toContain('Refusing to fake a pass');
+      expect(ensure).toContain('PLAYWRIGHT_LIVE_PORT || env.PORT || 3200');
+      expect(ensure).toContain('OMNI_AGENT_REDEEM_URL');
+      expect(ensure).toContain("stdio: ['ignore', fd, fd]");
+      expect(ensure).toContain('detached: true');
+      expect(ensure).toContain('LiveKit agent worker registration');
+    });
+
     it('runs live canary on scheduled/manual triggers with configured secrets', () => {
       const canaryWorkflow = readFileSync(resolve(root, '.github/workflows/live-provider-canary.yml'), 'utf8');
 
@@ -145,8 +164,7 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryWorkflow).toContain('OMNI_SPEAKING_CANARY_TOKEN: ${{ secrets.OMNI_SPEAKING_CANARY_TOKEN }}');
       expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_ENABLED');
       expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_API_KEY');
-    });
-  });
+    });  });
 
   describe('live canary truthfulness contract', () => {
     it('hard-fails when Web Bridge credentials are not configured', () => {
@@ -170,6 +188,11 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryCode).toContain('quota_exhausted');
       expect(canaryCode).toContain('Examiner');
       expect(canaryCode).toContain('fallback_turn_based');
+      expect(canaryCode).toContain('speaking-canary-hometown.wav');
+      expect(canaryCode).toContain('My hometown is a quiet coastal city.');
+      expect(canaryCode).toContain('learnerAudioBytes');
+      expect(canaryCode).toContain('learnerAudioFrames');
+      expect(canaryCode).toContain('ensureLivekitSpeakingStack');
     });
   });
 

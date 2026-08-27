@@ -65,9 +65,11 @@ export function parseAgentJobMetadata(raw: string | undefined): AgentJobMetadata
 }
 
 export function resolveAgentRuntime(env: NodeJS.ProcessEnv) {
+  const port = env.PORT || env.PLAYWRIGHT_LIVE_PORT || 3000;
+  const base = (env.OMNI_CANARY_BASE_URL || env.PLAYWRIGHT_LIVE_BASE_URL || `http://127.0.0.1:${port}`).replace(/\/$/, '');
   return {
-    redeemUrl: (env.OMNI_AGENT_REDEEM_URL || `http://127.0.0.1:${env.PORT || 3000}/api/livekit/credentials/redeem`).replace(/\/$/, ''),
-    eventUrl: (env.OMNI_AGENT_EVENT_URL || `http://127.0.0.1:${env.PORT || 3000}/api/livekit/session`).replace(/\/$/, ''),
+    redeemUrl: (env.OMNI_AGENT_REDEEM_URL || `${base}/api/livekit/credentials/redeem`).replace(/\/$/, ''),
+    eventUrl: (env.OMNI_AGENT_EVENT_URL || `${base}/api/livekit/session`).replace(/\/$/, ''),
     agentSecret: env.LIVEKIT_AGENT_INTERNAL_SECRET || env.LIVEKIT_API_SECRET || '',
     model: env.GEMINI_LIVE_MODEL || GEMINI_LIVE_MODEL,
   };
@@ -108,6 +110,12 @@ async function runWorker() {
   const runtime = resolveAgentRuntime(process.env);
   if (!runtime.agentSecret) {
     process.stderr.write('[omni-speaking-agent] LIVEKIT_AGENT_INTERNAL_SECRET or LIVEKIT_API_SECRET is required\n');
+    process.exit(1);
+  }
+
+  process.stdout.write(`[omni-speaking-agent] redeemUrl=${runtime.redeemUrl}\n`);
+  if (/AIza|geminiApiKey/i.test(runtime.redeemUrl)) {
+    process.stderr.write('[omni-speaking-agent] redeem URL must not contain a provider key\n');
     process.exit(1);
   }
 

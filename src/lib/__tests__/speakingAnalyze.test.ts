@@ -28,4 +28,34 @@ describe('speaking analyze contract', () => {
     expect(result.persist).toBe(true);
     expect(result.telemetry.acousticStatus).toBe('measured');
   });
+
+  it('uses canonical totalDurationSeconds 5.5s from two turns, not 11s', () => {
+    const result = interpretSpeakingAnalyzeRequest({
+      fullAudioBase64: 'A'.repeat(80),
+      conversationHistory: [
+        { part: 'part_1', userTranscript: 'My hometown is quiet', durationSeconds: 2 },
+        { part: 'part_1', userTranscript: 'It is a coastal city', durationSeconds: 3.5 },
+      ],
+      totalDurationSeconds: 5.5,
+      speechSegments: [{ start: 0, end: 1.6 }, { start: 2.1, end: 4.9 }],
+      consentStorage: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.request?.totalDurationSeconds).toBe(5.5);
+    expect(result.telemetry.rawWpm).toBe(Math.round((9 / 5.5) * 60));
+    expect(result.persist).toBe(false);
+
+    const doubled = interpretSpeakingAnalyzeRequest({
+      fullAudioBase64: 'A'.repeat(80),
+      conversationHistory: [
+        { part: 'part_1', userTranscript: 'My hometown is quiet', durationSeconds: 2 },
+        { part: 'part_1', userTranscript: 'It is a coastal city', durationSeconds: 3.5 },
+      ],
+      totalDurationSeconds: 11,
+      speechSegments: [{ start: 0, end: 1.6 }, { start: 2.1, end: 4.9 }],
+      consentStorage: false,
+    });
+    expect(doubled.telemetry.rawWpm).toBe(Math.round((9 / 11) * 60));
+    expect(result.telemetry.rawWpm).toBeGreaterThan(doubled.telemetry.rawWpm);
+  });
 });

@@ -29,8 +29,8 @@ import {
   resolveGeminiLiveVoiceId,
 } from '../../lib/speakingExamProtocol';
 import {
-  concatenateTurnAudio,
-  blobToBase64,
+  composeSpeakingTurnsForAnalysis,
+  canonicalExamDurationSeconds,
   measuredDurationSeconds,
   measureSpeechSegmentsFromBlob,
   releaseMedia,
@@ -291,27 +291,22 @@ export const SpeakingRealtimeRoom: React.FC<RoomProps> = ({ onBackToPractice }) 
 
   const finalizeExam = async () => {
     const audioTurns = turnAudioRef.current;
-    const combined = await concatenateTurnAudio(audioTurns);
-    const totalDuration = turns.reduce((sum, turn) => sum + turn.durationSeconds, 0)
-      + audioTurns.reduce((sum, turn) => sum + turn.durationSeconds, 0);
-    if (!combined) {
+    const composed = await composeSpeakingTurnsForAnalysis(audioTurns);
+    const durationSeconds = canonicalExamDurationSeconds(
+      composed,
+      audioTurns.length ? audioTurns : turns,
+    );
+    if (!composed.audioBase64) {
       setTelemetryLabel('unavailable');
-      applyState('completed', 'Buổi thi đã kết thúc. Các chỉ số acoustic đang unavailable vì không có audio thật.');
+      applyState('completed', 'Buổi thi đã kết thúc. Các chỉ số acoustic đang unavailable vì không decode đủ audio thật của mọi lượt.');
+      turnAudioRef.current = [];
       if (sessionId) await endLivekitSession(sessionId).catch(() => undefined);
       return;
     }
     try {
-      const base64 = await blobToBase64(combined.blob);
-      const speechSegments = audioTurns.flatMap((turn, index) => {
-        const offset = audioTurns.slice(0, index).reduce((sum, item) => sum + item.durationSeconds, 0);
-        return (turn.speechSegments || []).map((segment) => ({
-          start: segment.start + offset,
-          end: segment.end + offset,
-        }));
-      });
       const report = await evaluateSpeakingLiveAudioApi({
-        fullAudioBase64: base64,
-        mimeType: combined.mimeType,
+        fullAudioBase64: composed.audioBase64,
+        mimeType: composed.mimeType,
         conversationHistory: turns.map((turn, index) => ({
           turnIndex: index,
           part: turn.part,
@@ -319,18 +314,18 @@ export const SpeakingRealtimeRoom: React.FC<RoomProps> = ({ onBackToPractice }) 
           userTranscript: turn.answer,
           durationSeconds: turn.durationSeconds,
         })),
-        totalDurationSeconds: totalDuration,
-        speechSegments: speechSegments.length ? speechSegments : null,
+        totalDurationSeconds: durationSeconds,
+        speechSegments: composed.acousticStatus === 'measured' ? composed.speechSegments : null,
         consentStorage,
         sessionId: sessionId || undefined,
       });
-      setTelemetryLabel(report.telemetry?.acousticStatus || 'measured');
+      setTelemetryLabel(report.telemetry?.acousticStatus || composed.acousticStatus);
       awardXP(80, 'Hoàn thành phòng thi Speaking');
     } catch {
       setTelemetryLabel(calculateSpeakingTelemetry({
         transcript: turns.map((turn) => turn.answer).join(' '),
-        durationSeconds: totalDuration,
-        speechSegments: null,
+        durationSeconds,
+        speechSegments: composed.acousticStatus === 'measured' ? composed.speechSegments : null,
       }).acousticStatus);
     } finally {
       turnAudioRef.current = [];

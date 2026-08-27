@@ -29,7 +29,7 @@ export default defineConfig({
       LIVE_HUB_RECEIPT_SECRET: process.env.LIVE_HUB_RECEIPT_SECRET || 'omni-live-canary-receipt-secret',
       YT_DLP_POT_PROVIDER_URL: process.env.PLAYWRIGHT_YT_DLP_POT_PROVIDER_URL || 'http://127.0.0.1:4416',
     },
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 60_000,
   } : undefined,
 });

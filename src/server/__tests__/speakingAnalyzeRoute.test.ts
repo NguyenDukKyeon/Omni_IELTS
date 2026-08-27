@@ -97,4 +97,32 @@ describe('speaking analyze identity and consent', () => {
     expect(body.persisted).toBe(false);
     expect(artifacts.list('sess-anon')).toHaveLength(0);
   });
+
+  it('receives canonical 5.5s totalDurationSeconds from two recorded turns, not 11s', async () => {
+    const artifacts = new SpeakingArtifactStore(() => 1);
+    const origin = await listen(appWith(artifacts));
+    const response = await fetch(`${origin}/api/speaking/analyze`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${CANARY}`,
+      },
+      body: JSON.stringify({
+        fullAudioBase64: 'A'.repeat(80),
+        conversationHistory: [
+          { part: 'part_1', userTranscript: 'My hometown is quiet', durationSeconds: 2 },
+          { part: 'part_1', userTranscript: 'It is a coastal city', durationSeconds: 3.5 },
+        ],
+        totalDurationSeconds: 5.5,
+        speechSegments: [{ start: 0, end: 1.6 }, { start: 2.1, end: 4.9 }],
+        consentStorage: false,
+        sessionId: 'sess-duration',
+      }),
+    });
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.telemetry.rawWpm).toBe(Math.round((9 / 5.5) * 60));
+    expect(body.telemetry.rawWpm).not.toBe(Math.round((9 / 11) * 60));
+    expect(artifacts.list('sess-duration')).toHaveLength(0);
+  });
 });

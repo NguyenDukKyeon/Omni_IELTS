@@ -1,4 +1,8 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { ensureLivekitSpeakingStack, resolveSpeakingStackTarget } from './ensure-livekit-speaking-stack.mjs';
 
 dotenv.config({ quiet: true });
 
@@ -7,12 +11,17 @@ const apiKey = process.env.LIVEKIT_API_KEY?.trim();
 const apiSecret = process.env.LIVEKIT_API_SECRET?.trim();
 const geminiKey = process.env.GEMINI_API_KEY?.trim();
 const canaryToken = process.env.OMNI_SPEAKING_CANARY_TOKEN?.trim();
-const appBaseUrl = (process.env.OMNI_CANARY_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
 const forceFallback = process.env.OMNI_SPEAKING_CANARY_FORCE_FALLBACK === 'true';
 
 if (!url || !apiKey || !apiSecret || !geminiKey || !canaryToken) {
   throw new Error('LiveKit speaking canary is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, GEMINI_API_KEY, and OMNI_SPEAKING_CANARY_TOKEN. Refusing to fake a pass.');
 }
+
+if (process.env.OMNI_SPEAKING_CANARY_SKIP_STACK !== 'true') {
+  await ensureLivekitSpeakingStack(process.env);
+}
+
+const appBaseUrl = resolveSpeakingStackTarget(process.env).appBaseUrl;
 
 function assertNoKeyLeak(label, value) {
   const serialized = typeof value === 'string' ? value : JSON.stringify(value);
@@ -37,17 +46,47 @@ function isAudioKind(rtc, kind) {
   return kind === rtc.TrackKind?.KIND_AUDIO || kind === 'audio' || kind === 1;
 }
 
-function synthesizeSpeechLikePcm(sampleRate, seconds) {
-  const samples = new Int16Array(sampleRate * seconds);
-  for (let index = 0; index < samples.length; index += 1) {
-    const t = index / sampleRate;
-    const syllable = 0.5 + 0.5 * Math.sin(2 * Math.PI * 4 * t);
-    const formant = Math.sin(2 * Math.PI * 220 * t) * 0.45
-      + Math.sin(2 * Math.PI * 880 * t) * 0.25
-      + Math.sin(2 * Math.PI * 1400 * t) * 0.15;
-    samples[index] = Math.round(formant * syllable * 18_000);
+function decodeWavPcm16(bytes) {
+  if (bytes.length < 44) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (offset, length) => String.fromCharCode(...bytes.subarray(offset, offset + length));
+  if (ascii(0, 4) !== 'RIFF' || ascii(8, 4) !== 'WAVE') return null;
+  let offset = 12;
+  let sampleRate = 0;
+  let dataOffset = -1;
+  let dataSize = 0;
+  while (offset + 8 <= bytes.length) {
+    const id = ascii(offset, 4);
+    const size = view.getUint32(offset + 4, true);
+    const start = offset + 8;
+    if (id === 'fmt ') {
+      if (view.getUint16(start, true) !== 1 || view.getUint16(start + 2, true) !== 1 || view.getUint16(start + 14, true) !== 16) {
+        return null;
+      }
+      sampleRate = view.getUint32(start + 4, true);
+    } else if (id === 'data') {
+      dataOffset = start;
+      dataSize = size;
+      break;
+    }
+    offset = start + size + (size % 2);
   }
-  return samples;
+  if (dataOffset < 0 || !sampleRate) return null;
+  const frameCount = Math.floor(Math.min(dataSize, bytes.length - dataOffset) / 2);
+  const samples = new Int16Array(frameCount);
+  for (let index = 0; index < frameCount; index += 1) {
+    samples[index] = view.getInt16(dataOffset + index * 2, true);
+  }
+  return { samples, sampleRate, durationSeconds: samples.length / sampleRate };
+}
+
+const fixturePath = fileURLToPath(new URL('./fixtures/speaking-canary-hometown.wav', import.meta.url));
+if (!existsSync(fixturePath)) {
+  throw new Error(`Speaking canary fixture is missing at ${fixturePath}. Refusing to fake a pass.`);
+}
+const fixture = decodeWavPcm16(new Uint8Array(readFileSync(fixturePath)));
+if (!fixture || fixture.samples.length < 16_000 || fixture.durationSeconds < 1) {
+  throw new Error('Speaking canary fixture is not a 16-bit mono PCM WAV of intelligible English. Refusing to fake a pass.');
 }
 
 const headers = {
@@ -100,12 +139,15 @@ if (forceFallback) {
     if (agent) {
       agentIdentity = agent.identity;
       assertNoKeyLeak('agent metadata', agent.metadata || '');
+      if (/AIza|geminiApiKey|apiKey/i.test(agent.metadata || '')) {
+        throw new Error('Agent metadata leaked a provider key.');
+      }
       break;
     }
     await sleep(1000);
   }
   if (!agentIdentity) {
-    throw new Error('Live speaking canary did not observe the LiveKit agent in the room.');
+    throw new Error('Live speaking canary did not observe the LiveKit agent in the room. Refusing to fake a pass.');
   }
 
   const rtc = await import('@livekit/rtc-node').catch((error) => {
@@ -153,7 +195,7 @@ if (forceFallback) {
   }
   if (!examinerFrames.length && !dataMessages.length) {
     await room.disconnect();
-    throw new Error('Live speaking canary did not receive the first examiner audio/question.');
+    throw new Error('Live speaking canary did not receive the first examiner audio/question. Refusing to fake a pass.');
   }
 
   const quietDeadline = Date.now() + 8_000;
@@ -169,8 +211,7 @@ if (forceFallback) {
     }
   }
 
-  const sampleRate = 16_000;
-  const source = new rtc.AudioSource(sampleRate, 1);
+  const source = new rtc.AudioSource(fixture.sampleRate, 1);
   const localTrack = rtc.LocalAudioTrack.createAudioTrack('microphone', source);
   let publishOptions;
   try {
@@ -183,15 +224,21 @@ if (forceFallback) {
   }
   await room.localParticipant.publishTrack(localTrack, publishOptions);
 
-  const samples = synthesizeSpeechLikePcm(sampleRate, 2);
-  const frameSize = 320;
-  for (let offset = 0; offset < samples.length; offset += frameSize) {
-    const slice = samples.subarray(offset, Math.min(samples.length, offset + frameSize));
-    const frame = new rtc.AudioFrame(slice, sampleRate, 1, slice.length);
+  const frameSize = Math.floor(fixture.sampleRate / 50);
+  let learnerAudioFrames = 0;
+  for (let offset = 0; offset < fixture.samples.length; offset += frameSize) {
+    const slice = fixture.samples.subarray(offset, Math.min(fixture.samples.length, offset + frameSize));
+    const frame = new rtc.AudioFrame(slice, fixture.sampleRate, 1, slice.length);
     await source.captureFrame(frame);
+    learnerAudioFrames += 1;
   }
   if (typeof source.waitForPlayout === 'function') {
     await source.waitForPlayout().catch(() => undefined);
+  }
+  const learnerAudioBytes = fixture.samples.byteLength;
+  if (learnerAudioFrames <= 0 || learnerAudioBytes <= 0) {
+    await room.disconnect();
+    throw new Error('Live speaking canary published no learner audio. Refusing to fake a pass.');
   }
 
   const framesAfterLearner = examinerFrames.length;
@@ -208,10 +255,10 @@ if (forceFallback) {
   const followUpData = dataMessages.slice(dataAfterLearner);
   await room.disconnect();
   if (!followUpAudio.length && !followUpData.length) {
-    throw new Error('Live speaking canary did not receive an examiner follow-up after the learner audio fixture.');
+    throw new Error('Live speaking canary did not receive an examiner follow-up after the learner audio fixture. Refusing to fake a pass.');
   }
   if (examinerFrames.length <= framesAfterLearner && !followUpData.length && !followUpAudio.length) {
-    throw new Error('Live speaking canary did not prove Examiner -> Learner -> Examiner.');
+    throw new Error('Live speaking canary did not prove Examiner -> Learner -> Examiner. Refusing to fake a pass.');
   }
 
   const cutoff = await fetch(`${appBaseUrl}/api/livekit/session/${sessionPayload.session.id}/provider-cutoff`, {
@@ -231,9 +278,14 @@ if (forceFallback) {
     sessionId: sessionPayload.session.id,
     requestId: sessionPayload.requestId,
     voiceId: sessionPayload.session.voiceId,
+    fixture: path.basename(fixturePath),
+    fixtureTranscript: 'My hometown is a quiet coastal city.',
     agentIdentity,
     examinerAudioFrames: examinerFrames.length,
+    learnerAudioFrames,
+    learnerAudioBytes,
     followUpAudioFrames: followUpAudio.length,
+    followUpDataMessages: followUpData.length,
     dataMessages: dataMessages.length,
     cycle: 'Examiner -> Learner -> Examiner',
     fallbackAfterCutoff: true,

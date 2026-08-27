@@ -15,9 +15,19 @@
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
+    "baseUrl": ".",
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "react": [
+        "./node_modules/react"
+      ],
+      "react-dom": [
+        "./node_modules/react-dom"
       ]
     },
     "allowImportingTsExtensions": true,

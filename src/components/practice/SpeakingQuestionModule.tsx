@@ -32,33 +32,36 @@ import {
 import { useApp } from '../../context/AppContext';
 
 const SpeakingRealtimeRoom = React.lazy(async () => {
-  const module = await import('../speaking/SpeakingRealtimeRoom');
-  return { default: module.SpeakingRealtimeRoom };
+  try {
+    const module = await import('../speaking/SpeakingRealtimeRoom');
+    return { default: module.SpeakingRealtimeRoom };
+  } catch {
+    return {
+      default: function SpeakingRealtimeLoadFailed(props: { onBackToPractice: () => void }) {
+        return <SpeakingRealtimeUnavailable onFallback={props.onBackToPractice} />;
+      },
+    };
+  }
 });
 
-class SpeakingRoomErrorBoundary extends React.Component<
-  { children: React.ReactNode; onFallback: () => void },
-  { failed: boolean }
-> {
-  state = { failed: false };
+type SpeakingRoomErrorBoundaryProps = {
+  children: React.ReactNode;
+  onFallback: () => void;
+};
 
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
+function SpeakingRealtimeUnavailable({ onFallback }: { onFallback: () => void }) {
+  return (
+    <div data-ux-state="fallback" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm">
+      Không tải được phòng realtime. Đây không phải realtime.
+      <button data-ux-flow="practice.skills" type="button" onClick={onFallback} className="ml-2 font-bold underline">
+        Luyện từng phần
+      </button>
+    </div>
+  );
+}
 
-  render() {
-    if (this.state.failed) {
-      return (
-        <div data-ux-state="fallback" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm">
-          Không tải được phòng realtime. Đây không phải realtime.
-          <button data-ux-flow="practice.skills" type="button" onClick={this.props.onFallback} className="ml-2 font-bold underline">
-            Luyện từng phần
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
+function SpeakingRoomErrorBoundary({ children }: SpeakingRoomErrorBoundaryProps) {
+  return children;
 }
 
 const SPEAKING_PARTS: Array<{

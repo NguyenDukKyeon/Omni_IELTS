@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { examinerDataMessage, parseAgentJobMetadata, redeemGeminiKey } from '../livekitSpeakingAgent';
+import { examinerDataMessage, parseAgentJobMetadata, redeemGeminiKey, resolveAgentRuntime } from '../livekitSpeakingAgent';
 import { parseExamDataMessage } from '../../lib/speakingExamProtocol';
 
 describe('livekit speaking agent helpers', () => {
@@ -43,5 +43,31 @@ describe('livekit speaking agent helpers', () => {
       questionIndex: 0,
     });
     expect(JSON.stringify(parsed)).not.toMatch(/AIza/);
+  });
+
+  it('points the worker redeem URL at port 3200 when the live canary base URL is used', () => {
+    const runtime = resolveAgentRuntime({
+      OMNI_CANARY_BASE_URL: 'http://127.0.0.1:3200',
+    });
+    expect(runtime.redeemUrl).toBe('http://127.0.0.1:3200/api/livekit/credentials/redeem');
+    expect(runtime.eventUrl).toBe('http://127.0.0.1:3200/api/livekit/session');
+    expect(JSON.stringify(runtime)).not.toMatch(/AIza|geminiApiKey/);
+  });
+
+  it('honors PLAYWRIGHT_LIVE_PORT and an explicit redeem URL', () => {
+    const fromPort = resolveAgentRuntime({ PLAYWRIGHT_LIVE_PORT: '3200' });
+    expect(fromPort.redeemUrl).toBe('http://127.0.0.1:3200/api/livekit/credentials/redeem');
+
+    const explicit = resolveAgentRuntime({
+      PORT: '3000',
+      PLAYWRIGHT_LIVE_PORT: '3200',
+      OMNI_AGENT_REDEEM_URL: 'http://127.0.0.1:3200/api/livekit/credentials/redeem',
+    });
+    expect(explicit.redeemUrl).toBe('http://127.0.0.1:3200/api/livekit/credentials/redeem');
+
+    const deployed = resolveAgentRuntime({
+      OMNI_CANARY_BASE_URL: 'https://beta.example.com',
+    });
+    expect(deployed.redeemUrl).toBe('https://beta.example.com/api/livekit/credentials/redeem');
   });
 });
