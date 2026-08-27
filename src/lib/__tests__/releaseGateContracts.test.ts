@@ -33,7 +33,7 @@ describe('public beta release gate and CI contracts', () => {
       const viaModeFlag = resolveScriptsForArgs(['--mode=live']);
       expect(viaModeFlag.mode).toBe('live');
       expect(viaModeFlag.scripts).toEqual(LIVE_CANARY_SCRIPTS);
-      expect(viaModeFlag.scripts).toEqual(['test:e2e:live']);
+      expect(viaModeFlag.scripts).toEqual(['test:e2e:live', 'test:speaking:live']);
       expect(viaModeFlag.scripts).not.toContain('test:web-bridge:live');
 
       expect(resolveScriptsForArgs(['--mode=canary']).mode).toBe('live');
@@ -53,7 +53,9 @@ describe('public beta release gate and CI contracts', () => {
         'build',
         'test:e2e',
         'test:e2e:live',
+        'test:speaking:live',
       ]);
+      expect(full.scripts).not.toContain('test:web-bridge:live');
 
       expect(resolveScriptsForArgs(['--all']).mode).toBe('full');
       expect(resolveScriptsForArgs(['--full']).mode).toBe('full');
@@ -99,6 +101,8 @@ describe('public beta release gate and CI contracts', () => {
     it('preserves granular live test targets', () => {
       expect(scripts['test:web-bridge:live']).toBe('node scripts/web-bridge-live-canary.mjs');
       expect(scripts['check:web-bridge:live']).toBe('npm run test:web-bridge:live');
+      expect(scripts['test:speaking:live']).toBe('node scripts/livekit-speaking-canary.mjs');
+      expect(scripts['livekit:agent']).toBe('tsx src/server/livekitSpeakingAgent.ts');
       expect(scripts['test:e2e:live']).toBe('playwright test --config=playwright.live.config.ts');
       expect(scripts['test:e2e']).toBe('playwright test');
     });
@@ -125,6 +129,43 @@ describe('public beta release gate and CI contracts', () => {
       expect(qualityWorkflow).not.toMatch(/check:canary:live/);
     });
 
+    it('starts the LiveKit agent worker with a matching redeem URL and fails if it does not register', () => {
+      const canaryWorkflow = readFileSync(resolve(root, '.github/workflows/live-provider-canary.yml'), 'utf8');
+      const ensure = readFileSync(resolve(root, 'scripts/ensure-livekit-speaking-stack.mjs'), 'utf8');
+
+      expect(canaryWorkflow).toContain('node scripts/ensure-livekit-speaking-stack.mjs');
+      expect(canaryWorkflow).toContain('docker compose -f compose.media.yml up -d bgutil-provider');
+      expect(canaryWorkflow).toContain('PLAYWRIGHT_LIVE_PORT: 3200');
+      expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_ENABLED');
+      expect(ensure).toContain("spawnNpm('livekit:agent'");
+      expect(ensure).toContain('/api/livekit/credentials/redeem');
+      expect(ensure).toContain('registered worker');
+      expect(ensure).toContain('Refusing to fake a pass');
+      expect(ensure).toContain('PLAYWRIGHT_LIVE_PORT || env.PORT || 3200');
+      expect(ensure).toContain('OMNI_AGENT_REDEEM_URL');
+      expect(ensure).toContain("stdio: ['ignore', fd, fd]");
+      expect(ensure).toContain('detached: true');
+      expect(ensure).toContain('LiveKit agent worker registration');
+    });
+
+    it('implements a real speaking room error boundary without aliasing react in tsconfig', () => {
+      const tsconfig = readFileSync(resolve(root, 'tsconfig.json'), 'utf8');
+      const moduleSource = readFileSync(resolve(root, 'src/components/practice/SpeakingQuestionModule.tsx'), 'utf8');
+      const roomSource = readFileSync(resolve(root, 'src/components/speaking/SpeakingRealtimeRoom.tsx'), 'utf8');
+      const spec = readFileSync(resolve(root, 'e2e/speaking-realtime.spec.ts'), 'utf8');
+
+      expect(tsconfig).not.toContain('"./node_modules/react"');
+      expect(tsconfig).not.toContain('"./node_modules/react-dom"');
+      expect(moduleSource).toContain('class SpeakingRoomErrorBoundary extends React.Component');
+      expect(moduleSource).toContain('static getDerivedStateFromError');
+      expect(moduleSource).toContain('this.props.onFallback');
+      expect(moduleSource).not.toMatch(/function SpeakingRoomErrorBoundary\(\{ children \}/);
+      expect(roomSource).toContain('shouldThrowAfterSpeakingRoomLoad');
+      expect(spec).toContain('switch-to-turn-based-from-room-error');
+      expect(spec).toContain('SPEAKING_ROOM_RENDER_THROW_QUERY');
+      expect(spec).toContain('lazy room render error recovery');
+    });
+
     it('runs live canary on scheduled/manual triggers with configured secrets', () => {
       const canaryWorkflow = readFileSync(resolve(root, '.github/workflows/live-provider-canary.yml'), 'utf8');
 
@@ -137,10 +178,11 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryWorkflow).toContain('docker compose -f compose.media.yml up -d bgutil-provider');
       expect(canaryWorkflow).toContain('curl --fail --silent http://127.0.0.1:4416/ping');
       expect(canaryWorkflow).toContain('YT_DLP_POT_PROVIDER_URL: http://127.0.0.1:4416');
+      expect(canaryWorkflow).toContain('LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}');
+      expect(canaryWorkflow).toContain('OMNI_SPEAKING_CANARY_TOKEN: ${{ secrets.OMNI_SPEAKING_CANARY_TOKEN }}');
       expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_ENABLED');
       expect(canaryWorkflow).not.toContain('WEB_AI_BRIDGE_API_KEY');
-    });
-  });
+    });  });
 
   describe('live canary truthfulness contract', () => {
     it('hard-fails when Web Bridge credentials are not configured', () => {
@@ -151,6 +193,24 @@ describe('public beta release gate and CI contracts', () => {
       expect(canaryCode).toContain('if (!enabled || !bridgeKey)');
       expect(canaryCode).toContain('throw new Error(');
       expect(canaryCode).not.toContain('return { status: "ok" }');
+    });
+
+    it('hard-fails the speaking realtime canary when LiveKit or Gemini credentials are missing', () => {
+      const canaryCode = readFileSync(resolve(root, 'scripts/livekit-speaking-canary.mjs'), 'utf8');
+      expect(canaryCode).toContain('LIVEKIT_URL');
+      expect(canaryCode).toContain('LIVEKIT_API_KEY');
+      expect(canaryCode).toContain('GEMINI_API_KEY');
+      expect(canaryCode).toContain('OMNI_SPEAKING_CANARY_TOKEN');
+      expect(canaryCode).toContain('throw new Error(');
+      expect(canaryCode).toContain('Refusing to fake a pass');
+      expect(canaryCode).toContain('quota_exhausted');
+      expect(canaryCode).toContain('Examiner');
+      expect(canaryCode).toContain('fallback_turn_based');
+      expect(canaryCode).toContain('speaking-canary-hometown.wav');
+      expect(canaryCode).toContain('My hometown is a quiet coastal city.');
+      expect(canaryCode).toContain('learnerAudioBytes');
+      expect(canaryCode).toContain('learnerAudioFrames');
+      expect(canaryCode).toContain('ensureLivekitSpeakingStack');
     });
   });
 

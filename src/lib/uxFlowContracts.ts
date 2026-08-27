@@ -170,6 +170,17 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     expectedTransition: 'saved state -> validated updated state', sideEffect: 'Persist allowed profile data',
     errorStates: ['validation_failed', 'sync_unavailable'], evidence: ['e2e/profile.spec.ts'],
   },
+  {
+    id: 'speaking.realtime',
+    module: 'speaking',
+    owner: 'SpeakingRealtimeRoom',
+    precondition: 'Practice Speaking virtual room is visible',
+    trigger: 'Learner starts a realtime session, grants microphone, ends an answer, reconnects, consents, or switches to turn-based recording',
+    expectedTransition: 'idle -> requesting_permission -> connecting -> part_1 -> part_2_preparation -> part_2_speaking -> part_3 -> finalizing -> completed | fallback_turn_based | permission_denied | quota_exhausted | provider_unavailable | connection_lost',
+    sideEffect: 'POST /api/livekit/session or local turn-based recording; never persist raw microphone audio; BYOK stays in one-time memory',
+    errorStates: ['permission_denied', 'connection_lost', 'provider_unavailable', 'quota_exhausted', 'fallback_turn_based', 'failed', 'network_failed'],
+    evidence: ['e2e/speaking-realtime.spec.ts'],
+  },
 ];
 
 export function validateUxFlowContracts(contracts: UxFlowContract[]) {

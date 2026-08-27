@@ -1,0 +1,5 @@
+Fixture: scripts/fixtures/speaking-canary-hometown.wav
+Transcript: "My hometown is a quiet coastal city."
+Format: 16 kHz mono PCM16 WAV (~3.0s)
+Origin: original sentence synthesized for the Omni IELTS live canary (not a third-party recording of a person).
+Used only in npm run test:speaking:live. Raw microphone audio from learners is never stored.

@@ -28,6 +28,24 @@ jobs:
           done
           docker compose -f compose.media.yml logs bgutil-provider
           exit 1
+      - name: Start LiveKit speaking agent worker
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          LIVEKIT_AGENT_INTERNAL_SECRET: ${{ secrets.LIVEKIT_AGENT_INTERNAL_SECRET }}
+          LIVEKIT_AGENT_NAME: omni-ielts-speaking-examiner
+          OMNI_CANARY_BASE_URL: ${{ secrets.OMNI_CANARY_BASE_URL }}
+          OMNI_SPEAKING_CANARY_TOKEN: ${{ secrets.OMNI_SPEAKING_CANARY_TOKEN }}
+          PLAYWRIGHT_LIVE_PORT: 3200
+          GEMINI_LIVE_MODEL: gemini-2.5-flash-native-audio-preview-12-2025
+        run: |
+          if [ -z "${LIVEKIT_URL}" ] || [ -z "${LIVEKIT_API_KEY}" ] || [ -z "${LIVEKIT_API_SECRET}" ]; then
+            echo "LiveKit credentials are missing. Agent worker not started; speaking canary will fail-closed. Refusing to fake a pass."
+          else
+            node scripts/ensure-livekit-speaking-stack.mjs
+          fi
       - name: Run Live Provider Canaries
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -35,4 +53,12 @@ jobs:
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           OMNI_CANARY_BASE_URL: ${{ secrets.OMNI_CANARY_BASE_URL }}
           YT_DLP_POT_PROVIDER_URL: http://127.0.0.1:4416
+          LIVEKIT_URL: ${{ secrets.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+          LIVEKIT_AGENT_INTERNAL_SECRET: ${{ secrets.LIVEKIT_AGENT_INTERNAL_SECRET }}
+          OMNI_SPEAKING_CANARY_TOKEN: ${{ secrets.OMNI_SPEAKING_CANARY_TOKEN }}
+          GEMINI_LIVE_MODEL: gemini-2.5-flash-native-audio-preview-12-2025
+          PLAYWRIGHT_LIVE_PORT: 3200
+          OMNI_SPEAKING_CANARY_SKIP_STACK: 'true'
         run: npm run check:canary:live

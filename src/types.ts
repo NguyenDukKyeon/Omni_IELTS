@@ -1698,6 +1698,8 @@ export interface SpeakingLiveAudioScoringInput {
   targetBand?: number;
   totalDurationSeconds?: number;
   speechSegments?: Array<{ start: number; end: number }> | null;
+  consentStorage?: boolean;
+  sessionId?: string;
 }
 
 // ==========================================
@@ -2300,6 +2302,14 @@ export interface SpeakingTelemetry {
   speechRatio: number | null;
   acousticStatus: 'measured' | 'unavailable';
   vadVersion: string | null;
+  partTrends?: Array<{
+    part: 'part_1' | 'part_2' | 'part_3';
+    rawWpm: number;
+    fillerCount: number;
+    fillerRatePer100Words: number;
+    speechRatio: number | null;
+    acousticStatus: 'measured' | 'unavailable';
+  }> | null;
 }
 
 export interface MockSynthesizerInput {
@@ -2333,5 +2343,14 @@ export interface MockSynthesizerResult {
   weakestSkill: 'reading' | 'listening' | 'writing' | 'speaking';
   recommendedNextStepsVi: string[];
 }
+
+export type {
+  SpeakingRealtimeSession,
+  SpeakingSessionState,
+  SpeakingTurn,
+  OneTimeProviderCredential,
+  SpeakingFallbackReason,
+} from './lib/speakingRealtimeTypes';
+
 
 

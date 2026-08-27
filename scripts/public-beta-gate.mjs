@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config({ quiet: true });
 
 export const DETERMINISTIC_SCRIPTS = ['test', 'check:ux-contracts', 'lint', 'build', 'test:e2e'];
-export const LIVE_CANARY_SCRIPTS = ['test:e2e:live'];
+export const LIVE_CANARY_SCRIPTS = ['test:e2e:live', 'test:speaking:live'];
 export const FULL_GATE_SCRIPTS = [...DETERMINISTIC_SCRIPTS, ...LIVE_CANARY_SCRIPTS];
 
 export function resolveScriptsForArgs(args = process.argv.slice(2)) {
