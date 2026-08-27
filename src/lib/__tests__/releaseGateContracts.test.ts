@@ -70,6 +70,13 @@ describe('public beta release gate and CI contracts', () => {
     const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
     const scripts = packageJson.scripts;
 
+    it('pins the Linux Lightning CSS binary used by the Docker build', () => {
+      const packageLock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
+      const lightningCssVersion = packageLock.packages['node_modules/lightningcss'].version;
+
+      expect(packageJson.optionalDependencies?.['lightningcss-linux-x64-gnu']).toBe(lightningCssVersion);
+    });
+
     it('defines deterministic check:beta and check:gate commands', () => {
       expect(scripts['check:beta']).toContain('public-beta-gate.mjs');
       expect(scripts['check:beta']).toContain('--mode=deterministic');
@@ -102,6 +109,15 @@ describe('public beta release gate and CI contracts', () => {
   });
 
   describe('CI workflow contracts', () => {
+    it('restarts the app and PO-token provider after Docker Desktop restarts', () => {
+      const compose = readFileSync(resolve(root, 'compose.media.yml'), 'utf8');
+      const appService = compose.slice(compose.indexOf('  app:'), compose.indexOf('\n  bifrost:'));
+      const providerService = compose.slice(compose.indexOf('  bgutil-provider:'), compose.indexOf('\n  gemini-web2api:'));
+
+      expect(appService).toContain('restart: unless-stopped');
+      expect(providerService).toContain('restart: unless-stopped');
+    });
+
     it('runs deterministic gate on PR and push without provider secrets', () => {
       const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/public-beta-quality.yml'), 'utf8');
 
