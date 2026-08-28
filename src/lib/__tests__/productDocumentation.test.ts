@@ -19,4 +19,47 @@ describe('product documentation contracts', () => {
   it('reserves the approved product document paths', () => {
     for (const doc of requiredDocs) expect(existsSync(resolve(root, doc))).toBe(true);
   });
+
+  it('locks the approved product strategy decisions', () => {
+    const strategy = readFileSync(
+      resolve(root, 'docs/product/PRODUCT_STRATEGY.md'),
+      'utf8',
+    );
+    for (const phrase of [
+      'IELTS-first comprehensive preparation platform',
+      'Vietnam-first',
+      'IELTS Academic-first',
+      'Self-learner first',
+      'Plateaued Intermediate',
+      'Band 4.5–6.5',
+      'Band 3.0–9.0',
+      'Private Web Bridge',
+    ]) {
+      expect(strategy).toContain(phrase);
+    }
+  });
+
+  it('defines the approved product metrics and guardrails once', () => {
+    const strategy = readFileSync(
+      resolve(root, 'docs/product/PRODUCT_STRATEGY.md'),
+      'utf8',
+    );
+    const ids = [
+      'METRIC-001',
+      'METRIC-002',
+      'METRIC-003',
+      'METRIC-004',
+      'METRIC-005',
+      'METRIC-006',
+      'GUARD-001',
+      'GUARD-002',
+      'GUARD-003',
+      'GUARD-004',
+    ];
+    for (const id of ids) {
+      expect(
+        strategy.match(new RegExp(`^### ${id}\\b`, 'gm')),
+      ).toHaveLength(1);
+    }
+  });
 });
