@@ -109,7 +109,7 @@ The product must propose a next action with an evidence-based reason. Daily Coac
 
 ## Competency Graph
 
-The competency graph is a **relational model**, not a content catalogue. Each node has prerequisites, allowed evidence classes, and a linked mistake taxonomy. A learner is not “at Band 5.5”; the learner has a vector of node states with confidence and missing-evidence flags.
+The competency graph is a **relational model**, not a content catalogue. Each node has prerequisites, allowed evidence classes, and a linked mistake taxonomy. A learner is not “at Band 5.5”; the learner has a vector of node states with uncertainty and missing-evidence flags.
 
 ```text
 IELTS Academic
@@ -335,11 +335,11 @@ Normative mastery rules:
 2. Assisted Performance must not create `stable` or `mastered`.
 3. Only repeated unassisted evidence together with Transfer or Independent Assessment Evidence may create `mastered`.
 4. `mastered` must not erase history. Previous attempts, mistakes, and evidence records remain archived.
-5. When a mastered or stable taxonomy error reappears on independent evidence, the node must move to `relapsed`, confidence must fall, and the item must re-enter Daily Coach and Mistake Drill.
+5. When a mastered or stable taxonomy error reappears on independent evidence, the node must move to `relapsed`, `uncertainty` must rise, and the item must re-enter Daily Coach and Mistake Drill.
 6. Reveal answer must not count as completion or mastery.
 7. Copied model answers, AI-written responses, repeated known tests, empty audio, missing timestamps, and unsupported grader output must not move a node to `stable` or `mastered`.
 
-`estimatedMastery` / `confidence` are internal strength signals. They must not be converted directly into an IELTS band.
+`estimatedMastery` and `uncertainty` are internal strength signals. They must not be converted directly into an IELTS band. A UI confidence value, if shown, is derived (for example `1 - uncertainty`) and is not a canonical `CompetencyState` field.
 
 ## Evidence Hierarchy
 
@@ -390,36 +390,25 @@ AI output is not product evidence until it passes schema/quality validation and 
 
 ## CompetencyState Contract
 
-This is a product contract, not a database schema or migration. Implementation may store additional operational fields; it must not drop the fields below or convert `estimatedMastery` into a band.
+The canonical product contract is the approved-design interface. This is not a database schema or migration. Implementation may store additional operational fields in a wrapper; it must not drop, rename, or replace the fields below, and must not convert `estimatedMastery` into a band.
 
 ```ts
-type MasteryState =
-  | 'unseen'
-  | 'introduced'
-  | 'practising'
-  | 'stable'
-  | 'mastered'
-  | 'relapsed';
-
-interface EvidenceSummary {
-  byClass: Record<EvidenceClass, number>;
-  lastValidUnassistedAt?: string;
-  lastTransferAt?: string;
-  lastIndependentAssessmentAt?: string;
-  records: EvidenceRecord[];
-}
-
 interface CompetencyState {
   competencyId: string;
-  learnerId: string;
-  masteryState: MasteryState;
-  confidence: number;
+  state:
+    | 'unseen'
+    | 'introduced'
+    | 'practising'
+    | 'stable'
+    | 'mastered'
+    | 'relapsed';
   estimatedMastery: number;
-  evidenceSummary: EvidenceSummary;
-  lastDemonstratedAt?: string;
+  uncertainty: number;
+  evidenceCount: number;
+  independentEvidenceCount: number;
+  transferEvidenceCount: number;
+  lastEvidenceAt?: string;
   nextReviewAt?: string;
-  relapseCount: number;
-  updatedAt: string;
   recurringMistakeIds: string[];
   prerequisiteGaps: string[];
 }
@@ -427,34 +416,31 @@ interface CompetencyState {
 
 Field rules:
 
-- `masteryState` is the canonical lifecycle state from the approved design (`state`).
-- `confidence` is 0–1 and corresponds to the inverse of design `uncertainty`. Low evidence count must keep confidence low.
+- `state` is the canonical mastery lifecycle field. UI copy may describe it as a mastery state; the field name remains `state` and must not be renamed to `masteryState`.
 - `estimatedMastery` is 0–1 strength, not an IELTS band. It must not be shown as a band.
-- `evidenceSummary` must distinguish evidence class, assisted/unassisted (`assisted` on each `EvidenceRecord`), source artifact (`sourceArtifactId`), and validity.
-- `lastDemonstratedAt` is the last **valid** demonstration (design `lastEvidenceAt`). Reveal, empty audio, and unavailable grader output must not update it.
+- `uncertainty` is 0–1. Low evidence count must keep uncertainty high. A learner-facing **confidence** value, if shown, is a derived UI signal such as `1 - uncertainty`. Confidence must not replace `uncertainty` on this interface.
+- `evidenceCount`, `independentEvidenceCount`, and `transferEvidenceCount` are the canonical evidence counters. A detailed `EvidenceRecord` object may exist as a **related** contract for evidence class, assisted/unassisted state, source artifact, and validity. Related records must not replace these counters on `CompetencyState`.
+- `lastEvidenceAt` is the last **valid** demonstration. Reveal, empty audio, and unavailable grader output must not update it.
 - `nextReviewAt` may be produced by a scheduler such as FSRS for retrieval nodes; the scheduler does not own mastery policy.
-- `relapseCount` increments on each transition into `relapsed` and is never reset by a later `mastered`.
 - `recurringMistakeIds` and `prerequisiteGaps` are references, not deleted history.
 
-A CompetencyState write must not occur if the triggering attempt is `unavailable`.
+Learner ownership (`learnerId`), `updatedAt`, and a relapse counter are implementation/storage concerns. If persistence needs them, use a wrapper such as `LearnerCompetencyRecord { learnerId; competency: CompetencyState; updatedAt; relapseCount }` rather than mutating the canonical interface.
+
+Unavailable or failed attempts must be recorded at the **attempt or job** level with validity `unavailable` or `degraded`. They must not increment `evidenceCount`, `independentEvidenceCount`, or `transferEvidenceCount`; must not advance `state`; must not update `estimatedMastery`; and must not update `lastEvidenceAt`.
 
 ## MistakeEvidence Contract
 
-Mistake evidence is the durable record of a specific learner error. Archiving or mastering a mistake must not delete the record.
+Mistake evidence is the durable record of a specific learner error. Mastery status and review-queue status are **orthogonal**. Archiving a mistake from the due queue during normal product use must not delete the record and must not erase its mastery meaning.
 
 ```ts
-type MistakeLifecycleState =
-  | 'active'
-  | 'due'
-  | 'mastered'
-  | 'archived'
-  | 'relapsed';
+type MistakeMasteryStatus = 'active' | 'mastered' | 'relapsed';
 
 type MistakeReviewState =
-  | 'unreviewed'
+  | 'unscheduled'
   | 'scheduled'
+  | 'due'
   | 'in_review'
-  | 'cleared'
+  | 'archived'
   | 'blocked_unavailable';
 
 interface MistakeProvenance {
@@ -485,25 +471,38 @@ interface MistakeEvidence {
   rubricReference?: string;
   detectedAt: string;
   evidenceClass: EvidenceClass;
-  lifecycleState: MistakeLifecycleState;
+  masteryStatus: MistakeMasteryStatus;
   reviewState: MistakeReviewState;
   provenance: MistakeProvenance;
 }
 ```
 
-Lifecycle:
+The data model must be able to represent a mistake as **both mastered and removed from the active review queue** (`masteryStatus: 'mastered'` with `reviewState: 'archived'`) without losing its mastery meaning.
 
-- `active` — detected and not yet scheduled or still in the current loop.
-- `due` — retrieval or drill is scheduled (`nextReviewAt` reached).
-- `mastered` — later unassisted Transfer or Independent Assessment Evidence shows the error no longer appears. History remains.
-- `archived` — no longer in the live due queue (for example after learner deletion request handling keeps minimum lineage). History remains.
+Mastery status:
+
+- `active` — the error is still part of the live learning loop.
+- `mastered` — later unassisted Transfer or Independent Assessment Evidence shows the error no longer appears. History remains during normal product use.
 - `relapsed` — the same taxonomy reappeared on independent evidence after `mastered` or a stable period.
+
+Review-queue status:
+
+- `unscheduled` — detected and not yet queued.
+- `scheduled` — a review time has been assigned.
+- `due` — retrieval or drill is due.
+- `in_review` — the learner is currently in the drill.
+- `archived` — removed from the live due queue during **normal product use**. Learning lifecycle archive preserves history only during normal product use. `archived` is not a privacy-deletion state.
+- `blocked_unavailable` — a due drill cannot run because audio, package, or provider evidence is `unavailable`. The mistake must not be auto-cleared.
+
+Privacy override:
+
+- An account or data deletion request follows the privacy hard-delete workflow and overrides learning-history retention.
+- The product must not claim that learner-linked “minimum lineage” is retained after deletion by default.
+- Aggregated or de-identified operational metrics may survive only when the future privacy policy, consent, and applicable law permit it.
 
 `taxonomy` uses `{family}.{class}.{code}` (example: `writing.grammar.article`, `listening.spelling.homophone`). AI may propose taxonomy, but the structured object must pass schema and quality validation before it becomes MistakeEvidence.
 
 `canonicalAnswer` is used for closed items. `rubricReference` is used for Writing and Speaking. At least one of the two must be present for the record to be `valid`.
-
-Review state `blocked_unavailable` is required when a due drill cannot run because audio, package, or provider evidence is `unavailable`. The mistake must not be auto-cleared.
 
 ## Feedback Prioritisation by Segment
 
@@ -648,13 +647,13 @@ If the package or key is invalid, the result is `unavailable`. The product must 
 
 ## Writing and Speaking AI Estimate Policy
 
-Writing and Speaking reports that include a numeric band-like value must display the label **AI estimated band**. They must not use “band score”, “official score”, “examiner score”, or “IELTS result”.
+Writing and Speaking reports that include a numeric band-like value must display the label **AI estimated band**. Until independent expert calibration exists, the learner-facing label must be **AI estimated band — experimental**. They must not use “band score”, “official score”, “examiner score”, or “IELTS result”.
 
 A valid estimate object must include:
 
 ```ts
 interface AiEstimatedBandReport {
-  displayLabel: 'AI estimated band';
+  displayLabel: 'AI estimated band' | 'AI estimated band — experimental';
   estimatedBand: number | null;
   confidence: number | null;
   evidenceUsed: string[];
@@ -666,7 +665,7 @@ interface AiEstimatedBandReport {
 
 Normative rules:
 
-1. The UI must show **AI estimated band**, confidence, evidence used, limitations, and rubric version.
+1. The UI must show the required label (**AI estimated band — experimental** until independent expert calibration exists; otherwise **AI estimated band**), confidence, evidence used, limitations, and rubric version.
 2. The estimate must not be presented as an official IELTS score.
 3. If there is no valid writing response, transcript, or audio, `status` must be `unavailable`, `estimatedBand` must be `null`, and no numeric band may be shown.
 4. Pronunciation, prosody, and pause analysis must be `unavailable` when there is no real audio.
@@ -678,22 +677,50 @@ Normative rules:
 
 These rules implement [GUARD-001](./PRODUCT_STRATEGY.md#guard-001--fabricated-learning-or-assessment-data-incidents) and [GUARD-003](./PRODUCT_STRATEGY.md#guard-003--unsupported-official-or-real-exam-claims).
 
-## Human Calibration
+## AI Scoring Calibration and Periodic Human Review
 
-Human calibration validates Writing and Speaking AI estimates. It is not a Public Beta teacher, classroom, or marketplace feature.
+AI Scoring Calibration and Periodic Human Review implements the assessment layer called Human calibration in the approved design.
+
+This policy validates **AI scoring** for Writing and Speaking. It is not AI content generation and is **not human-in-the-loop grading for every learner submission**.
+
+Learner experience remains automated and self-service. **Public Beta does not require a permanent teacher, examiner, or reviewer.** Lack of external expert calibration does not block practice functionality; it blocks claims of official, examiner-equivalent, or independently validated accuracy. Until independent expert calibration exists, learner-facing results must say **AI estimated band — experimental**. Periodic expert review is a future quality activity, not a daily operational dependency.
+
+### Calibration collection
+
+Use a **versioned calibration collection** with provenance and rubric version. Changing model, prompt, rubric, or scoring pipeline must rerun the versioned calibration suite. Tracking must be criterion-level, not only overall band.
+
+Separate calibration material into:
+
+| Class | Meaning | Ground-truth status |
+|---|---|---|
+| `official_anchor` | publicly available official IELTS samples with published scores/comments and a source URL | strongest available public anchor; still not Omni issuing an official score |
+| `founder_reviewed` | samples reviewed internally against the published rubric | internal consistency check for a solo-founder operation |
+| `community_weak_label` | open or community datasets whose scores or feedback are not independently verified | robustness testing only |
+| `external_expert_reviewed` | optional future samples reviewed periodically by a qualified external expert | the only class that can support independently validated accuracy claims |
+
+Community or AI-labelled datasets, including `community_weak_label`, may be used for robustness testing. They must not be treated as ground truth and must not be used alone to claim examiner-level accuracy.
+
+### Provenance and rights
+
+Licensing, redistribution permission, and provenance must be checked before storing or shipping source content. If official or reference material cannot legally be redistributed, store only permitted metadata, evaluation expectations, and source links. Do not ship copyrighted full samples without permission.
+
+### Must / must not
 
 Must:
 
-- maintain a Writing/Speaking sample set reviewed by humans against the same rubric version shown to learners;
-- record disagreement between the AI estimate and the human rating (criterion-level where possible);
-- rerun regression calibration when model, prompt, or rubric version changes;
-- keep human ratings out of learner-facing “official band” language.
+- keep Public Beta scoring automated and self-service;
+- version the calibration suite with rubric version and provenance;
+- record criterion-level disagreement, not only overall band;
+- rerun the suite after model, prompt, rubric, or scoring-pipeline change;
+- label learner-facing Writing/Speaking estimates **AI estimated band — experimental** until independent expert calibration exists.
 
 Must not:
 
-- claim examiner-level or official-marker accuracy without calibration data;
-- silently replace a human-calibrated rubric with an untested prompt and keep the previous confidence copy;
-- use human calibration as a paid tutoring workflow in Public Beta.
+- require per-submission human review;
+- claim examiner-level, official-marker, or independently validated accuracy without `external_expert_reviewed` evidence;
+- treat `community_weak_label` or AI-labelled sets as ground truth;
+- silently replace a calibrated rubric or prompt and keep the previous confidence copy;
+- turn calibration into a paid tutoring or classroom workflow in Public Beta.
 
 Disagreement data informs trust reporting. It does not, by itself, authorise marketing claims.
 

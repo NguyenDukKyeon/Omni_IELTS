@@ -97,4 +97,110 @@ describe('product documentation contracts', () => {
       expect(framework).toContain(phrase);
     }
   });
+
+  it('preserves the canonical CompetencyState contract', () => {
+    const framework = readFileSync(
+      resolve(root, 'docs/product/LEARNING_AND_ASSESSMENT_FRAMEWORK.md'),
+      'utf8',
+    );
+    const startToken = 'interface CompetencyState {';
+    const start = framework.indexOf(startToken);
+    expect(start).toBeGreaterThan(-1);
+    let depth = 0;
+    let end = -1;
+    for (let i = start + startToken.length - 1; i < framework.length; i += 1) {
+      if (framework[i] === '{') depth += 1;
+      if (framework[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    expect(end).toBeGreaterThan(start);
+    const contract = framework.slice(start, end + 1);
+    expect(contract).toContain(`interface CompetencyState {
+  competencyId: string;
+  state:
+    | 'unseen'
+    | 'introduced'
+    | 'practising'
+    | 'stable'
+    | 'mastered'
+    | 'relapsed';
+  estimatedMastery: number;
+  uncertainty: number;
+  evidenceCount: number;
+  independentEvidenceCount: number;
+  transferEvidenceCount: number;
+  lastEvidenceAt?: string;
+  nextReviewAt?: string;
+  recurringMistakeIds: string[];
+  prerequisiteGaps: string[];
+}`);
+    for (const field of [
+      'competencyId',
+      'state:',
+      'estimatedMastery',
+      'uncertainty',
+      'evidenceCount',
+      'independentEvidenceCount',
+      'transferEvidenceCount',
+      'lastEvidenceAt',
+      'nextReviewAt',
+      'recurringMistakeIds',
+      'prerequisiteGaps',
+    ]) {
+      expect(contract).toContain(field);
+    }
+    for (const replacement of [
+      'masteryState',
+      'confidence',
+      'evidenceSummary',
+      'lastDemonstratedAt',
+      'learnerId',
+      'relapseCount',
+      'updatedAt',
+    ]) {
+      expect(contract).not.toContain(replacement);
+    }
+  });
+
+  it('defines solo-founder AI scoring calibration and periodic human review', () => {
+    const framework = readFileSync(
+      resolve(root, 'docs/product/LEARNING_AND_ASSESSMENT_FRAMEWORK.md'),
+      'utf8',
+    );
+    expect(framework).toMatch(/^## AI Scoring Calibration and Periodic Human Review$/m);
+    expect(framework).not.toMatch(/^## Human Calibration$/m);
+    for (const phrase of [
+      'official_anchor',
+      'community_weak_label',
+      'founder_reviewed',
+      'external_expert_reviewed',
+      'AI estimated band — experimental',
+      'not human-in-the-loop grading for every learner submission',
+      'Public Beta does not require a permanent teacher, examiner, or reviewer',
+    ]) {
+      expect(framework).toContain(phrase);
+    }
+  });
+
+  it('separates learning-history archive from privacy hard-delete', () => {
+    const framework = readFileSync(
+      resolve(root, 'docs/product/LEARNING_AND_ASSESSMENT_FRAMEWORK.md'),
+      'utf8',
+    );
+    expect(framework).not.toContain(
+      'learner deletion request handling keeps minimum lineage',
+    );
+    for (const phrase of [
+      'privacy hard-delete workflow',
+      'overrides learning-history retention',
+      'both mastered and removed from the active review queue',
+    ]) {
+      expect(framework).toContain(phrase);
+    }
+  });
 });
