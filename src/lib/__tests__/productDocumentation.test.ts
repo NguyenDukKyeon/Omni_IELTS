@@ -10,6 +10,9 @@ const requiredDocs = [
   'docs/product/PRD.md',
 ];
 
+const normalizeLineEndings = (value: string) =>
+  value.replace(/\r\n?/g, '\n');
+
 describe('product documentation contracts', () => {
   it('exposes a deterministic product documentation gate', () => {
     const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
@@ -119,7 +122,9 @@ describe('product documentation contracts', () => {
       }
     }
     expect(end).toBeGreaterThan(start);
-    const contract = framework.slice(start, end + 1);
+    const contract = normalizeLineEndings(
+      framework.slice(start, end + 1),
+    );
     expect(contract).toContain(`interface CompetencyState {
   competencyId: string;
   state:
@@ -202,5 +207,9 @@ describe('product documentation contracts', () => {
     ]) {
       expect(framework).toContain(phrase);
     }
+  });
+
+  it('normalizes CRLF and lone CR before comparing documentation contracts', () => {
+    expect(normalizeLineEndings('a\r\nb\rc')).toBe('a\nb\nc');
   });
 });
