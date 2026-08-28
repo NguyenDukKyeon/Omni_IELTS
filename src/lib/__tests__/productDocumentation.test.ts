@@ -62,4 +62,19 @@ describe('product documentation contracts', () => {
       ).toHaveLength(1);
     }
   });
+
+  it('counts only completed learning loops in METRIC-006', () => {
+    const strategy = readFileSync(
+      resolve(root, 'docs/product/PRODUCT_STRATEGY.md'),
+      'utf8',
+    );
+    const start = strategy.indexOf('### METRIC-006');
+    const end = strategy.indexOf('## Product Risks and Guardrails', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const metric = strategy.slice(start, end);
+    expect(metric).toContain('declared completion and evidence boundary');
+    expect(metric).toContain('excluded from the completed-loop denominator');
+    expect(metric).not.toContain('or an explicit honest stop');
+  });
 });

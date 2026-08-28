@@ -215,7 +215,9 @@ Share of learners who return on or after day 7. This is an **engagement indicato
 
 ### METRIC-006 — Cost per completed learning loop
 
-Fully loaded provider, model, search, and TTS cost attributable to one completed learning loop (diagnose through independent assessment or an explicit honest stop). Used to keep AI use inside declared budgets.
+Fully loaded provider, model, search, transcription, and TTS cost attributable to a learning loop that reaches its declared completion and evidence boundary.
+
+Incomplete, cancelled, provider-failed, or honestly degraded sessions are excluded from the completed-loop denominator. Their cost and frequency are tracked separately through operational job/provider failure and recovery metrics.
 
 ## Product Risks and Guardrails
 
