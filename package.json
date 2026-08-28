@@ -20,6 +20,7 @@
     "setup:web-bridge:pro": "tsx scripts/web-bridge-session.ts setup",
     "sync:web-bridge:session": "tsx scripts/web-bridge-session.ts sync",
     "check:ux-contracts": "tsx scripts/check-ux-contracts.ts",
+    "check:product-docs": "tsx scripts/check-product-docs.ts",
     "check:gate": "node scripts/public-beta-gate.mjs --mode=deterministic",
     "check:beta": "node scripts/public-beta-gate.mjs --mode=deterministic",
     "check:release": "node scripts/public-beta-gate.mjs --mode=full",
