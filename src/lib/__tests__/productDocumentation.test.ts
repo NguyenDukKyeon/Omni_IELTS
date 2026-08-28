@@ -77,4 +77,24 @@ describe('product documentation contracts', () => {
     expect(metric).toContain('excluded from the completed-loop denominator');
     expect(metric).not.toContain('or an explicit honest stop');
   });
+
+  it('defines the shared learning and assessment contracts', () => {
+    const framework = readFileSync(
+      resolve(root, 'docs/product/LEARNING_AND_ASSESSMENT_FRAMEWORK.md'),
+      'utf8',
+    );
+    for (const phrase of [
+      'Diagnose',
+      'Controlled Practice',
+      'Independent Assessment',
+      'unseen → introduced → practising → stable → mastered → relapsed',
+      'Assisted Performance',
+      'Transfer',
+      'Independent Assessment Evidence',
+      'AI estimated band',
+      'unavailable',
+    ]) {
+      expect(framework).toContain(phrase);
+    }
+  });
 });
