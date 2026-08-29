@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { AppShellProvider } from './context/AppShellContext';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { BottomNav } from './components/BottomNav';
@@ -125,8 +126,10 @@ const MainContent: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <MainContent />
-    </AppProvider>
+    <AppShellProvider>
+      <AppProvider>
+        <MainContent />
+      </AppProvider>
+    </AppShellProvider>
   );
 }

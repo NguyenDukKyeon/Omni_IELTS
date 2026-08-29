@@ -6,6 +6,7 @@ export type ModuleId =
   | 'media'
   | 'practice'
   | 'mock_test'
+  | 'review_progress'
   | 'knowledge'
   | 'profile';
 
