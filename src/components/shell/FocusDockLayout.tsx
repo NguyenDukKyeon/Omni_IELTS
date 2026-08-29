@@ -19,36 +19,26 @@ export function FocusDockLayout({
   focusMode = false,
 }: FocusDockLayoutProps) {
   const { navCollapsed, evidenceDock } = useAppShell();
-
-  if (examMode) {
-    return (
-      <div className="omni-focus-dock omni-focus-dock--exam">
-        {children}
-      </div>
-    );
-  }
-
-  const showEvidence = Boolean(evidence) && evidenceDock !== 'hidden';
+  const showChrome = !examMode;
+  const showEvidence = showChrome && Boolean(evidence) && evidenceDock !== 'hidden';
 
   return (
     <div
-      className={`omni-focus-dock ${focusMode ? 'omni-focus-dock--focus' : ''}`}
-      data-nav-collapsed={navCollapsed ? 'true' : 'false'}
+      className={`omni-focus-dock${examMode ? ' omni-focus-dock--exam' : ''}${focusMode && showChrome ? ' omni-focus-dock--focus' : ''}`}
+      data-nav-collapsed={showChrome && navCollapsed ? 'true' : 'false'}
       data-evidence={showEvidence ? evidenceDock : 'hidden'}
     >
-      <AppHeader />
+      {showChrome ? <AppHeader /> : null}
       <div
-        className={`omni-focus-dock__body ${showEvidence ? 'omni-focus-dock__body--with-evidence' : ''}`}
+        className={`omni-focus-dock__body${showEvidence ? ' omni-focus-dock__body--with-evidence' : ''}${examMode ? ' omni-focus-dock__body--exam' : ''}`}
       >
-        <div className="omni-focus-dock__nav">{navigation}</div>
+        {showChrome ? <div className="omni-focus-dock__nav">{navigation}</div> : null}
         <main id="main-viewport-content" className="omni-focus-dock__main">
           {children}
         </main>
-        {showEvidence && (
-          <div className="omni-focus-dock__evidence">{evidence}</div>
-        )}
+        {showEvidence ? <div className="omni-focus-dock__evidence">{evidence}</div> : null}
       </div>
-      <BottomNav />
+      {showChrome ? <BottomNav /> : null}
     </div>
   );
 }

@@ -29,3 +29,31 @@ test('Focus Dock exposes Dashboard and seven canonical modules without legacy ga
   await expect(page.getByRole('tab', { name: 'Grammar' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'IELTS Strategy' })).toBeVisible();
 });
+
+test('Evidence Dock is module-sensitive, persists collapse, and hides in Mock exam', async ({ page }) => {
+  await page.goto('/');
+  const dock = page.getByRole('complementary', { name: 'Bằng chứng và việc đến hạn' });
+  const navigation = page.getByRole('navigation', { name: 'Điều hướng học tập' });
+
+  await expect(dock).toBeVisible();
+  await expect(dock.getByRole('heading', { name: 'Đến hạn', exact: true })).toBeVisible();
+
+  await navigation.getByRole('button', { name: /Vocabulary/ }).click();
+  await expect(dock.locator('#vocabulary-context')).toBeVisible();
+  await expect(dock.locator('#media-context')).toHaveCount(0);
+
+  await navigation.getByRole('button', { name: /Media Lab/ }).click();
+  await expect(dock.locator('#media-context')).toBeVisible();
+  await expect(dock.getByText(/Urban Planning/)).toBeVisible();
+
+  await dock.getByRole('button', { name: 'Thu gọn' }).click();
+  await expect(page.getByRole('button', { name: 'Mở rộng bằng chứng' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Mở rộng bằng chứng' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Mở rộng bằng chứng' }).click();
+  await navigation.getByRole('button', { name: /IELTS Mock/ }).click();
+  await page.getByRole('button', { name: /Bắt đầu Vào Phòng Thi/ }).first().click();
+  await expect(page.getByRole('complementary', { name: 'Bằng chứng và việc đến hạn' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Điều hướng học tập' })).toHaveCount(0);
+});
