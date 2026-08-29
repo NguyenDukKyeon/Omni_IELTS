@@ -1,10 +1,15 @@
 import { expect, test } from './fixtures';
 
-test('Dashboard recommended vocabulary action opens the actual SRS lesson', async ({ page }) => {
+test('Daily Coach primary action follows seeded due-mistake evidence', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /Chào Nguyễn Minh Anh/ })).toBeVisible();
+  const coach = page.getByRole('region', { name: 'Daily Coach' });
 
-  await page.getByRole('button', { name: 'Ôn tập từ vựng ngay' }).click();
-  await expect(page.getByRole('heading', { name: /Kho Từ Vựng & Thuật Toán SRS/ })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'unprecedented' })).toBeVisible();
+  await expect(coach.getByRole('button', { name: 'Ôn lỗi đến hạn' })).toBeVisible();
+  await expect(coach.getByRole('button', { name: 'Tự chọn module' })).toBeVisible();
+  await expect(coach.getByText(/đến lịch ôn/)).toBeVisible();
+  await expect(coach.locator('[data-ux-control="dashboard.coach.alternative-1"]')).toBeVisible();
+  await expect(coach.locator('[data-ux-control="dashboard.coach.alternative-2"]')).toBeVisible();
+
+  await coach.getByRole('button', { name: 'Ôn lỗi đến hạn' }).click();
+  await expect(page.getByRole('heading', { name: 'Ôn lỗi đến hạn' })).toBeVisible();
 });

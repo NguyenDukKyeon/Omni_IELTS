@@ -8,7 +8,6 @@ import { AppProvider, useApp } from './context/AppContext';
 import { AppShellProvider } from './context/AppShellContext';
 import { FocusDockLayout } from './components/shell/FocusDockLayout';
 import { ModuleNavigation } from './components/shell/ModuleNavigation';
-import { NextActionBanner } from './components/NextActionBanner';
 import { FloatingAITutor } from './components/FloatingAITutor';
 import { OnboardingModal } from './components/OnboardingModal';
 import { MistakeNotebookModal } from './components/MistakeNotebookModal';
@@ -74,7 +73,6 @@ const MainContent: React.FC = () => {
         evidence={null}
         examMode={isFullScreenExam}
       >
-        {!isFullScreenExam && <NextActionBanner />}
         {renderActiveView()}
       </FocusDockLayout>
 
