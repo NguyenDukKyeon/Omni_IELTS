@@ -164,6 +164,44 @@ function capabilityById(rows: CapabilityRow[], id: string) {
   return rows.find((row) => row.id === id);
 }
 
+function readPrd() {
+  return readFileSync(resolve(root, 'docs/product/PRD.md'), 'utf8');
+}
+
+function headingBlock(document: string, heading: string) {
+  const normalized = normalizeLineEndings(document);
+  const start = normalized.search(new RegExp(`^### ${heading}\\b`, 'm'));
+  if (start < 0) return '';
+  const rest = normalized.slice(start);
+  const next = rest.search(/\n### /);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
+const prdRequirementIds = Array.from(
+  { length: 13 },
+  (_, index) => `PRD-${String(index + 1).padStart(3, '0')}`,
+);
+const nfrRequirementIds = Array.from(
+  { length: 5 },
+  (_, index) => `NFR-${String(index + 1).padStart(3, '0')}`,
+);
+const prdLabels = [
+  '**User outcome**',
+  '**In-scope behaviour**',
+  '**Explicit exclusions**',
+  '**Linked capabilities**',
+  '**Emitted evidence**',
+  '**Metrics and guardrails**',
+  '**Release acceptance summary**',
+];
+const nfrLabels = ['**Constraint**', '**Affected capabilities**', '**Verification summary**'];
+const definedCapabilityIds = [
+  ...coreCapabilities,
+  ...advancedCapabilities,
+  ...laterCapabilities,
+  ...rejectedCapabilities,
+];
+
 describe('product documentation contracts', () => {
   it('exposes a deterministic product documentation gate', () => {
     const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
@@ -667,5 +705,159 @@ describe('product documentation contracts', () => {
     expect(tutor?.produces).not.toContain('saved evidence');
     expect(registry).not.toContain('Evidence can be saved with citation');
     expect(registry).toContain('Tutor output must not increment CompetencyState evidence counters');
+  });
+
+  it('defines every approved product and non-functional requirement', () => {
+    const prd = readFileSync(
+      resolve(root, 'docs/product/PRD.md'),
+      'utf8',
+    );
+    for (let id = 1; id <= 13; id += 1) {
+      expect(
+        prd.match(
+          new RegExp(
+            `^### PRD-${String(id).padStart(3, '0')}\\b`,
+            'gm',
+          ),
+        ),
+      ).toHaveLength(1);
+    }
+    for (let id = 1; id <= 5; id += 1) {
+      expect(
+        prd.match(
+          new RegExp(
+            `^### NFR-${String(id).padStart(3, '0')}\\b`,
+            'gm',
+          ),
+        ),
+      ).toHaveLength(1);
+    }
+    expect(prd).toContain('Definition of Public Beta Success');
+    expect(prd).toContain('Release Blocking Conditions');
+  });
+
+  it('gives every product and non-functional requirement its required labels', () => {
+    const prd = readPrd();
+    for (const id of prdRequirementIds) {
+      const block = headingBlock(prd, id);
+      expect(block.startsWith(`### ${id}`)).toBe(true);
+      for (const label of prdLabels) expect(block).toContain(label);
+    }
+    for (const id of nfrRequirementIds) {
+      const block = headingBlock(prd, id);
+      expect(block.startsWith(`### ${id}`)).toBe(true);
+      for (const label of nfrLabels) expect(block).toContain(label);
+    }
+  });
+
+  it('references only registry-defined capabilities and does not define new ones', () => {
+    const prd = normalizeLineEndings(readPrd());
+    const referenced = [...prd.matchAll(/\b(CAP-[A-Z0-9-]+)\b/g)].map((match) => match[1]);
+    expect(referenced.length).toBeGreaterThan(0);
+    for (const id of referenced) {
+      expect(definedCapabilityIds).toContain(id);
+      expect(readRegistry().match(new RegExp(`^\\| ${id} \\|`, 'gm'))).toHaveLength(1);
+    }
+    expect(prd.match(/^\| (CAP-[A-Z0-9-]+) \|/gm)).toBeNull();
+    expect(prd.match(/^### ((?:METRIC|GUARD)-[A-Z0-9-]+)\b/gm)).toBeNull();
+  });
+
+  it('references every approved metric and guardrail without redefining them', () => {
+    const prd = readPrd();
+    for (const id of [
+      'METRIC-001',
+      'METRIC-002',
+      'METRIC-003',
+      'METRIC-004',
+      'METRIC-005',
+      'METRIC-006',
+      'GUARD-001',
+      'GUARD-002',
+      'GUARD-003',
+      'GUARD-004',
+    ]) {
+      expect(prd).toContain(id);
+    }
+  });
+
+  it('locks Public Beta performance targets and complete UI states', () => {
+    const nfr001 = headingBlock(readPrd(), 'NFR-001');
+    for (const phrase of [
+      'usable shell p75 ≤ 2.5 seconds on a representative mobile connection',
+      'cached module navigation ≤ 500 ms',
+      'local autosave acknowledgement ≤ 300 ms',
+      'visible interaction feedback ≤ 100 ms',
+      'long-running work represented as resumable jobs with progress',
+      'advanced modules/provider SDKs lazy-loaded',
+    ]) {
+      expect(nfr001).toContain(phrase);
+    }
+    const prd002 = headingBlock(readPrd(), 'PRD-002');
+    expect(prd002).toContain('CAP-GLB-APP-SHELL');
+    for (const phrase of [
+      'seven-module navigation',
+      'loading',
+      'success',
+      'empty',
+      'degraded',
+      'unavailable',
+      'permission denied',
+      'no decorative controls',
+    ]) {
+      expect(prd002).toContain(phrase);
+    }
+  });
+
+  it('requires onboarding profile, source ownership, truthful AI and degraded continuity', () => {
+    const prd = readPrd();
+    const prd001 = headingBlock(prd, 'PRD-001');
+    for (const id of [
+      'CAP-GLB-IDENTITY',
+      'CAP-GLB-APP-SHELL',
+      'CAP-GLB-LEARNER-PROFILE',
+      'CAP-GLB-PLACEMENT-DIAGNOSTIC',
+      'CAP-GLB-EVIDENCE',
+    ]) {
+      expect(prd001).toContain(id);
+    }
+    const prd005 = headingBlock(prd, 'PRD-005');
+    expect(prd005).toContain('destination handoff');
+    expect(prd005).toContain('final destination persistence remains with Practice/Mock/Vocabulary/Tutor');
+    expect(prd005).toContain('external web Search only on explicit action');
+    const prd012 = headingBlock(prd, 'PRD-012');
+    expect(prd012).toContain('cannot be a Public Beta or paid entitlement dependency');
+    const prd013 = headingBlock(prd, 'PRD-013');
+    expect(prd013).toContain('no fake completion');
+    expect(prd013).toContain('honest unavailable state');
+    expect(prd).toContain('AI estimated band — experimental');
+    expect(prd).toContain('unavailable');
+  });
+
+  it('blocks Public Beta release on honesty, evidence, privacy and canary failures', () => {
+    const prd = normalizeLineEndings(readPrd());
+    const start = prd.search(/^## Release Blocking Conditions$/m);
+    expect(start).toBeGreaterThan(-1);
+    const rest = prd.slice(start);
+    const next = rest.search(/\n## /);
+    const blockers = next === -1 ? rest : rest.slice(0, next);
+    for (const phrase of [
+      'open P0/P1',
+      'missing core UX contract',
+      'missing evidence emission',
+      'decorative/non-transitioning Beta control',
+      'fake score/transcript/audio/citation/real-exam/mastery/progress',
+      'invalid provenance or rights status',
+      'missing owner RLS',
+      'missing export/delete/hard-delete',
+      'deterministic gate failure',
+      'required live canary older than 24 hours or never passed',
+      'accessibility failure',
+      'cost/limit policy missing',
+      'rollback flag missing',
+      'public dependency on Private Web Bridge',
+      'unsupported official/examiner-equivalent claim',
+    ]) {
+      expect(blockers).toContain(phrase);
+    }
   });
 });
