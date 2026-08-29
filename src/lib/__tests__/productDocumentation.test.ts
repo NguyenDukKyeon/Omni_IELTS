@@ -177,6 +177,15 @@ function headingBlock(document: string, heading: string) {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+function sectionBlock(document: string, heading: string) {
+  const normalized = normalizeLineEndings(document);
+  const start = normalized.search(new RegExp(`^## ${heading}$`, 'm'));
+  if (start < 0) return '';
+  const rest = normalized.slice(start);
+  const next = rest.search(/\n## /);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 const prdRequirementIds = Array.from(
   { length: 13 },
   (_, index) => `PRD-${String(index + 1).padStart(3, '0')}`,
@@ -859,5 +868,85 @@ describe('product documentation contracts', () => {
     ]) {
       expect(blockers).toContain(phrase);
     }
+  });
+
+  it('restores the complete shared evidence contract set', () => {
+    const evidence = capabilityById(parseCapabilityRows(readRegistry()), 'CAP-GLB-EVIDENCE');
+    expect(evidence?.consumes).toContain('LearningEvent, Attempt, Evaluation');
+    expect(evidence?.produces).toContain(
+      'EvidenceClass, SkillEvidence, CompetencyState, MistakeEvidence, MasteryUpdate, ProgressUpdate',
+    );
+    expect(evidence?.owner).toBe('global');
+    expect(evidence?.priority).toBe('core');
+    const registry = readRegistry();
+    expect(registry).toContain(
+      'unavailable/degraded provider output cannot create a valid mastery/progress update',
+    );
+    const prd003 = headingBlock(readPrd(), 'PRD-003');
+    for (const contract of [
+      'LearningEvent',
+      'Attempt',
+      'Evaluation',
+      'SkillEvidence',
+      'MistakeEvidence',
+      'MasteryUpdate',
+      'ProgressUpdate',
+      'EvidenceClass',
+      'CompetencyState',
+    ]) {
+      expect(prd003).toContain(contract);
+    }
+  });
+
+  it('separates owned-contract journeys from learner mastery evidence', () => {
+    const prd003 = headingBlock(readPrd(), 'PRD-003');
+    expect(prd003).not.toContain(
+      'Each of the seven modules can complete at least one evidence-emitting journey that updates CompetencyState or MistakeEvidence',
+    );
+    expect(prd003).toContain(
+      'Sources import/chat/artifact orchestration does not directly create learner mastery',
+    );
+    expect(prd003).toContain('App Shell emits UX transition evidence, not learning mastery');
+    const success = sectionBlock(readPrd(), 'Definition of Public Beta Success');
+    expect(success).toContain(
+      'all seven modules have at least one complete owned-contract journey',
+    );
+    expect(success).toContain(
+      'all learning/assessment journeys that claim progress emit valid learner evidence',
+    );
+    expect(success).toContain('Sources and utility surfaces never fabricate learner mastery');
+    expect(success).not.toContain(
+      'all seven modules have at least one complete evidence-emitting journey',
+    );
+  });
+
+  it('keeps Dictation usable without a microphone while Shadowing requires audio', () => {
+    const prd008 = headingBlock(readPrd(), 'PRD-008');
+    expect(prd008).toContain('Shadowing records real learner microphone audio');
+    expect(prd008).toContain('Dictation does not require microphone permission');
+    expect(prd008).toContain('must not disable Dictation');
+    expect(prd008).not.toContain('shadow or dictate with a real microphone');
+  });
+
+  it('excludes learner notifications from Public Beta rather than only as a module owner', () => {
+    const outOfScope = sectionBlock(readPrd(), 'Out of Scope and Rejected Capabilities');
+    expect(outOfScope).toContain('learner push/email/browser notifications are post-beta');
+    expect(outOfScope).toContain('Public Beta does not depend on background notification delivery');
+    expect(outOfScope).not.toContain('Notifications as a learning-module owner');
+  });
+
+  it('treats Speaking realtime canary pass as necessary but not sufficient', () => {
+    const outOfScope = sectionBlock(readPrd(), 'Out of Scope and Rejected Capabilities');
+    expect(outOfScope).toContain('necessary but not sufficient');
+    expect(outOfScope).toContain('explicit Capability Registry and PRD scope change');
+    expect(outOfScope).toContain('an open or merged engineering PR cannot reclassify product scope');
+  });
+
+  it('keeps core MockBuild distinct from advanced Custom Mock authoring', () => {
+    const prd010 = headingBlock(readPrd(), 'PRD-010');
+    expect(prd010).toContain('Live Hub → Full Mock');
+    expect(prd010).toContain('source-derived Mock');
+    expect(prd010).toContain('CAP-MCK-CUSTOM');
+    expect(prd010).toContain('must not disable core MockBuild');
   });
 });

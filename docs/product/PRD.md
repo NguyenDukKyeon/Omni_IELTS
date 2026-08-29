@@ -82,9 +82,9 @@ Public Beta explicitly excludes:
 - transcript-only pronunciation (`CAP-GLB-TRANSCRIPT-ONLY-PRONUNCIATION`);
 - XP/mastery from reveal (`CAP-REV-XP-FOR-REVEAL`);
 - decorative controls (`CAP-GLB-DECORATIVE-CONTROLS`);
-- Notifications as a learning-module owner (`CAP-GLB-NOTIFICATIONS`).
+- learner push/email/browser notifications are post-beta (`CAP-GLB-NOTIFICATIONS`). Due reviews remain visible inside Dashboard/Review during Beta. Notifications are not a module owner. Public Beta does not depend on background notification delivery.
 
-Speaking realtime (`CAP-PRC-SPEAKING-REALTIME`) remains advanced until live Examiner → Learner → Examiner evidence and fallback canary pass; this PRD does not claim it is Beta-ready merely because an engineering PR exists.
+Speaking realtime (`CAP-PRC-SPEAKING-REALTIME`) remains advanced/post_beta. Examiner → Learner → Examiner live evidence and fallback canary are necessary but not sufficient for Public Beta inclusion. Moving it into Beta requires an explicit Capability Registry and PRD scope change, Product Owner approval, privacy/cost/accessibility/reliability gates, and deterministic fallback evidence. an open or merged engineering PR cannot reclassify product scope.
 
 ## Functional Requirements
 
@@ -192,7 +192,9 @@ Canonical loop:
 
 Diagnose → Learn → Controlled Practice → Feedback → Retrieval → Transfer → Independent Assessment → Update learner model → Recommend next action
 
-Require canonical EvidenceClass, CompetencyState and MistakeEvidence contracts from the Learning Framework, owned by `CAP-GLB-EVIDENCE` and applied by Review & Progress.
+Require canonical EvidenceClass, CompetencyState, SkillEvidence, MistakeEvidence, MasteryUpdate and ProgressUpdate contracts from the Learning Framework, owned by `CAP-GLB-EVIDENCE` and applied by Review & Progress. This PRD does not redefine those schemas.
+
+Every module must complete at least one journey that emits the contracts/evidence declared for its ownership. Sources emits SourceVersion, provenance, citation/rights state, ValidatedArtifactDraft and DestinationHandoff. Sources import/chat/artifact orchestration does not directly create learner mastery or improvement. Vocabulary, Grammar/Strategy, Media, Practice and Mock emit learner SkillEvidence/MistakeEvidence as applicable. Review & Progress validates/aggregates evidence and applies MasteryUpdate/ProgressUpdate. App Shell emits UX transition evidence, not learning mastery. A downstream learner attempt created from a source-derived artifact may emit learning evidence; the source import or AI-generated draft itself does not.
 
 **Explicit exclusions**
 
@@ -204,7 +206,7 @@ No progress/mastery from exposure, reveal, copied model answer, AI-written answe
 
 **Emitted evidence**
 
-LearningEvent, Attempt, Evaluation, EvidenceClass, CompetencyState counters, and MistakeEvidence. Tutor/AI material is at most Exposure if later opened as learning material.
+LearningEvent, Attempt, Evaluation, SkillEvidence, MistakeEvidence, MasteryUpdate, ProgressUpdate, EvidenceClass and CompetencyState. Tutor/AI material is at most Exposure if later opened as learning material.
 
 **Metrics and guardrails**
 
@@ -212,7 +214,7 @@ LearningEvent, Attempt, Evaluation, EvidenceClass, CompetencyState counters, and
 
 **Release acceptance summary**
 
-Each of the seven modules can complete at least one evidence-emitting journey that updates CompetencyState or MistakeEvidence without treating reveal, AI output, or empty audio as mastery.
+Every module can complete at least one owned-contract journey. Sources and App Shell never fabricate learner mastery. Learning/assessment journeys that claim progress emit valid SkillEvidence, MistakeEvidence, MasteryUpdate or ProgressUpdate, without treating reveal, AI output, or empty audio as mastery.
 
 ### PRD-004 — Explainable adaptive recommendation
 
@@ -365,7 +367,7 @@ A diagnosed grammar or strategy gap can move from lesson to controlled practice 
 
 **User outcome**
 
-The learner can practise from original audio or video, shadow or dictate with a real microphone, and resume without treating a missing transcript or missing mic as a completed score.
+The learner can practise from original audio or video. Shadowing records real learner microphone audio. Dictation plays original audio and accepts typed/arranged/gap-fill learner responses. Missing microphone makes Shadowing acoustic/pronunciation evaluation unavailable but must not disable Dictation. Resume must not treat a missing transcript or missing mic as a completed score.
 
 **In-scope behaviour**
 
@@ -375,7 +377,8 @@ The learner can practise from original audio or video, shadow or dictate with a 
 - sentence/segment progression;
 - speed/repeat/wait/A–B loop;
 - word-level diff;
-- real microphone input;
+- Shadowing records real learner microphone audio;
+- Dictation does not require microphone permission;
 - honest pronunciation/prosody availability;
 - resume.
 
@@ -394,7 +397,7 @@ Media consumes Sources; Sources keep provenance.
 
 **Emitted evidence**
 
-Listening/spelling MistakeEvidence from Dictation, fluency/pronunciation evidence from Shadowing only when real audio and valid timestamps/VAD exist, otherwise unavailable.
+Listening/spelling MistakeEvidence from typed learner Dictation responses. Shadowing emits acoustic evidence only with real audio and valid timestamps/VAD; otherwise unavailable.
 
 **Metrics and guardrails**
 
@@ -402,7 +405,7 @@ Listening/spelling MistakeEvidence from Dictation, fluency/pronunciation evidenc
 
 **Release acceptance summary**
 
-Shadowing and Dictation run on original media, resume preserves version, and missing mic/audio/transcript is unavailable rather than a fabricated pronunciation score.
+Shadowing records real learner microphone audio. Dictation does not require microphone permission. Missing microphone makes Shadowing evaluation unavailable but must not disable Dictation. Resume preserves media version, and missing transcript is unavailable rather than a fabricated pronunciation score.
 
 ### PRD-009 — Four-skill IELTS Practice
 
@@ -454,6 +457,13 @@ The learner can sit a computer-delivered Mock only when the package is valid, re
 **In-scope behaviour**
 
 - staged build;
+- Live Hub → Full Mock;
+- selected-source draft → Mock build / source-derived Mock;
+- validator repair;
+- ready package → exam;
+- standard staged Mock assembly from shipped content, validated source-derived drafts and Live Hub conversion;
+- AI/deterministic completion of missing approved sections through CAP-MCK-BUILD and CAP-GLB-CONTENT-QUALITY;
+- user enters the exam only after ready/persisted;
 - validated immutable package;
 - 40 Listening;
 - 40 Reading;
@@ -473,7 +483,7 @@ The learner can sit a computer-delivered Mock only when the package is valid, re
 
 **Explicit exclusions**
 
-Custom Mock authoring is advanced, not Beta. Invalid or cut audio cannot be ready. Independent Mock evidence is stronger than assisted Practice and must not be mixed without labelling.
+`CAP-MCK-CUSTOM` means unrestricted/manual arbitrary package authoring or an expert item-bank editor. excluding CAP-MCK-CUSTOM must not disable core MockBuild, Live Hub → Full Mock or source-derived Mock creation. Invalid or cut audio cannot be ready. Independent Mock evidence is stronger than assisted Practice and must not be mixed without labelling.
 
 **Linked capabilities**
 
@@ -819,7 +829,9 @@ Public Beta succeeds only when all of the following are true:
 
 - primary Band 5.0–5.5 segment can complete the core learning loop;
 - adjacent 4.5–5.0 and 6.0–6.5 flows are honest and usable within approved scope;
-- all seven modules have at least one complete evidence-emitting journey;
+- all seven modules have at least one complete owned-contract journey;
+- all learning/assessment journeys that claim progress emit valid learner evidence;
+- Sources and utility surfaces never fabricate learner mastery;
 - no open release blocker;
 - metrics can be measured without fabricating missing data;
 - provider failures degrade honestly;
