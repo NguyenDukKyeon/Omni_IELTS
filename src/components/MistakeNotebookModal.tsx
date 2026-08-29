@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   AlertTriangle,
@@ -55,6 +55,19 @@ export const MistakeNotebookModal: React.FC = () => {
   const [newTrapCategory, setNewTrapCategory] = useState<TrapCategory>('trap_not_given');
   const [newErrorType, setNewErrorType] = useState<ErrorCategory>('task_response');
   const [newSkill, setNewSkill] = useState<SkillType>('reading');
+
+  useEffect(() => {
+    if (!isMistakeNotebookOpen) return;
+    try {
+      if (sessionStorage.getItem('omni_open_mistake_workout') === '1') {
+        sessionStorage.removeItem('omni_open_mistake_workout');
+        setWorkoutTrapTarget('all');
+        setActiveTab('workout');
+      }
+    } catch {
+      // The notebook still opens on the default tab when storage is unavailable.
+    }
+  }, [isMistakeNotebookOpen]);
 
   if (!isMistakeNotebookOpen) return null;
 

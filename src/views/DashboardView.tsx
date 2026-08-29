@@ -127,7 +127,7 @@ export const DashboardView: React.FC = () => {
               </span>
               <div className="flex items-center gap-1 text-xs font-bold bg-blue-800 px-2.5 py-1 rounded-full">
                 <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-                <span>Lv.{level}</span>
+                <span>Cấp {level}</span>
               </div>
             </div>
 

@@ -137,25 +137,7 @@ export const FloatingAITutor: React.FC = () => {
 
   return (
     <>
-      {/* Floating Button (always visible across all screens) */}
-      {!isAITutorOpen && (
-        <button data-ux-flow="tutor.chat"
-          id="floating-ai-tutor-trigger"
-          onClick={() => setIsAITutorOpen(true)}
-          className="fixed bottom-16 md:bottom-6 right-4 sm:right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full bg-slate-900 dark:bg-blue-600 text-white font-bold text-sm shadow-xl shadow-slate-900/25 dark:shadow-blue-600/30 hover:scale-105 active:scale-95 transition-all duration-200 group border border-white/20 cursor-pointer"
-          title="Hỏi Gia sư AI về nội dung màn hình này"
-          aria-label="Open AI Tutor"
-        >
-          <div className="relative">
-            <Sparkles className="w-5 h-5 text-amber-300" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full ring-2 ring-slate-900 dark:ring-blue-600 animate-ping" />
-          </div>
-          <span className="tracking-wide">Hỏi AI Tutor</span>
-          <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-semibold hidden sm:inline">
-            Band {profile.targetBand.toFixed(1)}
-          </span>
-        </button>
-      )}
+      {/* AI Tutor is opened from the functional header. The sparkle FAB is retired from the migrated shell. */}
 
       {/* Floating AI Chat Window / Drawer */}
       {isAITutorOpen && (
