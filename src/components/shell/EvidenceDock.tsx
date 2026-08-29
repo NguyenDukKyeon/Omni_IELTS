@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, CircleAlert } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAppShell } from '../../context/AppShellContext';
 import { buildEvidenceDockModel, type EvidenceDockItem } from '../../lib/evidenceDock';
+import { isUnfinishedPracticeAttempt } from '../../lib/learningEvidence';
 import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
 import type { ModuleId } from '../../types';
 
@@ -11,11 +12,18 @@ function controlForItem(item: EvidenceDockItem):
   | 'shell.evidence.open-due-vocab'
   | 'shell.evidence.open-context'
   | 'shell.evidence.resume-latest'
+  | 'shell.evidence.open-practice'
+  | 'shell.evidence.open-mock'
   | null {
+  if (item.action === 'none' || !item.destination) return null;
   if (item.id === 'due-mistakes') return 'shell.evidence.open-due-review';
   if (item.id === 'due-vocab') return 'shell.evidence.open-due-vocab';
-  if (item.id === 'current-media' || item.id === 'missing-context-evidence') return 'shell.evidence.open-context';
-  if (item.status === 'recent') return 'shell.evidence.resume-latest';
+  if (item.action === 'resume') return 'shell.evidence.resume-latest';
+  if (item.action === 'open_module' && item.destination === 'practice') return 'shell.evidence.open-practice';
+  if (item.action === 'open_module' && item.destination === 'mock_test') return 'shell.evidence.open-mock';
+  if (item.action === 'collect' || item.id === 'current-media' || item.action === 'open_module') {
+    return 'shell.evidence.open-context';
+  }
   return null;
 }
 
@@ -31,6 +39,7 @@ export function EvidenceDock() {
     setActiveModule,
   } = useApp();
   const { evidenceDock, setEvidenceDock } = useAppShell();
+  const dockRef = useRef<HTMLElement>(null);
   const collapseRef = useRef<HTMLButtonElement>(null);
   const expandRef = useRef<HTMLButtonElement>(null);
   const previousState = useRef(evidenceDock);
@@ -38,13 +47,16 @@ export function EvidenceDock() {
   const dueMistakes = getDueMistakes(mistakes);
   const dueVocab = getDueVocabCards(vocabCards);
   const currentMedia = mediaSessions.find((session) => !session.completed);
+  const unfinished = practiceAttempts.find(isUnfinishedPracticeAttempt);
   const latestAttempt = practiceAttempts[0];
   const latestMock = mockResults[0];
-  const recentEvidence = latestAttempt
-    ? [{ id: latestAttempt.id, label: latestAttempt.taskType, destination: 'practice' as ModuleId }]
-    : latestMock
-      ? [{ id: latestMock.id, label: latestMock.testTitle, destination: 'mock_test' as ModuleId }]
-      : [];
+  const recentEvidence = unfinished
+    ? [{ id: unfinished.id, label: unfinished.taskType, destination: 'practice' as ModuleId, canResume: true }]
+    : latestAttempt
+      ? [{ id: latestAttempt.id, label: latestAttempt.taskType, destination: 'practice' as ModuleId, canResume: false }]
+      : latestMock
+        ? [{ id: latestMock.id, label: latestMock.testTitle, destination: 'mock_test' as ModuleId, canResume: false }]
+        : [];
 
   const model = buildEvidenceDockModel({
     activeModule,
@@ -69,6 +81,8 @@ export function EvidenceDock() {
     if (model.visibility === 'hidden' || evidenceDock === 'collapsed') return undefined;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      const target = event.target as Node | null;
+      if (!dockRef.current || !target || !dockRef.current.contains(target)) return;
       event.preventDefault();
       setEvidenceDock('collapsed');
     };
@@ -89,7 +103,7 @@ export function EvidenceDock() {
 
   if (evidenceDock === 'collapsed') {
     return (
-      <aside className="omni-evidence-dock is-collapsed" aria-label="Bằng chứng và việc đến hạn">
+      <aside ref={dockRef} className="omni-evidence-dock is-collapsed" aria-label="Bằng chứng và việc đến hạn">
         <button
           ref={expandRef}
           type="button"
@@ -106,10 +120,10 @@ export function EvidenceDock() {
   }
 
   return (
-    <aside className="omni-evidence-dock" aria-label="Bằng chứng và việc đến hạn">
+    <aside ref={dockRef} className="omni-evidence-dock" aria-label="Bằng chứng và việc đến hạn">
       <header className="omni-evidence-dock__header">
         <div>
-          <p className="omni-evidence-dock__eyebrow">Evidence Dock</p>
+          <p className="omni-evidence-dock__eyebrow">Bằng chứng học tập</p>
           <h2>Bằng chứng và việc đến hạn</h2>
         </div>
         <button
@@ -147,9 +161,13 @@ export function EvidenceDock() {
                             ? 'shell.evidence.open-due-review'
                             : control === 'shell.evidence.open-due-vocab'
                               ? 'shell.evidence.open-due-vocab'
-                              : control === 'shell.evidence.open-context'
-                                ? 'shell.evidence.open-context'
-                                : 'shell.evidence.resume-latest'
+                              : control === 'shell.evidence.open-practice'
+                                ? 'shell.evidence.open-practice'
+                                : control === 'shell.evidence.open-mock'
+                                  ? 'shell.evidence.open-mock'
+                                  : control === 'shell.evidence.resume-latest'
+                                    ? 'shell.evidence.resume-latest'
+                                    : 'shell.evidence.open-context'
                         }
                         onClick={() => openDestination(item.destination)}
                       >

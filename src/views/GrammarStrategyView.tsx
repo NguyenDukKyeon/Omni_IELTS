@@ -1,11 +1,40 @@
-import { useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { GrammarHubView } from './GrammarHubView';
 import { KnowledgeBaseView } from './KnowledgeBaseView';
 
 type GrammarStrategyTab = 'grammar' | 'strategy';
 
+const TABS: ReadonlyArray<{ id: GrammarStrategyTab; label: string }> = [
+  { id: 'grammar', label: 'Grammar' },
+  { id: 'strategy', label: 'IELTS Strategy' },
+];
+
 export function GrammarStrategyView() {
   const [activeTab, setActiveTab] = useState<GrammarStrategyTab>('grammar');
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const activate = (index: number) => {
+    const next = TABS[index];
+    setActiveTab(next.id);
+    tabRefs.current[index]?.focus();
+  };
+
+  const onTabListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = TABS.findIndex((tab) => tab.id === activeTab);
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      activate((current + 1) % TABS.length);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      activate((current - 1 + TABS.length) % TABS.length);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      activate(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      activate(TABS.length - 1);
+    }
+  };
 
   return (
     <div className="omni-grammar-strategy">
@@ -13,35 +42,28 @@ export function GrammarStrategyView() {
         className="omni-grammar-strategy__tabs"
         role="tablist"
         aria-label="Grammar and Strategy"
+        onKeyDown={onTabListKeyDown}
       >
-        <button
-          type="button"
-          role="tab"
-          id="grammar-strategy-tab-grammar"
-          aria-selected={activeTab === 'grammar'}
-          aria-controls="grammar-strategy-panel-grammar"
-          tabIndex={activeTab === 'grammar' ? 0 : -1}
-          className={`omni-grammar-strategy__tab ${activeTab === 'grammar' ? 'is-active' : ''}`}
-          data-ux-flow="grammar.learning"
-          data-ux-control="shell.grammar.tab-grammar"
-          onClick={() => setActiveTab('grammar')}
-        >
-          Grammar
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="grammar-strategy-tab-strategy"
-          aria-selected={activeTab === 'strategy'}
-          aria-controls="grammar-strategy-panel-strategy"
-          tabIndex={activeTab === 'strategy' ? 0 : -1}
-          className={`omni-grammar-strategy__tab ${activeTab === 'strategy' ? 'is-active' : ''}`}
-          data-ux-flow="grammar.learning"
-          data-ux-control="shell.grammar.tab-strategy"
-          onClick={() => setActiveTab('strategy')}
-        >
-          IELTS Strategy
-        </button>
+        {TABS.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={(node) => {
+              tabRefs.current[index] = node;
+            }}
+            type="button"
+            role="tab"
+            id={`grammar-strategy-tab-${tab.id}`}
+            aria-selected={activeTab === tab.id}
+            aria-controls={`grammar-strategy-panel-${tab.id}`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            className={`omni-grammar-strategy__tab ${activeTab === tab.id ? 'is-active' : ''}`}
+            data-ux-flow="grammar.learning"
+            data-ux-control={tab.id === 'grammar' ? 'shell.grammar.tab-grammar' : 'shell.grammar.tab-strategy'}
+            onClick={() => activate(index)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
       {activeTab === 'grammar' ? (
         <div

@@ -192,6 +192,8 @@
   background: var(--omni-ground);
   color: var(--omni-text);
   font-family: var(--omni-font-sans);
+  overflow-x: hidden;
+  min-width: 0;
 }
 
 .omni-focus-dock--exam {
@@ -581,8 +583,76 @@
 }
 
 @media (max-width: 1100px) {
+  .omni-focus-dock__evidence {
+    display: none;
+  }
+
+  .omni-focus-dock__body,
   .omni-focus-dock__body--with-evidence {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .omni-focus-dock__nav,
+  .omni-focus-dock__evidence {
+    display: none;
+  }
+
+  .omni-focus-dock__body,
+  .omni-focus-dock__body--with-evidence {
+    display: block;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .omni-focus-dock__main {
+    width: 100%;
+    min-width: 0;
+    padding: 1rem 0.85rem 5.5rem;
+  }
+
+  .omni-shell-header {
+    gap: 0.4rem;
+    padding: 0.5rem 0.7rem;
+    min-width: 0;
+  }
+
+  .omni-shell-header__home {
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  .omni-shell-header .omni-logo__type {
+    display: none;
+  }
+
+  .omni-shell-header__actions {
+    min-width: 0;
+    flex-wrap: nowrap;
+    gap: 0.3rem;
+  }
+
+  .omni-shell-header__action {
+    padding: 0.4rem;
+    min-width: 2.5rem;
+    justify-content: center;
+  }
+
+  .omni-shell-header__action span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .omni-dashboard {
+    max-width: none;
+  }
+
+  .omni-review-progress__skills,
+  .omni-review-progress__history {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -730,6 +800,27 @@
   color: var(--omni-text-muted);
   font-size: 0.78rem;
   font-weight: 500;
+}
+
+.omni-daily-coach__alt-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+  color: var(--omni-action-primary);
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.omni-daily-coach__alt-action svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.omni-daily-coach__alt:hover,
+.omni-daily-coach__alt:focus-visible {
+  border-color: var(--omni-action-primary);
 }
 
 .omni-dashboard__snapshot {
@@ -891,5 +982,95 @@
 @media (max-width: 1100px) {
   .omni-evidence-dock:not(.is-collapsed) {
     width: 16.5rem;
+  }
+}
+
+.omni-module-chooser {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: color-mix(in srgb, var(--omni-text) 32%, transparent);
+}
+
+.omni-module-chooser__panel {
+  width: min(28rem, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 1rem 1rem 1.25rem;
+  border: 1px solid var(--omni-border);
+  border-radius: var(--omni-radius-lg) var(--omni-radius-lg) 0 0;
+  background: var(--omni-surface-raised);
+  box-shadow: var(--omni-shadow-raised);
+}
+
+.omni-module-chooser__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.omni-module-chooser__header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.omni-module-chooser__close,
+.omni-module-chooser__item {
+  display: flex;
+  border: 1px solid var(--omni-border);
+  background: var(--omni-ground);
+  color: var(--omni-text);
+  cursor: pointer;
+}
+
+.omni-module-chooser__close {
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--omni-radius-sm);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.omni-module-chooser__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.omni-module-chooser__item {
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-height: 3rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--omni-radius-md);
+  text-align: left;
+}
+
+.omni-module-chooser__item span {
+  color: var(--omni-text-muted);
+  font-size: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .omni-module-chooser {
+    align-items: center;
+    padding: 1.5rem;
+  }
+
+  .omni-module-chooser__panel {
+    border-radius: var(--omni-radius-lg);
   }
 }

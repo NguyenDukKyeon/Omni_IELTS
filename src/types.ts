@@ -743,6 +743,8 @@ export interface PracticeAttempt {
   mistakesGeneratedCount: number;
   timestamp: string;
   durationMinutes: number;
+  evidenceClass?: 'independent' | 'mock';
+  status?: 'in_progress' | 'completed' | 'invalid';
 }
 
 export type ExamColorScheme = 'standard' | 'high_contrast' | 'inverted';
@@ -808,6 +810,8 @@ export interface MockResult {
   readingRawScore?: number; // e.g. 33/40
   completedDate: string;
   timeSpentMinutes: number;
+  evidenceClass?: 'independent' | 'mock';
+  status?: 'in_progress' | 'completed' | 'invalid';
   provenance?: FullMockTestPackage['provenance'];
   breakdown: string[];
   strengths?: string[];

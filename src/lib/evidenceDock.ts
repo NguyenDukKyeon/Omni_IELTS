@@ -6,8 +6,15 @@ export interface EvidenceDockInput {
   dueMistakeCount: number;
   dueVocabCount: number;
   currentMediaTitle?: string;
-  recentEvidence: Array<{ id: string; label: string; destination?: ModuleId }>;
+  recentEvidence: Array<{
+    id: string;
+    label: string;
+    destination?: ModuleId;
+    canResume?: boolean;
+  }>;
 }
+
+export type EvidenceDockAction = 'collect' | 'open_module' | 'resume' | 'none';
 
 export interface EvidenceDockItem {
   id: string;
@@ -15,6 +22,7 @@ export interface EvidenceDockItem {
   detail: string;
   status: 'due' | 'recent' | 'unfinished' | 'missing' | 'unavailable';
   destination?: ModuleId;
+  action?: EvidenceDockAction;
 }
 
 export interface EvidenceDockSection {
@@ -26,6 +34,12 @@ export interface EvidenceDockSection {
 export interface EvidenceDockModel {
   visibility: 'open' | 'collapsed' | 'hidden';
   sections: EvidenceDockSection[];
+}
+
+function openModuleCopy(destination?: ModuleId): string {
+  if (destination === 'practice') return 'Mở IELTS Practice';
+  if (destination === 'mock_test') return 'Mở IELTS Mock';
+  return 'Mở module tương ứng';
 }
 
 export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockModel {
@@ -40,13 +54,15 @@ export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockMo
       detail: 'Mở Review & Progress để luyện lại',
       status: 'due',
       destination: 'review_progress',
+      action: 'open_module',
     } : null,
     input.dueVocabCount > 0 ? {
       id: 'due-vocab',
       label: input.dueVocabCount + ' từ đến hạn',
-      detail: 'Ôn theo lịch FSRS',
+      detail: 'Ôn theo lịch ôn thông minh',
       status: 'due',
       destination: 'vocabulary',
+      action: 'open_module',
     } : null,
   ];
   const dueItems = dueCandidates.filter(
@@ -66,14 +82,24 @@ export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockMo
         detail: 'Tiếp tục từ segment đã lưu',
         status: 'unfinished',
         destination: 'media',
+        action: 'open_module',
       }]
-    : [{
-        id: 'missing-context-evidence',
-        label: 'Chưa đủ bằng chứng',
-        detail: 'Hoàn thành một hoạt động độc lập để cập nhật.',
-        status: 'missing',
-        destination: input.activeModule,
-      }];
+    : input.activeModule === 'practice'
+      ? [{
+          id: 'missing-context-evidence',
+          label: 'Chưa đủ bằng chứng',
+          detail: 'Hoàn thành một bài tự làm để cập nhật.',
+          status: 'missing',
+          action: 'none',
+        }]
+      : [{
+          id: 'missing-context-evidence',
+          label: 'Chưa đủ bằng chứng',
+          detail: 'Làm một bài tự làm để tạo bằng chứng mới.',
+          status: 'missing',
+          destination: 'practice',
+          action: 'collect',
+        }];
 
   return {
     visibility: 'open',
@@ -84,9 +110,14 @@ export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockMo
         id: 'recent-evidence',
         title: 'Bằng chứng gần đây',
         items: input.recentEvidence.map((item) => ({
-          ...item,
-          detail: 'Mở attempt đã lưu',
+          id: item.id,
+          label: item.label,
+          destination: item.destination,
           status: 'recent' as const,
+          action: item.canResume ? 'resume' : 'open_module',
+          detail: item.canResume
+            ? 'Tiếp tục bài đang làm'
+            : openModuleCopy(item.destination),
         })),
       },
     ],

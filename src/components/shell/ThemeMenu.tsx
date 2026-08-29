@@ -48,6 +48,7 @@ export function ThemeMenu() {
         className="omni-shell-header__action"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Giao diện"
         data-ux-flow="app.navigation"
         data-ux-control="shell.theme.open"
         onClick={() => setOpen((current) => !current)}

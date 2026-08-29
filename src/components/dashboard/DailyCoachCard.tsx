@@ -2,24 +2,30 @@ import { useState } from 'react';
 import { ArrowRight, ChevronDown, Clock, Compass } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { buildDailyCoachModel, type DailyCoachAction } from '../../lib/dailyCoach';
+import { isUnfinishedPracticeAttempt } from '../../lib/learningEvidence';
 import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
+import { ModuleChooser } from '../shell/ModuleChooser';
 
 export function DailyCoachCard() {
   const {
     profile,
     mistakes,
     vocabCards,
+    practiceAttempts,
     setActiveModule,
     setIsDiagnosticOpen,
   } = useApp();
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   const dueMistakes = getDueMistakes(mistakes);
   const dueVocab = getDueVocabCards(vocabCards);
+  const unfinished = practiceAttempts.find(isUnfinishedPracticeAttempt);
   const model = buildDailyCoachModel({
     diagnosticComplete: profile.completedDiagnostic,
     dueMistakeIds: dueMistakes.map((item) => item.id),
     dueVocabIds: dueVocab.map((item) => item.id),
+    unfinishedPracticeId: unfinished?.id,
   });
 
   const runAction = (action: DailyCoachAction) => {
@@ -27,12 +33,8 @@ export function DailyCoachCard() {
       setIsDiagnosticOpen(true);
       return;
     }
-    if (action.kind === 'manual_module') {
-      const controlId = 'shell.nav.sources';
-      const navButton = document.querySelector<HTMLButtonElement>(
-        `#desktop-sidebar [data-ux-control="${controlId}"]`,
-      );
-      navButton?.focus();
+    if (action.command === 'open_module_chooser' || action.kind === 'manual_module') {
+      setChooserOpen(true);
       return;
     }
     setActiveModule(action.destination);
@@ -103,6 +105,10 @@ export function DailyCoachCard() {
         >
           <strong>{firstAlternative.title}</strong>
           <span>{firstAlternative.reason}</span>
+          <em className="omni-daily-coach__alt-action">
+            Mở
+            <ArrowRight aria-hidden="true" />
+          </em>
         </button>
         <button
           type="button"
@@ -113,8 +119,21 @@ export function DailyCoachCard() {
         >
           <strong>{secondAlternative.title}</strong>
           <span>{secondAlternative.reason}</span>
+          <em className="omni-daily-coach__alt-action">
+            Mở
+            <ArrowRight aria-hidden="true" />
+          </em>
         </button>
       </div>
+
+      <ModuleChooser
+        open={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        onSelect={(id) => {
+          setActiveModule(id);
+          setChooserOpen(false);
+        }}
+      />
     </section>
   );
 }

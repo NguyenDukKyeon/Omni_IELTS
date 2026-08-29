@@ -31,4 +31,64 @@ describe('Evidence Dock', () => {
       recentEvidence: [],
     }).visibility).toBe('hidden');
   });
+
+  it('routes missing evidence to Independent Practice instead of the current module', () => {
+    const dashboard = buildEvidenceDockModel({
+      activeModule: 'dashboard',
+      dueMistakeCount: 0,
+      dueVocabCount: 0,
+      recentEvidence: [],
+    });
+    const missing = dashboard.sections.find(({ id }) => id === 'dashboard-context')?.items[0];
+    expect(missing?.status).toBe('missing');
+    expect(missing?.destination).toBe('practice');
+    expect(missing?.action).toBe('collect');
+  });
+
+  it('renders missing evidence as non-interactive when already on Practice', () => {
+    const practice = buildEvidenceDockModel({
+      activeModule: 'practice',
+      dueMistakeCount: 0,
+      dueVocabCount: 0,
+      recentEvidence: [],
+    });
+    const missing = practice.sections.find(({ id }) => id === 'practice-context')?.items[0];
+    expect(missing?.status).toBe('missing');
+    expect(missing?.destination).toBeUndefined();
+    expect(missing?.action).toBe('none');
+  });
+
+  it('does not mark completed recent work as a resume transition', () => {
+    const model = buildEvidenceDockModel({
+      activeModule: 'dashboard',
+      dueMistakeCount: 0,
+      dueVocabCount: 0,
+      recentEvidence: [{
+        id: 'att_1',
+        label: 'Writing Task 2',
+        destination: 'practice',
+        canResume: false,
+      }],
+    });
+    const recent = model.sections.find(({ id }) => id === 'recent-evidence')?.items[0];
+    expect(recent?.status).toBe('recent');
+    expect(recent?.action).toBe('open_module');
+    expect(recent?.detail).toMatch(/Mở IELTS Practice/);
+  });
+
+  it('uses resume only when the stored attempt is in progress', () => {
+    const model = buildEvidenceDockModel({
+      activeModule: 'dashboard',
+      dueMistakeCount: 0,
+      dueVocabCount: 0,
+      recentEvidence: [{
+        id: 'att-open',
+        label: 'Writing Task 2',
+        destination: 'practice',
+        canResume: true,
+      }],
+    });
+    const recent = model.sections.find(({ id }) => id === 'recent-evidence')?.items[0];
+    expect(recent?.action).toBe('resume');
+  });
 });

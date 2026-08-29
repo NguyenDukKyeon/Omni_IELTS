@@ -1,5 +1,6 @@
 import { AlertTriangle, ArrowRight, BookOpenCheck, GraduationCap } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { isExplicitIndependentEvidence, isExplicitMockEvidence } from '../lib/learningEvidence';
 import { getDueMistakes } from '../services/srsScheduler';
 import type { SkillType } from '../types';
 
@@ -39,7 +40,7 @@ export function ReviewProgressView() {
         <p className="omni-review-progress__lede">
           {dueMistakes.length > 0
             ? `${dueMistakes.length} lỗi đã đến lịch ôn và vẫn liên kết với bài làm gốc.`
-            : 'Chưa có lỗi đến hạn. Hoàn thành một bài Independent để tạo bằng chứng ôn tập.'}
+            : 'Chưa có lỗi đến hạn. Hoàn thành một bài tự làm để tạo bằng chứng ôn tập.'}
         </p>
       </header>
 
@@ -67,15 +68,17 @@ export function ReviewProgressView() {
           const mockBand = latestMock
             ? latestMock[`${skill.id}Band` as 'listeningBand' | 'readingBand' | 'writingBand' | 'speakingBand']
             : undefined;
-          const hasAttemptEvidence = typeof attempt?.scoreBand === 'number';
-          const hasMockEvidence = typeof mockBand === 'number';
+          const hasAttemptEvidence = Boolean(attempt && isExplicitIndependentEvidence(attempt));
+          const hasMockEvidence = Boolean(
+            latestMock && isExplicitMockEvidence(latestMock) && typeof mockBand === 'number',
+          );
 
           return (
             <article key={skill.id} className="omni-review-progress__skill">
               <h2>{skill.label}</h2>
               {hasAttemptEvidence && attempt ? (
                 <p>
-                  Bằng chứng Independent: {attempt.taskType} · band {attempt.scoreBand.toFixed(1)}
+                  Bằng chứng bài tự làm: {attempt.taskType} · band {attempt.scoreBand.toFixed(1)}
                 </p>
               ) : hasMockEvidence && latestMock ? (
                 <p>

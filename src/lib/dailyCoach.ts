@@ -9,11 +9,11 @@ export interface DailyCoachInput {
 
 export interface DailyCoachAction {
   id: string;
-  kind: 'diagnostic' | 'due_mistake' | 'due_vocab' | 'resume' | 'baseline' | 'manual_module';
+  kind: 'diagnostic' | 'due_mistake' | 'due_vocab' | 'resume' | 'baseline' | 'manual_module' | 'collect_source';
   title: string;
   reason: string;
   destination: ModuleId;
-  command: 'open_module' | 'open_diagnostic';
+  command: 'open_module' | 'open_diagnostic' | 'open_module_chooser';
   evidenceRefs: string[];
   estimatedMinutes?: number;
   confidence: 'low' | 'medium' | 'high';
@@ -31,7 +31,7 @@ export function buildDailyCoachModel(input: DailyCoachInput): DailyCoachModel {
     title: 'Tự chọn module',
     reason: 'Bạn luôn có thể chọn nội dung phù hợp với kế hoạch của mình.',
     destination: 'dashboard',
-    command: 'open_module',
+    command: 'open_module_chooser',
     evidenceRefs: [],
     confidence: 'high',
   };
@@ -60,7 +60,7 @@ export function buildDailyCoachModel(input: DailyCoachInput): DailyCoachModel {
     id: 'review-due-vocab',
     kind: 'due_vocab',
     title: 'Ôn từ đến hạn',
-    reason: 'FSRS đã chọn những mục gần ngưỡng quên.',
+    reason: 'Lịch ôn thông minh đã chọn những mục gần ngưỡng quên.',
     destination: 'vocabulary',
     command: 'open_module',
     evidenceRefs: input.dueVocabIds.map((id) => 'vocab:' + id),
@@ -80,7 +80,7 @@ export function buildDailyCoachModel(input: DailyCoachInput): DailyCoachModel {
   const baseline: DailyCoachAction = {
     id: 'independent-baseline',
     kind: 'baseline',
-    title: 'Làm một bài Independent ngắn',
+    title: 'Làm một bài tự làm ngắn',
     reason: 'Một bài mới sẽ tạo bằng chứng độc lập cho đề xuất tiếp theo.',
     destination: 'practice',
     command: 'open_module',
@@ -88,11 +88,21 @@ export function buildDailyCoachModel(input: DailyCoachInput): DailyCoachModel {
     estimatedMinutes: 15,
     confidence: 'medium',
   };
+  const sourceCollect: DailyCoachAction = {
+    id: 'collect-source',
+    kind: 'collect_source',
+    title: 'Nhập một nguồn học',
+    reason: 'Một nguồn mới sẽ tạo dữ liệu độc lập cho đề xuất tiếp theo.',
+    destination: 'sources',
+    command: 'open_module',
+    evidenceRefs: [],
+    confidence: 'medium',
+  };
 
-  const ordered = [dueMistakes, dueVocab, resume, baseline].filter(
+  const ordered = [dueMistakes, dueVocab, resume, baseline, sourceCollect].filter(
     (action): action is DailyCoachAction => action !== null,
   );
   const primary = input.diagnosticComplete ? ordered[0]! : diagnostic;
-  const secondary = ordered.find(({ id }) => id !== primary.id) ?? baseline;
+  const secondary = ordered.find(({ id }) => id !== primary.id && id !== manual.id) ?? sourceCollect;
   return { primary, alternatives: [secondary, manual] };
 }

@@ -41,6 +41,7 @@ export function AppHeader() {
           className={`omni-shell-header__action ${activeModule === 'profile' ? 'is-active' : ''}`}
           data-ux-flow="app.navigation"
           data-ux-control="shell.header.open-profile"
+          aria-label="Hồ sơ"
           onClick={() => setActiveModule('profile')}
         >
           <UserRound aria-hidden="true" className="omni-shell-header__action-icon" />

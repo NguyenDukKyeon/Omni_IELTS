@@ -1,6 +1,7 @@
 import { ArrowRight, BookOpenCheck, GraduationCap } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DailyCoachCard } from '../components/dashboard/DailyCoachCard';
+import { isExplicitIndependentEvidence, isExplicitMockEvidence } from '../lib/learningEvidence';
 import { getDueMistakes, getDueVocabCards } from '../services/srsScheduler';
 
 export function DashboardView() {
@@ -17,6 +18,10 @@ export function DashboardView() {
   const dueMistakes = getDueMistakes(mistakes);
   const latestAttempt = practiceAttempts[0];
   const latestMock = mockResults[0];
+  const independentEvidence = latestAttempt && isExplicitIndependentEvidence(latestAttempt)
+    ? latestAttempt
+    : null;
+  const mockEvidence = latestMock && isExplicitMockEvidence(latestMock) ? latestMock : null;
 
   return (
     <div id="dashboard-view" className="omni-dashboard">
@@ -35,12 +40,12 @@ export function DashboardView() {
           <h2>Việc đến hạn</h2>
           <p>
             {dueMistakes.length} lỗi · {dueVocab.length} từ.
-            Chi tiết nằm ở Evidence Dock bên phải, không lặp lại ở đây.
+            Chi tiết nằm ở khu bằng chứng học tập.
           </p>
         </article>
         <article>
-          <h2>Independent gần nhất</h2>
-          {latestAttempt ? (
+          <h2>Bài tự làm gần nhất</h2>
+          {independentEvidence ? (
             <button
               type="button"
               data-ux-flow="dashboard.daily"
@@ -48,7 +53,7 @@ export function DashboardView() {
               onClick={() => setActiveModule('practice')}
             >
               <BookOpenCheck aria-hidden="true" />
-              <span>{latestAttempt.taskType}</span>
+              <span>{independentEvidence.taskType}</span>
               <ArrowRight aria-hidden="true" />
             </button>
           ) : (
@@ -57,7 +62,7 @@ export function DashboardView() {
         </article>
         <article>
           <h2>Mock gần nhất</h2>
-          {latestMock ? (
+          {mockEvidence ? (
             <button
               type="button"
               data-ux-flow="dashboard.daily"
@@ -65,7 +70,7 @@ export function DashboardView() {
               onClick={() => setActiveModule('mock_test')}
             >
               <GraduationCap aria-hidden="true" />
-              <span>{latestMock.testTitle}</span>
+              <span>{mockEvidence.testTitle}</span>
               <ArrowRight aria-hidden="true" />
             </button>
           ) : (
