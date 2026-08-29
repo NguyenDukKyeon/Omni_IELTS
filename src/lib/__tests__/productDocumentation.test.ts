@@ -8,6 +8,7 @@ const requiredDocs = [
   'docs/product/LEARNING_AND_ASSESSMENT_FRAMEWORK.md',
   'docs/product/CAPABILITY_REGISTRY.md',
   'docs/product/PRD.md',
+  'docs/product/TRACEABILITY_MATRIX.md',
 ];
 
 const normalizeLineEndings = (value: string) =>
@@ -210,6 +211,63 @@ const definedCapabilityIds = [
   ...laterCapabilities,
   ...rejectedCapabilities,
 ];
+
+const domainSpecOwners = [
+  'platform',
+  'sources',
+  'vocabulary',
+  'grammar_strategy',
+  'media',
+  'practice',
+  'mock',
+  'review_progress',
+];
+
+const architectureOwners = [
+  'Identity & Privacy',
+  'Source Ingestion',
+  'Content & Provenance',
+  'Curriculum',
+  'Learning Activity',
+  'Assessment',
+  'Mastery & Scheduling',
+  'Mistake Lifecycle',
+  'Mock Exam',
+  'AI Orchestration',
+  'Voice & Media',
+  'Progress & Analytics',
+];
+
+type TraceabilityRow = {
+  id: string;
+  capabilities: string;
+  metrics: string;
+  domain: string;
+  architecture: string;
+  status: string;
+  cells: string[];
+};
+
+function parseTraceabilityRows(matrix: string): TraceabilityRow[] {
+  const rows: TraceabilityRow[] = [];
+  for (const line of normalizeLineEndings(matrix).split('\n')) {
+    if (!/^\| (?:PRD|NFR)-/.test(line)) continue;
+    const cells = line
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    rows.push({
+      id: cells[0] ?? '',
+      capabilities: cells[1] ?? '',
+      metrics: cells[2] ?? '',
+      domain: cells[3] ?? '',
+      architecture: cells[4] ?? '',
+      status: cells[5] ?? '',
+      cells,
+    });
+  }
+  return rows;
+}
 
 describe('product documentation contracts', () => {
   it('exposes a deterministic product documentation gate', () => {
@@ -948,5 +1006,61 @@ describe('product documentation contracts', () => {
     expect(prd010).toContain('source-derived Mock');
     expect(prd010).toContain('CAP-MCK-CUSTOM');
     expect(prd010).toContain('must not disable core MockBuild');
+  });
+
+  it('maps every product and non-functional requirement exactly once', () => {
+    const matrix = readFileSync(
+      resolve(root, 'docs/product/TRACEABILITY_MATRIX.md'),
+      'utf8',
+    );
+
+    for (const id of [...prdRequirementIds, ...nfrRequirementIds]) {
+      expect(
+        matrix.match(new RegExp(`^\\| ${id} \\|`, 'gm')),
+      ).toHaveLength(1);
+    }
+  });
+
+  it('parses the traceability matrix with portable columns, owners and core coverage', () => {
+    const matrix = normalizeLineEndings(
+      readFileSync(resolve(root, 'docs/product/TRACEABILITY_MATRIX.md'), 'utf8'),
+    );
+    const crlf = matrix.replace(/\n/g, '\r\n');
+    const rows = parseTraceabilityRows(matrix);
+    expect(parseTraceabilityRows(crlf)).toEqual(rows);
+    expect(rows).toHaveLength(18);
+    expect(rows.map((row) => row.id)).toEqual([
+      ...prdRequirementIds,
+      ...nfrRequirementIds,
+    ]);
+    const strategy = readFileSync(
+      resolve(root, 'docs/product/PRODUCT_STRATEGY.md'),
+      'utf8',
+    );
+    const definedMetrics = [
+      ...strategy.matchAll(/^### ((?:METRIC|GUARD)-[A-Z0-9-]+)\b/gm),
+    ].map((match) => match[1]);
+    const coveredCore = new Set<string>();
+    for (const row of rows) {
+      expect(row.cells).toHaveLength(6);
+      for (const cell of row.cells) expect(cell.length).toBeGreaterThan(0);
+      const caps = row.capabilities.match(/CAP-[A-Z0-9-]+/g) ?? [];
+      expect(caps.length).toBeGreaterThan(0);
+      for (const id of caps) expect(definedCapabilityIds).toContain(id);
+      const metrics = row.metrics.match(/(?:METRIC|GUARD)-[A-Z0-9-]+/g) ?? [];
+      expect(metrics.length).toBeGreaterThan(0);
+      for (const id of metrics) expect(definedMetrics).toContain(id);
+      expect(domainSpecOwners).toContain(row.domain);
+      expect(architectureOwners).toContain(row.architecture);
+      expect(row.status).toBe('product_approved');
+      for (const id of caps) {
+        if (coreCapabilities.includes(id)) coveredCore.add(id);
+      }
+    }
+    expect([...coveredCore].sort()).toEqual([...coreCapabilities].sort());
+    expect(coveredCore.size).toBe(coreCapabilities.length);
+    for (const id of [...advancedCapabilities, ...laterCapabilities, ...rejectedCapabilities]) {
+      expect(coreCapabilities).not.toContain(id);
+    }
   });
 });
