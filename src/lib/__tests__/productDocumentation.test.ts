@@ -1,6 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, mkdtempSync, cpSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { collectProductDocIssues } from '../../../scripts/check-product-docs.ts';
 
 const root = process.cwd();
 const requiredDocs = [
@@ -267,6 +269,39 @@ function parseTraceabilityRows(matrix: string): TraceabilityRow[] {
     });
   }
   return rows;
+}
+
+function withMutatedMatrix(mutate: (matrix: string) => string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'omni-product-docs-'));
+  try {
+    cpSync(resolve(root, 'docs/product'), join(dir, 'docs/product'), { recursive: true });
+    const matrixPath = join(dir, 'docs/product/TRACEABILITY_MATRIX.md');
+    writeFileSync(matrixPath, mutate(readFileSync(matrixPath, 'utf8')));
+    return collectProductDocIssues(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function rewriteRequirementRow(
+  matrix: string,
+  id: string,
+  field: 'capabilities' | 'metrics',
+  mutate: (value: string) => string,
+) {
+  const index = field === 'capabilities' ? 1 : 2;
+  return normalizeLineEndings(matrix)
+    .split('\n')
+    .map((line) => {
+      if (!line.startsWith(`| ${id} |`)) return line;
+      const cells = line
+        .split('|')
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      cells[index] = mutate(cells[index] ?? '');
+      return `| ${cells.join(' | ')} |`;
+    })
+    .join('\n');
 }
 
 describe('product documentation contracts', () => {
@@ -1062,5 +1097,115 @@ describe('product documentation contracts', () => {
     for (const id of [...advancedCapabilities, ...laterCapabilities, ...rejectedCapabilities]) {
       expect(coreCapabilities).not.toContain(id);
     }
+  });
+
+  it('rejects malformed requirement-looking matrix rows', () => {
+    const underscore = withMutatedMatrix(
+      (matrix) =>
+        `${matrix}\n| PRD_999 | CAP-GLB-APP-SHELL | METRIC-005 | platform | Learning Activity | product_approved |\n`,
+    );
+    expect(underscore.some((issue) => issue.startsWith('malformed_requirement_row:'))).toBe(true);
+    expect(
+      underscore.some(
+        (issue) =>
+          issue.includes('PRD_999') && issue.includes('docs/product/TRACEABILITY_MATRIX.md'),
+      ),
+    ).toBe(true);
+
+    const indented = withMutatedMatrix(
+      (matrix) =>
+        `${matrix}\n  | PRD-999 | CAP-GLB-APP-SHELL | METRIC-005 | platform | Learning Activity | product_approved |\n`,
+    );
+    expect(indented.some((issue) => issue.startsWith('malformed_requirement_row:'))).toBe(true);
+    expect(
+      indented.some(
+        (issue) =>
+          issue.includes('PRD-999') && issue.includes('docs/product/TRACEABILITY_MATRIX.md'),
+      ),
+    ).toBe(true);
+  });
+
+  it('enforces exact PRD and NFR capability-set parity with the matrix', () => {
+    const missing = withMutatedMatrix((matrix) =>
+      rewriteRequirementRow(matrix, 'PRD-005', 'capabilities', (value) =>
+        value.replace(', CAP-GLB-IDENTITY', ''),
+      ),
+    );
+    expect(
+      missing.some(
+        (issue) =>
+          issue.startsWith('capability_set_mismatch: PRD-005') &&
+          issue.includes('missing CAP-GLB-IDENTITY'),
+      ),
+    ).toBe(true);
+
+    const extra = withMutatedMatrix((matrix) =>
+      rewriteRequirementRow(
+        matrix,
+        'PRD-005',
+        'capabilities',
+        (value) => `${value}, CAP-VOC-CAPTURE`,
+      ),
+    );
+    expect(
+      extra.some(
+        (issue) =>
+          issue.startsWith('capability_set_mismatch: PRD-005') &&
+          issue.includes('extra CAP-VOC-CAPTURE'),
+      ),
+    ).toBe(true);
+  });
+
+  it('enforces exact metric and guardrail parity with the matrix', () => {
+    const missing = withMutatedMatrix((matrix) =>
+      rewriteRequirementRow(matrix, 'PRD-005', 'metrics', (value) =>
+        value.replace(', GUARD-003', ''),
+      ),
+    );
+    expect(
+      missing.some(
+        (issue) =>
+          issue.startsWith('metric_set_mismatch: PRD-005') && issue.includes('missing GUARD-003'),
+      ),
+    ).toBe(true);
+
+    const extra = withMutatedMatrix((matrix) =>
+      rewriteRequirementRow(matrix, 'PRD-005', 'metrics', (value) => `${value}, METRIC-005`),
+    );
+    expect(
+      extra.some(
+        (issue) =>
+          issue.startsWith('metric_set_mismatch: PRD-005') && issue.includes('extra METRIC-005'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects duplicate capability and metric references in one matrix cell', () => {
+    const duplicateCap = withMutatedMatrix((matrix) =>
+      rewriteRequirementRow(
+        matrix,
+        'PRD-005',
+        'capabilities',
+        (value) => `${value}, CAP-GLB-IDENTITY`,
+      ),
+    );
+    expect(
+      duplicateCap.some(
+        (issue) =>
+          issue.startsWith('duplicate_capability_reference: CAP-GLB-IDENTITY') &&
+          issue.includes('docs/product/TRACEABILITY_MATRIX.md'),
+      ),
+    ).toBe(true);
+
+    const duplicateMetric = withMutatedMatrix((matrix) =>
+      rewriteRequirementRow(matrix, 'PRD-005', 'metrics', (value) => `${value}, GUARD-001`),
+    );
+    expect(
+      duplicateMetric.some(
+        (issue) =>
+          issue.startsWith('duplicate_metric_reference: GUARD-001') &&
+          issue.includes('docs/product/TRACEABILITY_MATRIX.md'),
+      ),
+    ).toBe(true);
   });
 });

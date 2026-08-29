@@ -19,6 +19,10 @@ The approved rebuild design is the decision baseline. Product Strategy defines m
 - valid cross-document references;
 - allowed owners/status;
 - no orphaned core capability;
+- exact PRD/NFR-to-matrix capability parity;
+- exact metric/guardrail parity;
+- malformed requirement-row rejection;
+- duplicate reference rejection;
 - forbidden placeholder language.
 
 Cross-document mentions of an ID are references, not new definitions. The matrix defines no stable IDs.
