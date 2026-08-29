@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 128">
+  <path d="M52 4C20 4 0 28 0 64s20 60 52 60 52-24 52-60S84 4 52 4Zm0 24c16 0 26 14 26 36s-10 36-26 36S26 86 26 64s10-36 26-36Z" fill="#121418" fill-rule="evenodd"/>
+  <path d="M120 124V4h29l39 55 39-55h29v120h-28V49l-28 41h-24l-28-41v75h-28Z" fill="#121418"/>
+  <path d="M270 124V4h28l48 73V4h28v120h-28l-48-73v73h-28Z" fill="#121418"/>
+  <path d="M402 4h36v120h-36V4Z" fill="#121418"/>
+</svg>

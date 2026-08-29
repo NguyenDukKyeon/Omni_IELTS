@@ -1,16 +1,90 @@
+@import "./styles/tokens.css";
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-:root {
-  color-scheme: light dark;
-}
-
 @layer base {
   body {
-    @apply bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 antialiased;
+    @apply antialiased;
+    background-color: var(--omni-ground);
+    color: var(--omni-text);
+    font-family: var(--omni-font-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+}
+
+.omni-logo {
+  --omni-logo-ink: var(--omni-text);
+  align-items: center;
+  color: var(--omni-logo-ink);
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.75rem;
+  text-decoration: none;
+}
+
+.omni-mark {
+  block-size: 4rem;
+  inline-size: 4rem;
+}
+
+.omni-logo[data-inverse="true"] {
+  --omni-logo-ink: var(--omni-on-dark);
+}
+
+.omni-logo--horizontal .omni-logo__mark {
+  block-size: 2.75rem;
+  inline-size: 2.75rem;
+}
+
+.omni-logo--stacked {
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.omni-logo--stacked .omni-logo__mark {
+  block-size: 4rem;
+  inline-size: 4rem;
+}
+
+.omni-logo--symbol .omni-mark {
+  block-size: 100%;
+  inline-size: 100%;
+}
+
+.omni-logo__type {
+  align-items: flex-start;
+  color: var(--omni-logo-ink);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.omni-logo__wordmark {
+  block-size: auto;
+  display: block;
+  inline-size: 8.25rem;
+}
+
+.omni-logo__descriptor {
+  color: var(--omni-brand-500);
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.omni-logo--stacked .omni-logo__type {
+  align-items: center;
+}
+
+.omni-logo--stacked .omni-logo__wordmark {
+  inline-size: 10rem;
+}
+
+.omni-logo--stacked .omni-logo__descriptor {
+  font-size: 0.56rem;
 }
 
 @layer utilities {
