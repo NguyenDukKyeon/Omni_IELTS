@@ -64,6 +64,9 @@ const coreCapabilities = [
   'CAP-GLB-SEARCH',
   'CAP-GLB-SCORING-CALIBRATION',
   'CAP-GLB-CONTENT-QUALITY',
+  'CAP-GLB-APP-SHELL',
+  'CAP-GLB-LEARNER-PROFILE',
+  'CAP-GLB-PLACEMENT-DIAGNOSTIC',
 ];
 
 const advancedCapabilities = [
@@ -109,6 +112,56 @@ function readRegistry() {
 
 function definitionRow(registry: string, id: string) {
   return registry.match(new RegExp(`^\\| ${id} \\|.*$`, 'm'))?.[0] ?? '';
+}
+
+const CAPABILITY_HEADER =
+  '| ID | Name | Owner | Learner Job | Segment/Band | Priority | Release Phase | Mechanism | Prerequisites | Consumes | Produces | State Machine | API Owner | Data Owner | Provider | Privacy | Metric | Evidence | UX Contract | Acceptance Tests | Status |';
+
+type CapabilityRow = {
+  id: string;
+  cells: string[];
+  name: string;
+  owner: string;
+  priority: string;
+  releasePhase: string;
+  provider: string;
+  privacy: string;
+  status: string;
+  prerequisites: string;
+  consumes: string;
+  produces: string;
+  evidence: string;
+};
+
+function parseCapabilityRows(registry: string): CapabilityRow[] {
+  const rows: CapabilityRow[] = [];
+  for (const line of normalizeLineEndings(registry).split('\n')) {
+    if (!/^\| CAP-[A-Z0-9-]+ \|/.test(line)) continue;
+    const cells = line
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    rows.push({
+      id: cells[0] ?? '',
+      cells,
+      name: cells[1] ?? '',
+      owner: cells[2] ?? '',
+      priority: cells[5] ?? '',
+      releasePhase: cells[6] ?? '',
+      provider: cells[14] ?? '',
+      privacy: cells[15] ?? '',
+      status: cells[20] ?? '',
+      prerequisites: cells[8] ?? '',
+      consumes: cells[9] ?? '',
+      produces: cells[10] ?? '',
+      evidence: cells[17] ?? '',
+    });
+  }
+  return rows;
+}
+
+function capabilityById(rows: CapabilityRow[], id: string) {
+  return rows.find((row) => row.id === id);
 }
 
 describe('product documentation contracts', () => {
@@ -504,5 +557,115 @@ describe('product documentation contracts', () => {
     const registry = readRegistry();
     expect(registry.match(/^### ((?:PRD|NFR|METRIC|GUARD)-[A-Z0-9-]+)\b/gm)).toBeNull();
     expect(registry.match(/^\| ((?:PRD|NFR|METRIC|GUARD)-[A-Z0-9-]+) \|/gm)).toBeNull();
+  });
+
+  it('parses capability rows with portable column and enum invariants', () => {
+    const registry = readRegistry();
+    expect(registry).toContain(CAPABILITY_HEADER);
+    const parsed = parseCapabilityRows(registry);
+    const expectedIds = [
+      ...coreCapabilities,
+      ...advancedCapabilities,
+      ...laterCapabilities,
+      ...rejectedCapabilities,
+    ];
+    expect(parsed.map((row) => row.id).sort()).toEqual([...expectedIds].sort());
+    expect(new Set(parsed.map((row) => row.id)).size).toBe(parsed.length);
+    for (const row of parsed) {
+      expect(row.cells).toHaveLength(21);
+      for (const cell of row.cells) expect(cell.length).toBeGreaterThan(0);
+      expect(['core', 'advanced', 'later', 'reject']).toContain(row.priority);
+      expect(['beta', 'post_beta', 'research']).toContain(row.releasePhase);
+      expect(['none', 'browser', 'official_ai', 'search', 'private_bridge']).toContain(
+        row.provider,
+      );
+      expect([
+        'public_metadata',
+        'private_learning',
+        'sensitive_audio',
+        'credential',
+      ]).toContain(row.privacy);
+      expect(row.status).toBe('approved');
+      if (row.priority === 'core') expect(row.provider).not.toBe('private_bridge');
+    }
+    const byPriority = (priority: string) =>
+      parsed.filter((row) => row.priority === priority).map((row) => row.id).sort();
+    expect(byPriority('core')).toEqual([...coreCapabilities].sort());
+    expect(byPriority('advanced')).toEqual([...advancedCapabilities].sort());
+    expect(byPriority('later')).toEqual([...laterCapabilities].sort());
+    expect(byPriority('reject')).toEqual([...rejectedCapabilities].sort());
+  });
+
+  it('registers app shell, learner profile and placement diagnostic as core capabilities', () => {
+    const registry = readRegistry();
+    const parsed = parseCapabilityRows(registry);
+    for (const id of [
+      'CAP-GLB-APP-SHELL',
+      'CAP-GLB-LEARNER-PROFILE',
+      'CAP-GLB-PLACEMENT-DIAGNOSTIC',
+    ]) {
+      const row = capabilityById(parsed, id);
+      expect(row?.priority).toBe('core');
+      expect(row?.releasePhase).toBe('beta');
+      expect(row?.owner).toBe('global');
+    }
+    for (const phrase of [
+      'seven-module navigation',
+      'Dashboard is not an eighth learning module',
+      'no visible control without a real state/route/data transition',
+      'current/target band personalises the experience but is not proof of improvement',
+      'never claim an official band',
+      'never convert CEFR one-to-one into IELTS',
+      'must not fill a missing skill score using averages from other skills',
+      'diagnostic baseline must remain distinguishable from Week 4 unseen reassessment',
+    ]) {
+      expect(registry).toContain(phrase);
+    }
+  });
+
+  it('keeps source-grounded chat independent of web Search Grounding', () => {
+    const registry = readRegistry();
+    const row = capabilityById(parseCapabilityRows(registry), 'CAP-SRC-GROUNDED-CHAT');
+    expect(row?.prerequisites).toContain('CAP-SRC-SELECTION');
+    expect(row?.prerequisites).toContain('CAP-GLB-AI-ROUTER');
+    expect(row?.prerequisites).not.toContain('CAP-GLB-SEARCH');
+    expect(definitionRow(registry, 'CAP-SRC-GROUNDED-CHAT')).not.toContain('CAP-GLB-SEARCH');
+    for (const phrase of [
+      'Tra cứu dẫn chứng',
+      'Default chat answers only from selected SourceVersions',
+      'do not silently search the public web',
+    ]) {
+      expect(registry).toContain(phrase);
+    }
+  });
+
+  it('keeps Artifact Studio as source-side handoff rather than destination ownership', () => {
+    const registry = readRegistry();
+    const studio = capabilityById(parseCapabilityRows(registry), 'CAP-SRC-ARTIFACT-STUDIO');
+    expect(studio?.produces).toContain('ValidatedArtifactDraft');
+    expect(studio?.produces).toContain('DestinationHandoff');
+    expect(studio?.produces).not.toMatch(/Practice, Mock section/);
+    expect(studio?.produces).not.toMatch(/\bfinal Practice\b/);
+    expect(studio?.produces).not.toMatch(/\bfinal Mock\b/);
+    expect(registry).toContain('destination modules own final persistence');
+    expect(definitionRow(registry, 'CAP-MCK-BUILD')).toContain('ValidatedMockDraft');
+    expect(definitionRow(registry, 'CAP-VOC-CAPTURE')).toMatch(
+      /ValidatedVocabularyDraft|validated vocabulary draft/,
+    );
+    expect(registry).toContain('ValidatedPracticeDraft');
+  });
+
+  it('prevents Tutor output from creating learner mastery or progress evidence', () => {
+    const registry = readRegistry();
+    const tutor = capabilityById(parseCapabilityRows(registry), 'CAP-GLB-TUTOR');
+    expect(tutor?.produces).toContain(
+      'cited notes, source-backed facts, Idea Bank entries with provenance',
+    );
+    expect(tutor?.evidence).toContain(
+      'no learner mastery/progress evidence from Tutor-generated output',
+    );
+    expect(tutor?.produces).not.toContain('saved evidence');
+    expect(registry).not.toContain('Evidence can be saved with citation');
+    expect(registry).toContain('Tutor output must not increment CompetencyState evidence counters');
   });
 });
