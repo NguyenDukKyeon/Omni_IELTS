@@ -93,7 +93,7 @@ Implementation-stage brand decisions:
 
 - Approved product strategy, learning framework, capability registry, PRD, and traceability matrix under `docs/product/`.
 - Approved rebuild design at `docs/superpowers/specs/2026-08-29-omni-ielts-product-rebuild-design.md`.
-- Approved Brand and UX rebuild decisions are recorded at `docs/superpowers/specs/2026-08-30-omni-brand-ux-rebuild-design.md` pending final repository review.
+- Approved Brand and UX rebuild decisions are recorded at `docs/superpowers/specs/2026-08-30-omni-brand-ux-rebuild-design.md`.
 - Approved direction boards are stored under `.impeccable/mocks/approved/` with embedded and sidecar generation provenance.
 - A functioning React application with deterministic desktop/mobile E2E coverage for existing core journeys.
 - Existing “Omni IELTS” wordmark treatment in the application header is implementation evidence, not protected brand authority for the redesign.
