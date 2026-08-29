@@ -1208,4 +1208,21 @@ describe('product documentation contracts', () => {
       ),
     ).toBe(true);
   });
+
+  it('records the approved OMNI Brand and UX deltas without adding capability IDs', () => {
+    const prd = readFileSync(resolve(root, 'docs/product/PRD.md'), 'utf8');
+    const registry = readFileSync(resolve(root, 'docs/product/CAPABILITY_REGISTRY.md'), 'utf8');
+    const matrix = readFileSync(resolve(root, 'docs/product/TRACEABILITY_MATRIX.md'), 'utf8');
+
+    expect(prd).toContain('Focus Dock');
+    expect(prd).toContain('Home`, `Learn`, `Practice`, `Review`, and `More');
+    expect(prd).toContain('one SourceVersion or selected span');
+    expect(prd).toContain('one destination artifact per job');
+    expect(prd).toContain('authentic per-test mix');
+    expect(prd).toContain('System`, `Light`, `Dark`, and High Contrast');
+    expect(prd).toContain('encrypted account credential vault');
+    expect(prd).toContain('explicit opt-in');
+    expect(registry).toContain('one primary action and two alternatives');
+    expect(matrix).toContain('Brand and UX Rebuild Design');
+  });
 });
