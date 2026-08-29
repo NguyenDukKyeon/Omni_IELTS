@@ -16,7 +16,9 @@ describe('public beta release gate and CI contracts', () => {
       const { mode, scripts } = resolveScriptsForArgs([]);
       expect(mode).toBe('deterministic');
       expect(scripts).toEqual(DETERMINISTIC_SCRIPTS);
-      expect(scripts).toEqual(['test', 'check:ux-contracts', 'lint', 'build', 'test:e2e']);
+      expect(scripts).toEqual(['test', 'check:product-docs', 'check:ux-contracts', 'lint', 'build', 'test:e2e']);
+      expect(scripts.filter((script) => script === 'check:product-docs')).toHaveLength(1);
+      expect(scripts.indexOf('check:product-docs')).toBe(scripts.indexOf('test') + 1);
       expect(scripts).not.toContain('test:web-bridge:live');
       expect(scripts).not.toContain('test:e2e:live');
     });
@@ -34,6 +36,7 @@ describe('public beta release gate and CI contracts', () => {
       expect(viaModeFlag.mode).toBe('live');
       expect(viaModeFlag.scripts).toEqual(LIVE_CANARY_SCRIPTS);
       expect(viaModeFlag.scripts).toEqual(['test:e2e:live']);
+      expect(viaModeFlag.scripts).not.toContain('check:product-docs');
       expect(viaModeFlag.scripts).not.toContain('test:web-bridge:live');
 
       expect(resolveScriptsForArgs(['--mode=canary']).mode).toBe('live');
@@ -48,12 +51,17 @@ describe('public beta release gate and CI contracts', () => {
       expect(full.scripts).toEqual(FULL_GATE_SCRIPTS);
       expect(full.scripts).toEqual([
         'test',
+        'check:product-docs',
         'check:ux-contracts',
         'lint',
         'build',
         'test:e2e',
         'test:e2e:live',
       ]);
+      expect(full.scripts.filter((script) => script === 'check:product-docs')).toHaveLength(1);
+      expect(full.scripts.indexOf('check:product-docs')).toBe(full.scripts.indexOf('test') + 1);
+      expect(full.scripts.slice(0, DETERMINISTIC_SCRIPTS.length)).toEqual(DETERMINISTIC_SCRIPTS);
+      expect(full.scripts.slice(DETERMINISTIC_SCRIPTS.length)).toEqual(LIVE_CANARY_SCRIPTS);
 
       expect(resolveScriptsForArgs(['--all']).mode).toBe('full');
       expect(resolveScriptsForArgs(['--full']).mode).toBe('full');
