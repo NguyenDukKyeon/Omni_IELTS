@@ -142,6 +142,10 @@ The learner can reach all seven learning modules, resume unfinished work, and al
 **In-scope behaviour**
 
 - seven-module navigation across Sources & Library, Vocabulary, Grammar & Strategy, Media Lab, IELTS Practice, IELTS Mock, and Review & Progress;
+- Focus Dock on wide desktop: persistent seven-module navigation, a task-first central canvas, and a context-sensitive Evidence Dock;
+- Mobile destinations are `Home`, `Learn`, `Practice`, `Review`, and `More`; no horizontally scrolling module bar;
+- Daily Coach presents one primary evidence-backed action and two alternatives, including manual module choice;
+- Themes support `System`, `Light`, `Dark`, and High Contrast; Mock defaults to Light with an accessibility override;
 - Dashboard and Daily Coach as recommendation surfaces, not an eighth learning module;
 - one primary CTA per module context;
 - resume unfinished work;
@@ -272,6 +276,10 @@ The learner can keep multiple heterogeneous sources in one private workspace, ch
 - provenance;
 - rights status;
 - deletion/export;
+- Library-first is the default entry;
+- Collections and explicitly selected-source grounded chat remain supported;
+- Each artifact job consumes one SourceVersion or selected span and creates one destination artifact per job;
+- Successful generation presents Open artifact and Create another output without redirecting automatically;
 - source-side artifact draft and destination handoff;
 - final destination persistence remains with Practice/Mock/Vocabulary/Tutor;
 - external web Search only on explicit action;
@@ -462,6 +470,10 @@ The learner can sit a computer-delivered Mock only when the package is valid, re
 - validator repair;
 - ready package → exam;
 - standard staged Mock assembly from shipped content, validated source-derived drafts and Live Hub conversion;
+- MockBuild uses a shared blueprint and dependency-aware bounded parallel skill jobs;
+- One mock uses an authentic per-test mix of supported task types;
+- Cross-test coverage records attempted, independent accuracy and last-seen state;
+- A task type is advertised only after schema, renderer, validator, repair, fixture, accessibility and E2E support;
 - AI/deterministic completion of missing approved sections through CAP-MCK-BUILD and CAP-GLB-CONTENT-QUALITY;
 - user enters the exam only after ready/persisted;
 - validated immutable package;
@@ -679,6 +691,8 @@ Reload and restart fixtures must restore the same attempt/package/job identity. 
 - mobile 360–430 px;
 - responsive tablets;
 - Safari/Firefox expansion after core validation.
+- System, Light, Dark and High Contrast themes preserve meaning.
+- Core shell journeys support 200% zoom.
 
 **Affected capabilities**
 
@@ -695,8 +709,10 @@ Keyboard-only journeys for onboarding, one Sources import, one Practice attempt,
 - owner RLS;
 - validated auth;
 - encrypted credentials;
+- BYOK defaults to an encrypted account credential vault and may be session-only;
 - no secret reflection;
 - raw microphone audio not stored by default;
+- Transcript and telemetry persistence is explicit opt-in;
 - explicit consent for transcript/telemetry storage and hosted OCR;
 - export/delete;
 - privacy hard-delete;
