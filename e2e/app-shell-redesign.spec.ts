@@ -452,6 +452,8 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
       const navRect = bottomNav?.getBoundingClientRect();
       const main = document.getElementById('main-viewport-content');
       const mainRect = main?.getBoundingClientRect();
+      const planRow = document.querySelector('.omni-daily-coach__plan-row');
+      const planRowHeight = planRow?.getBoundingClientRect().height ?? 0;
 
       return {
         viewportWidth: window.innerWidth,
@@ -462,6 +464,7 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
         ctaVisibleInViewport: Boolean(ctaRect && ctaRect.top >= 0 && ctaRect.bottom <= window.innerHeight),
         bottomNavVisible: Boolean(navRect && navRect.top < window.innerHeight),
         mainWidth: mainRect?.width ?? 0,
+        planRowHeight,
       };
     });
 
@@ -472,6 +475,8 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
     expect(mobileLayout.ctaVisibleInViewport).toBe(true);
     expect(mobileLayout.bottomNavVisible).toBe(true);
     expect(mobileLayout.mainWidth).toBeGreaterThan(mobileLayout.viewportWidth * 0.8);
+    expect(mobileLayout.planRowHeight).toBeLessThanOrEqual(72);
+    expect(mobileLayout.planRowHeight).toBeGreaterThanOrEqual(48);
   } else {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
@@ -490,11 +495,18 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
       const titleRect = title?.getBoundingClientRect();
       const primaryCta = document.querySelector('[data-ux-control="dashboard.coach.primary"]');
       const ctaRect = primaryCta?.getBoundingClientRect();
+      const focusGrid = document.querySelector('.omni-daily-coach__focus-grid');
+      const focusSignal = document.querySelector('.omni-focus-signal');
+      const signalValue = document.querySelector('.omni-focus-signal__value')?.textContent || '';
+      const planRow = document.querySelector('.omni-daily-coach__plan-row');
+      const planRowHeight = planRow?.getBoundingClientRect().height ?? 0;
+      const emptyCards = document.querySelectorAll('.omni-evidence-dock__empty-card');
 
       const leftMargin = frameRect?.left ?? 0;
       const rightMargin = window.innerWidth - (frameRect?.right ?? window.innerWidth);
       const isCentered = Math.abs(leftMargin - rightMargin) <= 6;
       const titleToCtaDistance = ctaRect && titleRect ? ctaRect.top - titleRect.bottom : 999;
+      const hasTwoZoneGrid = Boolean(focusGrid && focusSignal);
 
       return {
         viewportWidth: window.innerWidth,
@@ -504,6 +516,10 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
         dockWidth: dockRect?.width ?? 0,
         mainWidth: mainRect?.width ?? 0,
         titleToCtaDistance,
+        hasTwoZoneGrid,
+        signalValue,
+        planRowHeight,
+        emptyCardCount: emptyCards.length,
       };
     });
 
@@ -515,6 +531,11 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
     expect(desktopLayout.dockWidth).toBeLessThanOrEqual(250);
     expect(desktopLayout.mainWidth).toBeGreaterThanOrEqual(620);
     expect(desktopLayout.titleToCtaDistance).toBeLessThan(120);
+    expect(desktopLayout.hasTwoZoneGrid).toBe(true);
+    expect(desktopLayout.signalValue.length).toBeGreaterThan(0);
+    expect(desktopLayout.planRowHeight).toBeLessThanOrEqual(68);
+    expect(desktopLayout.planRowHeight).toBeGreaterThanOrEqual(48);
+    expect(desktopLayout.emptyCardCount).toBeLessThanOrEqual(1);
   }
 });
 

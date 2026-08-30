@@ -72,7 +72,7 @@ async function run() {
 </head>
 <body>
   <div class="header">
-    <h1>OMNI Focus Dock · Visual review comparison (Pass 2)</h1>
+    <h1>OMNI Focus Dock · Visual review comparison (Pass 3)</h1>
     <p>Approved reference against deterministic build captures. High visual fidelity review artifact.</p>
   </div>
   <div class="grid">
