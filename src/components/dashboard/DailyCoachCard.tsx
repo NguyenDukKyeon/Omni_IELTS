@@ -111,6 +111,9 @@ export function DailyCoachCard() {
   const signalDetail = totalDueCount > 0
     ? `${selectedDueCount} trong ${totalDueCount} việc cần ôn hôm nay`
     : 'Chưa có việc đến hạn';
+  const Plan0Icon = planRows[0]?.icon;
+  const Plan1Icon = planRows[1]?.icon;
+  const Plan2Icon = planRows[2]?.icon;
 
   return (
     <section className="omni-daily-coach" aria-label="Daily Coach" data-ux-scope="app-shell-v2">
@@ -229,34 +232,89 @@ export function DailyCoachCard() {
       <div className="omni-daily-coach__plan">
         <h3 className="omni-daily-coach__plan-title">Kế hoạch hôm nay</h3>
         <div className="omni-daily-coach__plan-list">
-          {planRows.map(({ action, control, icon: Icon, fallbackMeta }) => (
+          {planRows[0] && Plan0Icon && (
             <button
-              key={action.id}
               type="button"
               className="omni-daily-coach__plan-row"
               data-ux-flow="dashboard.daily"
-              data-ux-control={control}
-              onClick={() => runAction(action)}
+              data-ux-control="dashboard.coach.alternative-1"
+              onClick={() => runAction(planRows[0].action)}
             >
               <div className="omni-daily-coach__plan-row-main">
                 <div className="omni-daily-coach__plan-row-icon">
-                  <Icon aria-hidden="true" />
+                  <Plan0Icon aria-hidden="true" />
                 </div>
                 <div className="omni-daily-coach__plan-row-text">
-                  <strong>{action.title}</strong>
-                  <span>{action.reason}</span>
+                  <strong>{planRows[0].action.title}</strong>
+                  <span>{planRows[0].action.reason}</span>
                 </div>
               </div>
               <div className="omni-daily-coach__plan-row-meta">
                 <span>
-                  {typeof action.estimatedMinutes === 'number'
-                    ? `${action.estimatedMinutes} phút`
-                    : fallbackMeta}
+                  {typeof planRows[0].action.estimatedMinutes === 'number'
+                    ? `${planRows[0].action.estimatedMinutes} phút`
+                    : planRows[0].fallbackMeta}
                 </span>
                 <ChevronRight aria-hidden="true" />
               </div>
             </button>
-          ))}
+          )}
+
+          {planRows[1] && Plan1Icon && (
+            <button
+              type="button"
+              className="omni-daily-coach__plan-row"
+              data-ux-flow="dashboard.daily"
+              data-ux-control="dashboard.coach.plan-manual-module"
+              onClick={() => runAction(planRows[1].action)}
+            >
+              <div className="omni-daily-coach__plan-row-main">
+                <div className="omni-daily-coach__plan-row-icon">
+                  <Plan1Icon aria-hidden="true" />
+                </div>
+                <div className="omni-daily-coach__plan-row-text">
+                  <strong>{planRows[1].action.title}</strong>
+                  <span>{planRows[1].action.reason}</span>
+                </div>
+              </div>
+              <div className="omni-daily-coach__plan-row-meta">
+                <span>
+                  {typeof planRows[1].action.estimatedMinutes === 'number'
+                    ? `${planRows[1].action.estimatedMinutes} phút`
+                    : planRows[1].fallbackMeta}
+                </span>
+                <ChevronRight aria-hidden="true" />
+              </div>
+            </button>
+          )}
+
+          {planRows[2] && Plan2Icon && (
+            <button
+              type="button"
+              className="omni-daily-coach__plan-row"
+              data-ux-flow="dashboard.daily"
+              data-ux-control="dashboard.coach.plan-source"
+              onClick={() => runAction(planRows[2].action)}
+            >
+              <div className="omni-daily-coach__plan-row-main">
+                <div className="omni-daily-coach__plan-row-icon">
+                  <Plan2Icon aria-hidden="true" />
+                </div>
+                <div className="omni-daily-coach__plan-row-text">
+                  <strong>{planRows[2].action.title}</strong>
+                  <span>{planRows[2].action.reason}</span>
+                </div>
+              </div>
+              <div className="omni-daily-coach__plan-row-meta">
+                <span>
+                  {typeof planRows[2].action.estimatedMinutes === 'number'
+                    ? `${planRows[2].action.estimatedMinutes} phút`
+                    : planRows[2].fallbackMeta}
+                </span>
+                <ChevronRight aria-hidden="true" />
+              </div>
+            </button>
+          )}
         </div>
       </div>
 
@@ -278,3 +336,4 @@ export function DailyCoachCard() {
     </section>
   );
 }
+

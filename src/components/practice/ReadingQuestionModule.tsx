@@ -7,10 +7,16 @@ import {
   AlertTriangle,
   Clock,
   RefreshCw,
-  ExternalLink,
   Zap,
   Target,
   HelpCircle,
+  Type,
+  Highlighter,
+  Search,
+  Flag,
+  ArrowRight,
+  Eye,
+  Check,
 } from 'lucide-react';
 import { ReadingQuestionType, ReadingPracticeExercise, TrapCategory, QuestionTrapAnalysisInput } from '../../types';
 import { generateReadingPracticeApi } from '../../services/practiceService';
@@ -162,7 +168,9 @@ export const ReadingQuestionModule: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [selectedTopic, setSelectedTopic] = useState<string>('Scientific Innovation & Ecology');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('Band 7.0-8.0');
-  const [highlightedText, setHighlightedText] = useState<string>('');
+  const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
+  const [isHighlighterActive, setIsHighlighterActive] = useState<boolean>(false);
+  const [flaggedQuestions, setFlaggedQuestions] = useState<Record<string, boolean>>({});
   const [diagnosticModalOpen, setDiagnosticModalOpen] = useState<boolean>(false);
   const [selectedQuestionForTrap, setSelectedQuestionForTrap] = useState<QuestionTrapAnalysisInput | null>(null);
 
@@ -170,6 +178,7 @@ export const ReadingQuestionModule: React.FC = () => {
     setIsGenerating(true);
     setIsSubmitted(false);
     setUserAnswers({});
+    setFlaggedQuestions({});
     try {
       const newEx = await generateReadingPracticeApi(typeToGen, selectedTopic, selectedDifficulty);
       setExercise(newEx);
@@ -191,6 +200,10 @@ export const ReadingQuestionModule: React.FC = () => {
     setUserAnswers((prev) => ({ ...prev, [qId]: value }));
   };
 
+  const toggleFlagQuestion = (qId: string) => {
+    setFlaggedQuestions((prev) => ({ ...prev, [qId]: !prev[qId] }));
+  };
+
   const handleSubmit = () => {
     if (isSubmitted) return;
     setIsSubmitted(true);
@@ -204,7 +217,6 @@ export const ReadingQuestionModule: React.FC = () => {
       if (isCorrect) {
         correctCount++;
       } else {
-        // Determine Trap category
         const isNotGivenTrap =
           exercise.type === 'true_false_not_given' || exercise.type === 'yes_no_not_given';
         const isHeadingTrap = exercise.type === 'matching_headings';
@@ -220,10 +232,9 @@ export const ReadingQuestionModule: React.FC = () => {
           ? 'Bẫy suy đoán logic cá nhân ngoài đời thay vì bám sát 100% bằng chứng đoạn văn.'
           : 'Bẫy paraphrase từ đồng nghĩa và giới hạn phạm vi thông tin.';
 
-        // Tự động ghi lỗi vào MistakeEntry với phân loại bẫy thông minh
         addMistake({
           id: `mistake_read_${Date.now()}_${q.id}`,
-          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.questionText}"`,
+          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.statementOrQuestion}"`,
           correctedText: `Đáp án chuẩn: "${q.correctAnswer}" (Bạn đã chọn: "${userAnswers[q.id] || 'Bỏ trống'}")`,
           explanation: `${q.explanationVi} (${q.paragraphReference || ''})`,
           trapCategory: trapCat,
@@ -262,34 +273,40 @@ export const ReadingQuestionModule: React.FC = () => {
     }
   };
 
-  const scorePercent = Math.round(
-    (exercise.questions.filter(
-      (q) => (userAnswers[q.id] || '').trim().toLowerCase() === q.correctAnswer.trim().toLowerCase()
-    ).length /
-      exercise.questions.length) *
-      100
-  );
+  const answeredCount = exercise.questions.filter((q) => Boolean(userAnswers[q.id]?.trim())).length;
+  const correctCount = exercise.questions.filter(
+    (q) => (userAnswers[q.id] || '').trim().toLowerCase() === q.correctAnswer.trim().toLowerCase()
+  ).length;
+  const scorePercent = Math.round((correctCount / exercise.questions.length) * 100);
+
+  const fontSizeClass =
+    fontSize === 'sm' ? 'text-xs' : fontSize === 'lg' ? 'text-base' : 'text-sm';
 
   return (
     <div id="ielts_reading_module" className="space-y-6">
-      {/* 1. Selector bar: All 6 IELTS Reading Question Types */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              Luyện từng dạng câu hỏi IELTS Reading
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Đề thi do AI sinh vô hạn theo chuẩn Cambridge IELTS — tập trung bẻ khóa bẫy từng dạng.
-            </p>
+      {/* 1. Question Type Selector (IZONE Practice Style) */}
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/40">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Luyện Từng Dạng Bài IELTS Reading
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Đề thi sinh theo chuẩn Cambridge IELTS — tập trung nhận diện và hóa giải bẫy đề thi.
+              </p>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <select data-ux-flow="practice.skills"
+            <select
+              data-ux-flow="practice.skills"
               value={selectedTopic}
               onChange={(e) => setSelectedTopic(e.target.value)}
-              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="Scientific Innovation & Ecology">🌿 Environment & Ecology</option>
               <option value="Artificial Intelligence & Technology">🤖 AI & Future Tech</option>
@@ -298,54 +315,55 @@ export const ReadingQuestionModule: React.FC = () => {
               <option value="Economics, Global Trade & Energy">⚡ Economics & Energy</option>
             </select>
 
-            <select data-ux-flow="practice.skills"
+            <select
+              data-ux-flow="practice.skills"
               value={selectedDifficulty}
               onChange={(e) => setSelectedDifficulty(e.target.value)}
-              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="Band 5.5-6.5">Band 5.5 - 6.5 (Standard)</option>
               <option value="Band 7.0-8.0">Band 7.0 - 8.0 (Academic)</option>
               <option value="Band 8.5+">Band 8.5+ (Mastery)</option>
             </select>
 
-            <button data-ux-flow="practice.skills"
+            <button
+              data-ux-flow="practice.skills"
               onClick={() => handleGenerateNew(selectedType)}
               disabled={isGenerating}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
               {isGenerating ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <Sparkles className="w-3.5 h-3.5" />
               )}
-              {isGenerating ? 'Đang tạo đề AI...' : 'Tạo bài AI mới'}
+              <span>{isGenerating ? 'Đang tạo đề AI...' : 'Tạo bài mới'}</span>
             </button>
           </div>
         </div>
 
-        {/* Question Type Cards */}
+        {/* Question Types Chips Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {READING_TYPES.map((t) => {
             const isSelected = selectedType === t.type;
             return (
-              <button data-ux-flow="practice.skills"
+              <button
+                data-ux-flow="practice.skills"
                 key={t.type}
                 onClick={() => handleSelectType(t.type)}
-                className={`text-left p-3 rounded-xl border transition-all text-xs flex flex-col justify-between ${
+                className={`text-left p-3 rounded-2xl border transition-all text-xs flex flex-col justify-between cursor-pointer ${
                   isSelected
-                    ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-semibold shadow-sm'
+                    ? 'border-emerald-600 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-semibold shadow-sm ring-1 ring-emerald-500/20'
                     : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold truncate">{t.title}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                  <div className="font-bold truncate text-slate-900 dark:text-white mb-0.5">{t.title}</div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
                     {t.desc}
                   </p>
                 </div>
-                <span className="mt-2 inline-block px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 w-fit">
+                <span className="mt-2.5 inline-block px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 w-fit">
                   {t.badge}
                 </span>
               </button>
@@ -354,26 +372,67 @@ export const ReadingQuestionModule: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Main Practice Workspace: Split screen (Passage on Left, Interactive Questions on Right) */}
+      {/* 2. Computer-Delivered Split-Screen Workspace (Passage Left, Questions Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Academic Reading Passage */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-          <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100 dark:border-slate-700">
+        {/* Left Column: Academic Reading Passage with Toolbar */}
+        <div className="lg:col-span-7 bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col space-y-4">
+          {/* Top Passage Toolbar (Font sizing, Highlighter, Timing) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-700">
             <div>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
-                {exercise.difficulty} • {exercise.topic}
-              </span>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-1.5">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  {exercise.difficulty}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  {exercise.topic}
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-1">
                 {exercise.passage.title}
               </h2>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/50 px-3 py-1.5 rounded-lg">
-              <Clock className="w-4 h-4 text-indigo-500" />
-              <span>Gợi ý: {exercise.targetTimeMinutes} phút</span>
+
+            {/* Toolbar Action Controls */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-slate-100 dark:bg-slate-700/60 rounded-xl p-0.5 text-xs font-semibold">
+                <button
+                  data-ux-flow="practice.skills"
+                  type="button"
+                  title="Cỡ chữ nhỏ"
+                  onClick={() => setFontSize('sm')}
+                  className={`px-2 py-1 rounded-lg transition-all ${fontSize === 'sm' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-bold' : 'text-slate-500'}`}
+                >
+                  A-
+                </button>
+                <button
+                  data-ux-flow="practice.skills"
+                  type="button"
+                  title="Cỡ chữ chuẩn"
+                  onClick={() => setFontSize('base')}
+                  className={`px-2 py-1 rounded-lg transition-all ${fontSize === 'base' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-bold' : 'text-slate-500'}`}
+                >
+                  A
+                </button>
+                <button
+                  data-ux-flow="practice.skills"
+                  type="button"
+                  title="Cỡ chữ lớn"
+                  onClick={() => setFontSize('lg')}
+                  className={`px-2 py-1 rounded-lg transition-all ${fontSize === 'lg' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-bold' : 'text-slate-500'}`}
+                >
+                  A+
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700/50 px-2.5 py-1.5 rounded-xl font-medium">
+                <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{exercise.targetTimeMinutes}p</span>
+              </div>
             </div>
           </div>
 
-          <div className="p-3 mb-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+          {/* Instructions Alert */}
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-2xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
             <HelpCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
             <div>
               <strong>Chiến thuật làm dạng {exercise.type.replace(/_/g, ' ').toUpperCase()}:</strong>{' '}
@@ -382,37 +441,37 @@ export const ReadingQuestionModule: React.FC = () => {
           </div>
 
           {/* Passage Paragraphs */}
-          <div className="space-y-4 text-sm leading-relaxed text-slate-800 dark:text-slate-200">
+          <div className={`space-y-4 leading-relaxed text-slate-800 dark:text-slate-200 ${fontSizeClass}`}>
             {exercise.passage.paragraphs.map((para) => (
               <div
                 key={para.label}
-                className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-50/70 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800"
+                className="flex items-start gap-3.5 p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800"
               >
-                <span className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 shadow-sm">
+                <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 shadow-sm">
                   {para.label}
                 </span>
-                <p className="flex-1">{para.text}</p>
+                <p className="flex-1 select-text">{para.text}</p>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Right Column: Questions & Dynamic Input Types */}
+        {/* Right Column: Questions & Dynamic Interactive Inputs */}
         <div className="lg:col-span-5 space-y-4">
           {/* Headings List (if Matching Headings) */}
           {exercise.headingsList && exercise.headingsList.length > 0 && (
-            <div className="bg-slate-900 text-white rounded-2xl p-5 shadow-sm border border-slate-800">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3 flex items-center gap-1.5">
+            <div className="bg-slate-900 text-white rounded-3xl p-5 shadow-sm border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4" /> Danh sách Tiêu đề (List of Headings)
               </h4>
               <div className="space-y-2">
                 {exercise.headingsList.map((h) => (
                   <div
                     key={h.id}
-                    className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60"
+                    className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/60"
                   >
-                    <span className="font-bold text-amber-400 min-w-[20px] uppercase">{h.id}.</span>
-                    <span>{h.text}</span>
+                    <span className="font-bold text-amber-400 min-w-[22px] uppercase">{h.id}.</span>
+                    <span className="leading-snug">{h.text}</span>
                   </div>
                 ))}
               </div>
@@ -421,17 +480,17 @@ export const ReadingQuestionModule: React.FC = () => {
 
           {/* Features List (if Matching Features) */}
           {exercise.featuresList && (
-            <div className="bg-slate-900 text-white rounded-2xl p-5 shadow-sm border border-slate-800">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3">
+            <div className="bg-slate-900 text-white rounded-3xl p-5 shadow-sm border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
                 Danh sách {exercise.featuresList.categoryName}
               </h4>
               <div className="space-y-1.5">
                 {exercise.featuresList.items.map((feat) => (
                   <div
                     key={feat.id}
-                    className="flex items-center gap-2 text-xs text-slate-200 bg-slate-800 p-2 rounded-lg"
+                    className="flex items-center gap-2 text-xs text-slate-200 bg-slate-800 p-2 rounded-xl"
                   >
-                    <span className="font-bold text-indigo-400 w-5 h-5 rounded bg-slate-700 flex items-center justify-center">
+                    <span className="font-bold text-emerald-400 w-5 h-5 rounded bg-slate-700 flex items-center justify-center">
                       {feat.id}
                     </span>
                     <span>{feat.name}</span>
@@ -442,24 +501,31 @@ export const ReadingQuestionModule: React.FC = () => {
           )}
 
           {/* Question Items Card */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-5">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-5">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                Câu hỏi luyện tập ({exercise.questions.length} câu)
-              </h3>
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                  Câu hỏi luyện tập ({exercise.questions.length} câu)
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Đã làm {answeredCount}/{exercise.questions.length} câu
+                </p>
+              </div>
+
               {isSubmitted && (
                 <span
-                  className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                  className={`text-xs font-bold px-3 py-1 rounded-full border ${
                     scorePercent >= 80
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800'
+                      : 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800'
                   }`}
                 >
-                  Đúng {exercise.questions.filter((q) => (userAnswers[q.id] || '').trim().toLowerCase() === q.correctAnswer.trim().toLowerCase()).length}/{exercise.questions.length} ({scorePercent}%)
+                  Đúng {correctCount}/{exercise.questions.length} ({scorePercent}%)
                 </span>
               )}
             </div>
 
+            {/* Questions List */}
             <div className="space-y-4">
               {exercise.questions.map((q, idx) => {
                 const userVal = userAnswers[q.id] || '';
@@ -467,30 +533,47 @@ export const ReadingQuestionModule: React.FC = () => {
                   isSubmitted &&
                   userVal.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase();
                 const isWrong = isSubmitted && !isCorrect;
+                const isFlagged = Boolean(flaggedQuestions[q.id]);
 
                 return (
                   <div
                     key={q.id}
-                    className={`p-4 rounded-xl border transition-all ${
+                    className={`p-4 rounded-2xl border transition-all ${
                       isSubmitted
                         ? isCorrect
                           ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20'
                           : 'border-rose-300 bg-rose-50/50 dark:border-rose-800 dark:bg-rose-950/20'
+                        : userVal
+                        ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/10'
                         : 'border-slate-200 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/30'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2 mb-2">
-                      <span className="font-bold text-xs text-indigo-600 dark:text-indigo-400">
-                        Câu {q.questionNumber}:
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-lg bg-emerald-100/70 dark:bg-emerald-950/50">
+                          Câu {q.questionNumber || idx + 1}:
+                        </span>
+                        <button
+                          data-ux-flow="practice.skills"
+                          type="button"
+                          title={isFlagged ? 'Bỏ đánh dấu xem lại' : 'Đánh dấu cần xem lại'}
+                          onClick={() => toggleFlagQuestion(q.id)}
+                          className={`text-xs p-1 rounded transition-colors ${
+                            isFlagged ? 'text-amber-500 font-bold' : 'text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          <Flag className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
                       {isSubmitted && (
                         <span className="flex items-center gap-1 text-xs font-semibold">
                           {isCorrect ? (
-                            <span className="text-emerald-600 flex items-center gap-1">
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                               <CheckCircle2 className="w-4 h-4" /> Chính xác
                             </span>
                           ) : (
-                            <span className="text-rose-600 flex items-center gap-1">
+                            <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1">
                               <XCircle className="w-4 h-4" /> Chưa đúng
                             </span>
                           )}
@@ -498,18 +581,19 @@ export const ReadingQuestionModule: React.FC = () => {
                       )}
                     </div>
 
-                    <p className="text-xs text-slate-800 dark:text-slate-200 font-medium mb-3">
+                    <p className="text-xs text-slate-800 dark:text-slate-200 font-semibold mb-3">
                       {q.statementOrQuestion}
                     </p>
 
                     {/* Input Controls according to Question Type */}
                     {exercise.type === 'matching_headings' && exercise.headingsList ? (
                       <div className="space-y-1">
-                        <select data-ux-flow="practice.skills"
+                        <select
+                          data-ux-flow="practice.skills"
                           disabled={isSubmitted}
                           value={userVal}
                           onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 font-medium"
                         >
                           <option value="">-- Chọn Heading thích hợp --</option>
                           {exercise.headingsList.map((h) => (
@@ -522,13 +606,14 @@ export const ReadingQuestionModule: React.FC = () => {
                     ) : exercise.type === 'true_false_not_given' ? (
                       <div className="flex items-center gap-2">
                         {['TRUE', 'FALSE', 'NOT GIVEN'].map((opt) => (
-                          <button data-ux-flow="practice.skills"
+                          <button
+                            data-ux-flow="practice.skills"
                             key={opt}
                             disabled={isSubmitted}
                             onClick={() => handleAnswerChange(q.id, opt)}
-                            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-all ${
+                            className={`flex-1 py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                               userVal === opt
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
                             }`}
                           >
@@ -539,13 +624,14 @@ export const ReadingQuestionModule: React.FC = () => {
                     ) : exercise.type === 'yes_no_not_given' ? (
                       <div className="flex items-center gap-2">
                         {['YES', 'NO', 'NOT GIVEN'].map((opt) => (
-                          <button data-ux-flow="practice.skills"
+                          <button
+                            data-ux-flow="practice.skills"
                             key={opt}
                             disabled={isSubmitted}
                             onClick={() => handleAnswerChange(q.id, opt)}
-                            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-all ${
+                            className={`flex-1 py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                               userVal === opt
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
                             }`}
                           >
@@ -554,16 +640,17 @@ export const ReadingQuestionModule: React.FC = () => {
                         ))}
                       </div>
                     ) : exercise.type === 'matching_information' ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {exercise.passage.paragraphs.map((p) => (
-                          <button data-ux-flow="practice.skills"
+                          <button
+                            data-ux-flow="practice.skills"
                             key={p.label}
                             disabled={isSubmitted}
                             onClick={() => handleAnswerChange(q.id, p.label)}
-                            className={`w-10 h-8 rounded-lg text-xs font-bold border transition-all ${
+                            className={`w-10 h-9 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                               userVal === p.label
-                                ? 'bg-indigo-600 text-white border-indigo-600'
-                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
                             }`}
                           >
                             {p.label}
@@ -572,31 +659,32 @@ export const ReadingQuestionModule: React.FC = () => {
                       </div>
                     ) : (
                       <div>
-                        <input data-ux-flow="practice.skills"
+                        <input
+                          data-ux-flow="practice.skills"
                           type="text"
                           disabled={isSubmitted}
                           placeholder="Nhập câu trả lời từ bài đọc..."
                           value={userVal}
                           onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 font-medium"
                         />
                       </div>
                     )}
 
                     {/* Explanations & Traps after submission */}
                     {isSubmitted && (
-                      <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
+                      <div className="mt-3.5 pt-3.5 border-t border-slate-200 dark:border-slate-700 text-xs space-y-2">
                         <div className="text-slate-700 dark:text-slate-300">
                           <strong className="text-emerald-600 dark:text-emerald-400">
                             Đáp án chuẩn:
                           </strong>{' '}
                           <span className="font-bold uppercase">{q.correctAnswer}</span>
                         </div>
-                        <p className="text-slate-600 dark:text-slate-400">
+                        <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
                           <strong>Giải thích:</strong> {q.explanationVi}
                         </p>
                         {q.trapWarning && (
-                          <div className="p-2 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-1.5">
+                          <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
                             <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
                             <span>
                               <strong>Bẫy cần nhớ:</strong> {q.trapWarning}
@@ -605,13 +693,14 @@ export const ReadingQuestionModule: React.FC = () => {
                         )}
                         {q.relatedGrammarTopicId && (
                           <div className="flex items-center gap-2 pt-1">
-                            <button data-ux-flow="practice.skills"
+                            <button
+                              data-ux-flow="practice.skills"
                               onClick={() =>
                                 openAITutorWithPrompt(
                                   `Hãy giải thích kỹ về bẫy dạng bài Reading này liên quan đến chủ đề ngữ pháp "${q.relatedGrammarTopicId}" và cách nhận diện từ khóa trong bài "${exercise.title}".`
                                 )
                               }
-                              className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-semibold"
+                              className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
                             >
                               <Zap className="w-3 h-3" /> Ôn lại ngữ pháp / bẫy này với AI Tutor
                             </button>
@@ -619,8 +708,9 @@ export const ReadingQuestionModule: React.FC = () => {
                         )}
 
                         {/* Interactive Trap Classification AI Trigger */}
-                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                          <button data-ux-flow="practice.skills"
+                        <div className="pt-2">
+                          <button
+                            data-ux-flow="practice.skills"
                             type="button"
                             onClick={() => {
                               const snippet = q.paragraphReference
@@ -646,9 +736,9 @@ export const ReadingQuestionModule: React.FC = () => {
                               });
                               setDiagnosticModalOpen(true);
                             }}
-                            className="w-full py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
+                            className="w-full py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
                           >
-                            <Target className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            <Target className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                             <span>Bóc Tách Bẫy Câu Này (Trap Diagnostics AI)</span>
                           </button>
                         </div>
@@ -659,34 +749,74 @@ export const ReadingQuestionModule: React.FC = () => {
               })}
             </div>
 
-            {/* Action buttons */}
-            <div className="pt-2 flex items-center gap-3">
-              {!isSubmitted ? (
-                <button data-ux-flow="practice.skills"
-                  onClick={handleSubmit}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Nộp bài & Xem phân tích bẫy chi tiết
-                </button>
-              ) : (
-                <div className="w-full flex gap-2">
-                  <button data-ux-flow="practice.skills"
-                    onClick={() => handleGenerateNew(selectedType)}
-                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+            {/* Bottom Question Navigator Palette (Computer-Delivered IELTS style) */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-semibold text-slate-500 mr-1">Bảng câu hỏi:</span>
+                {exercise.questions.map((q, idx) => {
+                  const userVal = userAnswers[q.id] || '';
+                  const isCorrect =
+                    isSubmitted &&
+                    userVal.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase();
+                  const isWrong = isSubmitted && !isCorrect;
+                  const isAnswered = Boolean(userVal);
+                  const isFlagged = Boolean(flaggedQuestions[q.id]);
+
+                  return (
+                    <div
+                      key={q.id}
+                      className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center border transition-all relative ${
+                        isSubmitted
+                          ? isCorrect
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-rose-600 text-white border-rose-600'
+                          : isAnswered
+                          ? 'bg-slate-800 text-white border-slate-800 dark:bg-slate-200 dark:text-slate-900'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      <span>{q.questionNumber || idx + 1}</span>
+                      {isFlagged && !isSubmitted && (
+                        <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 ring-1 ring-white" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Action buttons */}
+              <div>
+                {!isSubmitted ? (
+                  <button
+                    data-ux-flow="practice.skills"
+                    onClick={handleSubmit}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    <Sparkles className="w-4 h-4" /> Sinh đề AI tiếp theo
+                    <CheckCircle2 className="w-4 h-4" /> Nộp bài & Chấm điểm
                   </button>
-                  <button data-ux-flow="practice.skills"
-                    onClick={() => {
-                      setIsSubmitted(false);
-                      setUserAnswers({});
-                    }}
-                    className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 transition-all"
-                  >
-                    Làm lại bài này
-                  </button>
-                </div>
-              )}
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      data-ux-flow="practice.skills"
+                      onClick={() => handleGenerateNew(selectedType)}
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4" /> Sinh đề tiếp
+                    </button>
+                    <button
+                      data-ux-flow="practice.skills"
+                      onClick={() => {
+                        setIsSubmitted(false);
+                        setUserAnswers({});
+                        setFlaggedQuestions({});
+                      }}
+                      className="px-3.5 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 transition-all cursor-pointer"
+                    >
+                      Làm lại
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -701,3 +831,4 @@ export const ReadingQuestionModule: React.FC = () => {
     </div>
   );
 };
+

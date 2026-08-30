@@ -21,6 +21,23 @@
   --omni-radius-md: 0.875rem;
   --omni-radius-lg: 1.125rem;
   --omni-shadow-raised: 0 8px 24px rgba(18, 20, 24, 0.08);
+
+  /* IZONE-inspired Skill Palette Tokens */
+  --omni-skill-reading: #059669;
+  --omni-skill-reading-bg: rgba(5, 150, 105, 0.08);
+  --omni-skill-reading-border: rgba(5, 150, 105, 0.25);
+  --omni-skill-listening: #0284c7;
+  --omni-skill-listening-bg: rgba(2, 132, 199, 0.08);
+  --omni-skill-listening-border: rgba(2, 132, 199, 0.25);
+  --omni-skill-writing: #d97706;
+  --omni-skill-writing-bg: rgba(217, 119, 6, 0.08);
+  --omni-skill-writing-border: rgba(217, 119, 6, 0.25);
+  --omni-skill-speaking: #7c3aed;
+  --omni-skill-speaking-bg: rgba(124, 58, 237, 0.08);
+  --omni-skill-speaking-border: rgba(124, 58, 237, 0.25);
+  --omni-skill-forecast: #e11d48;
+  --omni-skill-forecast-bg: rgba(225, 29, 72, 0.08);
+  --omni-skill-forecast-border: rgba(225, 29, 72, 0.25);
 }
 
 .dark {
