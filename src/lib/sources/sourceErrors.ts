@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 export type NormalizedSourceErrorCode =
   | 'AUTH_REQUIRED'
   | 'QUOTA_EXCEEDED'
@@ -14,10 +12,11 @@ export type NormalizedSourceErrorCode =
   | 'URL_UNREACHABLE'
   | 'PDF_SCANNED_NO_TEXT'
   | 'MALFORMED_DOCUMENT'
-  | 'SUBTITLE_PARSE_ERROR';
+  | 'SUBTITLE_PARSE_ERROR'
+  | 'VERSION_CONFLICT';
 
 export interface NormalizedSourceError {
-  code: NormalizedSourceErrorCode | string;
+  code: NormalizedSourceErrorCode;
   userMessageVi: string;
   suggestedActionVi: string;
   retryable: boolean;
@@ -26,7 +25,7 @@ export interface NormalizedSourceError {
   owningModule?: 'sources' | 'media' | 'mock';
 }
 
-const FIXED_MESSAGES: Record<string, { userMessageVi: string; suggestedActionVi: string; retryable: boolean; retryAfterSeconds?: number }> = {
+const FIXED_MESSAGES: Record<NormalizedSourceErrorCode, { userMessageVi: string; suggestedActionVi: string; retryable: boolean; retryAfterSeconds?: number }> = {
   AUTH_REQUIRED: {
     userMessageVi: 'Bạn cần đăng nhập để nhập nguồn học.',
     suggestedActionVi: 'Đăng nhập rồi thử lại.',
@@ -99,18 +98,30 @@ const FIXED_MESSAGES: Record<string, { userMessageVi: string; suggestedActionVi:
     suggestedActionVi: 'Tải lại tệp phụ đề hợp lệ hoặc dán văn bản.',
     retryable: false,
   },
+  VERSION_CONFLICT: {
+    userMessageVi: 'Phiên bản nguồn này đã tồn tại và không thể ghi đè.',
+    suggestedActionVi: 'Tạo phiên bản mới thay vì sửa phiên bản cũ.',
+    retryable: false,
+  },
 };
 
 function rawText(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   if (error && typeof error === 'object' && 'message' in error) return String((error as { message: unknown }).message ?? '');
-  if (error && typeof error === 'object' && 'code' in error) return String((error as { code: unknown }).code ?? '');
   return '';
 }
 
-function inferCode(text: string, explicit?: string): string {
-  if (explicit && FIXED_MESSAGES[explicit]) return explicit;
+export function containsSensitive(value: string): boolean {
+  return /AIza[\w-]{10,}|gsk_[A-Za-z0-9]+|bearer\s+\S+|authorization:\s*bearer|x-api-key|api[_-]?key|sk-[A-Za-z0-9_-]+|ya29\.[A-Za-z0-9._-]+|HTTP\s*\d{3}|internal\/|\.ts:\d+|\/tmp\/|\/var\/|command failed|--print-json|sk-proj/i.test(value);
+}
+
+function isKnownCode(value: unknown): value is NormalizedSourceErrorCode {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(FIXED_MESSAGES, value);
+}
+
+function inferCode(text: string, explicit?: unknown): NormalizedSourceErrorCode {
+  if (isKnownCode(explicit)) return explicit;
   const lower = text.toLowerCase();
   if (/\b429\b/.test(text) || lower.includes('quota') || lower.includes('rate limit') || lower.includes('resource_exhausted')) {
     return 'QUOTA_EXCEEDED';
@@ -124,27 +135,31 @@ function inferCode(text: string, explicit?: string): string {
   if (lower.includes('unauthorized') || lower.includes('unauthenticated') || /\b401\b/.test(text) || /\b403\b/.test(text)) {
     return 'AUTH_REQUIRED';
   }
-  return explicit && explicit.length > 0 ? explicit : 'EXTRACTION_FAILED';
+  return 'EXTRACTION_FAILED';
+}
+
+function owningModuleOf(value: unknown): 'sources' | 'media' | 'mock' | undefined {
+  return value === 'sources' || value === 'media' || value === 'mock' ? value : undefined;
 }
 
 export function normalizeSourceError(error: unknown): NormalizedSourceError {
-  const already = error && typeof error === 'object' ? error as Partial<NormalizedSourceError> : {};
+  const already = error && typeof error === 'object' ? error as Partial<NormalizedSourceError> & { message?: string } : {};
   const text = rawText(error);
-  const code = inferCode(text, typeof already.code === 'string' ? already.code : undefined);
-  const fixed = FIXED_MESSAGES[code] ?? FIXED_MESSAGES.EXTRACTION_FAILED;
+  const code = inferCode(text, already.code);
+  const fixed = FIXED_MESSAGES[code];
+  const diagnosticId = typeof already.diagnosticId === 'string'
+    && /^[0-9a-f-]{16,}$/i.test(already.diagnosticId)
+    && !containsSensitive(already.diagnosticId)
+    ? already.diagnosticId
+    : globalThis.crypto.randomUUID();
+
   return {
     code,
     userMessageVi: fixed.userMessageVi,
-    suggestedActionVi: already.suggestedActionVi && !containsSensitive(already.suggestedActionVi)
-      ? already.suggestedActionVi
-      : fixed.suggestedActionVi,
+    suggestedActionVi: fixed.suggestedActionVi,
     retryable: code === 'QUOTA_EXCEEDED' ? true : fixed.retryable,
     retryAfterSeconds: fixed.retryAfterSeconds,
-    diagnosticId: typeof already.diagnosticId === 'string' ? already.diagnosticId : randomUUID(),
-    owningModule: already.owningModule,
+    diagnosticId,
+    owningModule: owningModuleOf(already.owningModule),
   };
-}
-
-function containsSensitive(value: string): boolean {
-  return /HTTP\s*\d{3}|internal\/|\.ts:\d+|\/tmp\/|api[_-]?key|sk-|command failed/i.test(value);
 }
