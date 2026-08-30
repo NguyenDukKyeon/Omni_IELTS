@@ -27,6 +27,15 @@ const memory: MemoryCache = {
 const IDB_NAME = 'omni-sources-library-v1';
 const IDB_STORE = 'snapshot';
 
+export class SourceVersionConflictError extends Error {
+  readonly code = 'VERSION_CONFLICT';
+
+  constructor(message = 'Source version already exists and cannot be overwritten.') {
+    super(message);
+    this.name = 'SourceVersionConflictError';
+  }
+}
+
 function idbAvailable(): boolean {
   return typeof indexedDB !== 'undefined';
 }
@@ -132,6 +141,13 @@ function versionFromRow(row: Record<string, unknown>): SourceVersion {
   };
 }
 
+function hasVersionConflict(version: SourceVersion): boolean {
+  if (memory.versions.has(version.id)) return true;
+  return [...memory.versions.values()].some(
+    (existing) => existing.sourceId === version.sourceId && existing.versionNumber === version.versionNumber,
+  );
+}
+
 export const sourcesStorage = {
   async saveRecord(record: SourceRecord): Promise<SourceRecord> {
     memory.records.set(record.id, record);
@@ -144,11 +160,17 @@ export const sourcesStorage = {
   },
 
   async saveVersion(version: SourceVersion, userId: string): Promise<SourceVersion> {
-    memory.versions.set(version.id, version);
-    if (supabase) {
-      const { error } = await supabase.from('source_versions').upsert(versionRow(version, userId));
-      if (error) throw error;
+    if (hasVersionConflict(version)) {
+      throw new SourceVersionConflictError();
     }
+    if (supabase) {
+      const { error } = await supabase.from('source_versions').insert(versionRow(version, userId));
+      if (error) {
+        if (error.code === '23505') throw new SourceVersionConflictError();
+        throw error;
+      }
+    }
+    memory.versions.set(version.id, version);
     await persistNativeCache();
     return version;
   },
