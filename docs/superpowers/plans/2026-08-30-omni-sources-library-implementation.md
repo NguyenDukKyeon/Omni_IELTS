@@ -123,16 +123,16 @@ Existing packages that must be **reused, not re-added**:
 | `wavesurfer.js` | `^7.12.11` (already present) | None in P03 | Waveform / playback |
 | `@google/genai` | already present | Only through existing `GroundedProviderRouter` / `aiGateway` | New parallel Gemini client inside Sources |
 
-Candidate packages — adopt **only** if Task 2 extraction cannot be done with existing packages. Versions below were verified against official npm/GitHub on 2026-08-30 and **must be re-verified at implementation time** before any install. Pin the exact resolved version in `package-lock.json`. Do not commit `^` ranges for newly added packages.
+Candidate packages — adopt **only** if Task 2 extraction cannot be done with existing packages. Exact pins below were recorded on 2026-08-30 from the npm registry `latest` document and the package LICENSE/homepage. Pin these exact versions in `package.json` with `--save-exact` and the resolved tree in `package-lock.json`. Do not commit `^` ranges for newly added packages. Task 2 must confirm these same versions are still published on npm before install. If a pin is unpublished or its LICENSE is no longer a recorded permissive license, defer that adapter from P03 instead of substituting another version.
 
-| Package | Decision | Exact version to re-verify | License | Official docs | Fallback if install/docs fail | Removal path |
+| Package | Decision | Exact pin | License | Official source (verified 2026-08-30) | Fallback if install/docs fail | Removal path |
 |---|---|---|---|---|---|---|
-| `@mozilla/readability` | ADOPT for article URL extraction (`CAP-SRC-EXTRACT`) | `0.6.0` | Apache-2.0 | https://github.com/mozilla/readability | `URL_UNREACHABLE` + paste-text | Uninstall; keep paste/URL-fail path |
-| `jsdom` | ADOPT as the documented Node DOM host for Readability and DOMPurify. Not a product capability. | Re-verify current Node-22 compatible release (npm latest was `30.0.1`; prefer the current documented Node 22 release) | MIT | https://github.com/jsdom/jsdom | Same as Readability: paste-text | Uninstall with Readability |
-| `dompurify` | ADOPT for HTML sanitization of Readability/mammoth HTML | Re-verify current `3.x` (npm latest was `3.4.14`) | MPL-2.0 OR Apache-2.0 | https://github.com/cure53/DOMPurify | Reject unsanitized HTML; paste-text | Uninstall; reject HTML inputs |
-| `pdf-parse` | ADOPT for **text-layer** PDF only | Re-verify current `2.4.5` or documented successor; confirm LICENSE file | Confirm LICENSE at install (Apache-2.0 expected for 2.x) | https://www.npmjs.com/package/pdf-parse and the package LICENSE | `PDF_SCANNED_NO_TEXT` + paste | Uninstall; paste-only PDF path |
-| `mammoth` | ADOPT for DOCX | Re-verify current `1.12.2` | BSD-2-Clause | https://github.com/mwilliamson/mammoth.js | `MALFORMED_DOCUMENT` + paste | Uninstall; paste-only DOCX path |
-| `dexie` | **REJECT for P03** | n/a | n/a | https://dexie.org (registry candidate only) | Native IndexedDB or in-memory cache in `sourcesStorage`; P09 owns offline queue | Never introduce |
+| `@mozilla/readability` | ADOPT for article URL extraction (`CAP-SRC-EXTRACT`) | `0.6.0` | Apache-2.0 | npm registry `latest` published 2025-03-03 (`https://www.npmjs.com/package/@mozilla/readability`, `https://registry.npmjs.org/@mozilla/readability/0.6.0`); LICENSE Apache-2.0 at `https://github.com/mozilla/readability/blob/main/LICENSE.md` | `URL_UNREACHABLE` + paste-text | Uninstall; keep paste/URL-fail path |
+| `jsdom` | ADOPT as the documented Node DOM host for Readability and DOMPurify. Not a product capability. | `30.0.1` | MIT | npm registry `latest` published 2026-07-29 (`https://www.npmjs.com/package/jsdom`, `https://registry.npmjs.org/jsdom/30.0.1`); LICENSE MIT at `https://github.com/jsdom/jsdom`; engines node `^22.22.2` or `^24.15.0` or `>=26.0.0` (matches Dockerfile `node:22-bookworm-slim`) | Same as Readability: paste-text | Uninstall with Readability |
+| `dompurify` | ADOPT for HTML sanitization of Readability/mammoth HTML | `3.4.14` | MPL-2.0 OR Apache-2.0 | npm registry `latest` published 2026-08-19 (`https://www.npmjs.com/package/dompurify`, `https://registry.npmjs.org/dompurify/3.4.14`); dual license from npm `license` field and `https://github.com/cure53/DOMPurify` | Reject unsanitized HTML; paste-text | Uninstall; reject HTML inputs |
+| `pdf-parse` | ADOPT for **text-layer** PDF only | `2.4.5` | Apache-2.0 | npm registry `latest` published 2025-10-20 (`https://www.npmjs.com/package/pdf-parse`, `https://registry.npmjs.org/pdf-parse/2.4.5`); LICENSE Apache-2.0 at `https://github.com/mehmet-kozan/pdf-parse/blob/v2.4.5/LICENSE`; engines node `>=20.16.0 <21` or `>=22.3.0` | `PDF_SCANNED_NO_TEXT` + paste | Uninstall; paste-only PDF path |
+| `mammoth` | ADOPT for DOCX | `1.12.2` | BSD-2-Clause | npm registry `latest` published 2026-08-28 (`https://www.npmjs.com/package/mammoth`, `https://registry.npmjs.org/mammoth/1.12.2`); LICENSE BSD-2-Clause at `https://github.com/mwilliamson/mammoth.js` | `MALFORMED_DOCUMENT` + paste | Uninstall; paste-only DOCX path |
+| `dexie` | **REJECT for P03** | n/a | n/a | https://dexie.org (registry candidate only; not adopted) | Native IndexedDB or in-memory cache in `sourcesStorage`; P09 owns offline queue | Never introduce |
 
 Unpinned, speculative, or program-map-violating packages are prohibited, including AnyDoc/firecrawl, yt-dlp, new AI provider SDKs, `@testing-library/react`, and Dexie.
 
@@ -176,13 +176,13 @@ Expected: FAIL with `Cannot find module` until the test file exists; then PASS o
 
 - [ ] **Step 3: Record the verification log inside the Task 2 commit message when a package is actually added**
 
-At Task 2 implementation time, open the official docs URLs above, copy the published version and LICENSE, then:
+At Task 2 implementation time, confirm the exact pins in the Task 0 table are still the published npm versions and still carry the recorded licenses, then:
 
 ```bash
-npm install @mozilla/readability@<verified> jsdom@<verified> dompurify@<verified> pdf-parse@<verified> mammoth@<verified> --save-exact
+npm install @mozilla/readability@0.6.0 jsdom@30.0.1 dompurify@3.4.14 pdf-parse@2.4.5 mammoth@1.12.2 --save-exact
 ```
 
-Do not run that command in this documentation PR. Do not add Dexie.
+Do not run that command in this documentation PR. Do not add Dexie. Do not replace any pin with a range, a placeholder, or a different unlisted version.
 
 - [ ] **Step 4: GREEN**
 
