@@ -39,6 +39,15 @@ export function MobileModuleSheet({
   useEffect(() => {
     if (!open) return undefined;
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    const layer = panelRef.current?.parentElement;
+    const frame = layer?.parentElement;
+    const inertSiblings = frame
+      ? Array.from(frame.children).filter((child) => child !== layer) as HTMLElement[]
+      : [];
+    inertSiblings.forEach((target) => {
+      target.inert = true;
+    });
+    document.body.classList.add('omni-sheet-open');
     const focusFirst = () => {
       const first = panelRef.current?.querySelector('button') as HTMLButtonElement | null;
       first?.focus();
@@ -69,6 +78,10 @@ export function MobileModuleSheet({
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener('keydown', onKey);
+      inertSiblings.forEach((target) => {
+        target.inert = false;
+      });
+      document.body.classList.remove('omni-sheet-open');
       previouslyFocused?.focus();
     };
   }, [open]);

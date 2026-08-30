@@ -7,6 +7,7 @@ const playwrightBaseUrl = `http://127.0.0.1:${playwrightPort}`;
 
 export default defineConfig({
   testDir: './e2e',
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

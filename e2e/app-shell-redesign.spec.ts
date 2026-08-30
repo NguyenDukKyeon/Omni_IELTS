@@ -434,6 +434,82 @@ test('mobile shell controls activate all five destinations, grouped sheets, them
   await expect(nav.locator('[data-ux-control="shell.mobile.more"]')).toBeFocused();
 });
 
+test('Focus Dock keeps the canvas dominant across accepted desktop and mobile widths', async ({ page }, testInfo) => {
+  const mobile = isMobileProject(testInfo.project.name);
+  const widths = mobile ? [360, 390, 430] : [1280, 1440, 1920];
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: mobile ? 900 : 1080 });
+    await page.goto('/');
+    const metrics = await page.evaluate(() => {
+      const main = document.getElementById('main-viewport-content');
+      const nav = document.getElementById('desktop-sidebar');
+      const dock = document.querySelector('.omni-evidence-dock:not(.is-collapsed)');
+      const mobileNav = document.getElementById('mobile-bottom-nav');
+      return {
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        mainWidth: main?.getBoundingClientRect().width ?? 0,
+        navWidth: nav?.getBoundingClientRect().width ?? 0,
+        dockWidth: dock?.getBoundingClientRect().width ?? 0,
+        mobileNavWidth: mobileNav?.getBoundingClientRect().width ?? 0,
+      };
+    });
+
+    expect(metrics.documentWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+    expect(metrics.mainWidth).toBeGreaterThan(metrics.viewportWidth * (mobile ? 0.8 : 0.45));
+    if (mobile) {
+      expect(metrics.mobileNavWidth).toBeGreaterThanOrEqual(metrics.viewportWidth - 1);
+      await expect(page.getByRole('navigation', { name: 'Điều hướng di động' }).getByRole('button')).toHaveCount(5);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      const bottomClearance = await page.evaluate(() => {
+        const lastCard = document.querySelector('.omni-dashboard__snapshot article:last-child');
+        const mobileNav = document.getElementById('mobile-bottom-nav');
+        return {
+          contentBottom: lastCard?.getBoundingClientRect().bottom ?? 0,
+          navTop: mobileNav?.getBoundingClientRect().top ?? window.innerHeight,
+        };
+      });
+      expect(bottomClearance.contentBottom).toBeLessThanOrEqual(bottomClearance.navTop + 1);
+    } else {
+      expect(metrics.navWidth).toBeLessThan(metrics.mainWidth);
+      expect(metrics.dockWidth).toBeLessThan(metrics.mainWidth);
+      await expect(page.getByRole('navigation', { name: 'Điều hướng học tập' })).toBeVisible();
+      await expect(page.getByRole('complementary', { name: 'Bằng chứng và việc đến hạn' })).toBeVisible();
+    }
+  }
+});
+
+test('Focus Dock review captures render from the document top with reduced motion', async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  if (isMobileProject(testInfo.project.name)) {
+    await page.setViewportSize({ width: 412, height: 915 });
+    await page.goto('/');
+    await expect(page.locator('#dashboard-view')).toBeVisible();
+    await expect(page.locator('#main-viewport-content')).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: `${process.cwd()}/.impeccable/review/focus-dock-mobile.png`,
+      fullPage: false,
+    });
+    return;
+  }
+
+  for (const [width, height, fileName] of [
+    [1440, 900, 'focus-dock-desktop-1440.png'],
+    [1920, 1080, 'focus-dock-desktop-1920.png'],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.goto('/');
+    await expect(page.locator('#dashboard-view')).toBeVisible();
+    await expect(page.locator('#main-viewport-content')).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: `${process.cwd()}/.impeccable/review/${fileName}`,
+      fullPage: false,
+    });
+  }
+});
+
 test('knowledge remains renderable as a hidden compatibility route', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => {

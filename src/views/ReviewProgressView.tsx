@@ -20,8 +20,8 @@ export function ReviewProgressView() {
     setActiveModule,
   } = useApp();
   const dueMistakes = getDueMistakes(mistakes);
-  const latestAttempt = practiceAttempts[0];
-  const latestMock = mockResults[0];
+  const latestAttempt = practiceAttempts.find(isExplicitIndependentEvidence);
+  const latestMock = mockResults.find(isExplicitMockEvidence);
 
   const openDueWorkout = () => {
     try {

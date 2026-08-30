@@ -6,7 +6,6 @@ import { getDueMistakes, getDueVocabCards } from '../services/srsScheduler';
 
 export function DashboardView() {
   const {
-    profile,
     vocabCards,
     mistakes,
     practiceAttempts,
@@ -26,10 +25,10 @@ export function DashboardView() {
   return (
     <div id="dashboard-view" className="omni-dashboard" data-ux-scope="app-shell-v2">
       <header className="omni-dashboard__header">
-        <p className="omni-dashboard__eyebrow">Dashboard</p>
-        <h1>Hôm nay của {profile.name}</h1>
+        <p className="omni-dashboard__eyebrow">Tổng quan hôm nay</p>
+        <h1>Việc nên làm tiếp theo</h1>
         <p>
-          Một hành động chính, hai lựa chọn, và bằng chứng học tập có thể kiểm tra.
+          Một trọng tâm rõ ràng, hai lựa chọn khác và bằng chứng học tập có thể kiểm tra.
         </p>
       </header>
 

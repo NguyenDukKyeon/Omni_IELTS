@@ -32,11 +32,11 @@ const PRACTICE_CONTROLS: Record<string, string> = {
   mock_test: 'shell.mobile.practice-mock',
 };
 
-const THEME_OPTIONS: ReadonlyArray<{ id: ThemePreference; label: string; control: string }> = [
-  { id: 'system', label: 'Hệ thống', control: 'shell.mobile.theme-system' },
-  { id: 'light', label: 'Sáng', control: 'shell.mobile.theme-light' },
-  { id: 'dark', label: 'Tối', control: 'shell.mobile.theme-dark' },
-  { id: 'high_contrast', label: 'Tương phản cao', control: 'shell.mobile.theme-high-contrast' },
+const THEME_OPTIONS: ReadonlyArray<{ id: ThemePreference; label: string }> = [
+  { id: 'system', label: 'Hệ thống' },
+  { id: 'light', label: 'Sáng' },
+  { id: 'dark', label: 'Tối' },
+  { id: 'high_contrast', label: 'Tương phản cao' },
 ];
 
 export function MobileNavigation() {

@@ -28,17 +28,19 @@ export function FocusDockLayout({
       data-nav-collapsed={showChrome && navCollapsed ? 'true' : 'false'}
       data-evidence={showEvidence ? evidenceDock : 'hidden'}
     >
-      {showChrome ? <AppHeader /> : null}
-      <div
-        className={`omni-focus-dock__body${showEvidence ? ' omni-focus-dock__body--with-evidence' : ''}${examMode ? ' omni-focus-dock__body--exam' : ''}`}
-      >
-        {showChrome ? <div className="omni-focus-dock__nav">{navigation}</div> : null}
-        <main id="main-viewport-content" className="omni-focus-dock__main">
-          {children}
-        </main>
-        {showEvidence ? <div className="omni-focus-dock__evidence">{evidence}</div> : null}
+      <div className="omni-focus-dock__frame">
+        {showChrome ? <AppHeader /> : null}
+        <div
+          className={`omni-focus-dock__body${showEvidence ? ' omni-focus-dock__body--with-evidence' : ''}${examMode ? ' omni-focus-dock__body--exam' : ''}`}
+        >
+          {showChrome ? <div className="omni-focus-dock__nav">{navigation}</div> : null}
+          <main id="main-viewport-content" className="omni-focus-dock__main">
+            {children}
+          </main>
+          {showEvidence ? <div className="omni-focus-dock__evidence">{evidence}</div> : null}
+        </div>
+        {showChrome ? <BottomNav /> : null}
       </div>
-      {showChrome ? <BottomNav /> : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, ChevronDown, Clock, Compass } from 'lucide-react';
+import { ArrowRight, ChevronDown, Clock, Compass, Target } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { buildDailyCoachModel, type DailyCoachAction } from '../../lib/dailyCoach';
 import { isUnfinishedPracticeAttempt } from '../../lib/learningEvidence';
@@ -44,9 +44,12 @@ export function DailyCoachCard() {
 
   return (
     <section className="omni-daily-coach" aria-label="Daily Coach" data-ux-scope="app-shell-v2">
-      <p className="omni-daily-coach__eyebrow">Daily Coach</p>
       <div className="omni-daily-coach__primary">
-        <div>
+        <div className="omni-daily-coach__primary-copy">
+          <div className="omni-daily-coach__eyebrow-row">
+            <span className="omni-daily-coach__mark" aria-hidden="true"><Target /></span>
+            <p className="omni-daily-coach__eyebrow">Trọng tâm hôm nay</p>
+          </div>
           <h2>{model.primary.title}</h2>
           <p>{model.primary.reason}</p>
           <div className="omni-daily-coach__meta">
@@ -78,6 +81,7 @@ export function DailyCoachCard() {
         type="button"
         className="omni-daily-coach__evidence-toggle"
         aria-expanded={evidenceOpen}
+        aria-controls="daily-coach-evidence"
         data-ux-flow="dashboard.daily"
         data-ux-control="dashboard.coach.open-evidence"
         onClick={() => setEvidenceOpen((open) => !open)}
@@ -86,7 +90,7 @@ export function DailyCoachCard() {
         <span>{evidenceOpen ? 'Ẩn bằng chứng' : 'Xem bằng chứng'}</span>
       </button>
       {evidenceOpen && (
-        <ul className="omni-daily-coach__evidence">
+        <ul id="daily-coach-evidence" className="omni-daily-coach__evidence">
           {model.primary.evidenceRefs.length === 0 ? (
             <li>Chưa đủ bằng chứng. Hành động này dùng để thu thập dữ liệu độc lập.</li>
           ) : (

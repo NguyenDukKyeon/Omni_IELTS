@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, CircleAlert } from 'lucide-react';
+import { BookOpenCheck, ChevronLeft, ChevronRight, CircleAlert, Clock3, History } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAppShell } from '../../context/AppShellContext';
 import { buildEvidenceDockModel, type EvidenceDockItem } from '../../lib/evidenceDock';
-import { isUnfinishedPracticeAttempt } from '../../lib/learningEvidence';
+import {
+  isExplicitIndependentEvidence,
+  isExplicitMockEvidence,
+  isUnfinishedPracticeAttempt,
+} from '../../lib/learningEvidence';
 import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
 import type { ModuleId } from '../../types';
 
@@ -38,8 +42,14 @@ function EvidenceDockButton({
   control: EvidenceDockControl;
   onOpen: (destination?: ModuleId) => void;
 }) {
+  const StatusIcon = item.status === 'due'
+    ? Clock3
+    : item.status === 'unfinished'
+      ? History
+      : BookOpenCheck;
   const content = (
     <>
+      <StatusIcon aria-hidden="true" className="omni-evidence-dock__item-icon" />
       <strong>{item.label}</strong>
       <span>{item.detail}</span>
     </>
@@ -88,8 +98,8 @@ export function EvidenceDock() {
   const dueVocab = getDueVocabCards(vocabCards);
   const currentMedia = mediaSessions.find((session) => !session.completed);
   const unfinished = practiceAttempts.find(isUnfinishedPracticeAttempt);
-  const latestAttempt = practiceAttempts[0];
-  const latestMock = mockResults[0];
+  const latestAttempt = practiceAttempts.find(isExplicitIndependentEvidence);
+  const latestMock = mockResults.find(isExplicitMockEvidence);
   const recentEvidence = unfinished
     ? [{ id: unfinished.id, label: unfinished.taskType, destination: 'practice' as ModuleId, canResume: true }]
     : latestAttempt
