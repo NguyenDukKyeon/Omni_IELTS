@@ -24,8 +24,7 @@ describe('sources_library_v2 kill switch', () => {
   it('resolves without a global Node process', () => {
     const original = globalThis.process;
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'process');
-    // @ts-expect-error test deletes Node process to prove the client resolver is browser-safe
-    delete globalThis.process;
+    Reflect.deleteProperty(globalThis, 'process');
     try {
       expect(isSourcesLibraryV2Enabled()).toBe(false);
       expect(isSourcesLibraryV2Enabled(false)).toBe(false);

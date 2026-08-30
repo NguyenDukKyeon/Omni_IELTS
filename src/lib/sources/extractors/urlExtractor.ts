@@ -41,12 +41,14 @@ export async function extractUrl(input: ExtractionInput, deps: UrlFetchDeps = {}
   }
 
   try {
-    const dom = new JSDOM(fetched.html, { url: fetched.finalUrl });
+    const html = fetched.html || '';
+    const finalUrl = fetched.finalUrl || 'https://example.invalid/';
+    const dom = new JSDOM(html, { url: finalUrl });
     const article = new Readability(dom.window.document).parse();
     if (!article?.content && !article?.textContent) return unreachable();
     const purify = createDOMPurify(dom.window);
     const cleanHtml = purify.sanitize(String(article.content || ''));
-    const paragraphs = htmlToParagraphs(`<div>${cleanHtml}</div>`, fetched.finalUrl);
+    const paragraphs = htmlToParagraphs(`<div>${cleanHtml}</div>`, finalUrl);
     const blocks = paragraphsToBlocks(paragraphs.length > 0 ? paragraphs : [String(article.textContent || '').trim()]);
     if (blocks.length === 0) return unreachable();
     const result = succeedExtraction(blocks.map((block) => block.text).join('\n\n'), blocks, 'url-readability');

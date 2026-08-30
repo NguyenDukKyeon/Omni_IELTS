@@ -47,9 +47,18 @@ export type UrlFetchDeps = {
   maxBytes?: number;
 };
 
-export type PublicHtmlResult =
-  | { ok: true; html: string; finalUrl: string }
-  | { ok: false; code: UrlSafetyCode };
+export type PublicHtmlResult = {
+  ok: boolean;
+  html?: string;
+  finalUrl?: string;
+  code?: UrlSafetyCode;
+};
+
+type UrlAssertion = {
+  ok: boolean;
+  url?: URL;
+  code?: UrlSafetyCode;
+};
 
 function fail(code: UrlSafetyCode): PublicHtmlResult {
   return { ok: false, code };
@@ -108,7 +117,7 @@ export function isBlockedHostname(hostname: string): boolean {
   return isNonPublicIp(host);
 }
 
-function parseHttpUrl(raw: string): { ok: true; url: URL } | { ok: false; code: UrlSafetyCode } {
+function parseHttpUrl(raw: string): UrlAssertion {
   let url: URL;
   try {
     url = new URL(raw);
@@ -130,21 +139,21 @@ function parseHttpUrl(raw: string): { ok: true; url: URL } | { ok: false; code: 
 export async function assertPublicHttpUrl(
   raw: string,
   lookup: (hostname: string) => Promise<string[]> = defaultDnsLookup,
-): Promise<{ ok: true; url: URL } | { ok: false; code: UrlSafetyCode }> {
+): Promise<UrlAssertion> {
   const parsed = parseHttpUrl(raw);
-  if (!parsed.ok) return parsed;
+  if (!parsed.ok || !parsed.url) return { ok: false, code: parsed.code ?? 'INVALID_INPUT' };
   const host = parsed.url.hostname.replace(/^\[|\]$/g, '');
   if (isIP(host) || coerceIpv4(host)) {
-    return isNonPublicIp(host) ? fail('RIGHTS_REJECTED') : { ok: true, url: parsed.url };
+    return isNonPublicIp(host) ? { ok: false, code: 'RIGHTS_REJECTED' } : { ok: true, url: parsed.url };
   }
   let addresses: string[];
   try {
     addresses = await lookup(host);
   } catch {
-    return fail('URL_UNREACHABLE');
+    return { ok: false, code: 'URL_UNREACHABLE' };
   }
   if (!addresses.length || addresses.some((address) => isNonPublicIp(address) || isBlockedHostname(address))) {
-    return fail('RIGHTS_REJECTED');
+    return { ok: false, code: 'RIGHTS_REJECTED' };
   }
   return { ok: true, url: parsed.url };
 }
@@ -163,7 +172,7 @@ export async function fetchPublicHtml(rawUrl: string, deps: UrlFetchDeps = {}): 
 
   for (let hops = 0; hops <= URL_MAX_REDIRECTS; hops += 1) {
     const safety = await assertPublicHttpUrl(current, lookup);
-    if (!safety.ok) return safety;
+    if (!safety.ok || !safety.url) return fail(safety.code ?? 'URL_UNREACHABLE');
     if (visited.has(safety.url.href)) return fail('URL_UNREACHABLE');
     visited.add(safety.url.href);
 
