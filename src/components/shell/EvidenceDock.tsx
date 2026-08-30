@@ -160,6 +160,7 @@ export function EvidenceDock() {
           className="omni-evidence-dock__expand"
           data-ux-flow="app.navigation"
           data-ux-control="shell.evidence.expand"
+          title="Mở rộng bằng chứng"
           onClick={() => setEvidenceDock('open')}
         >
           <ChevronLeft aria-hidden="true" />
@@ -172,9 +173,9 @@ export function EvidenceDock() {
   return (
     <aside ref={dockRef} className="omni-evidence-dock" aria-label="Bằng chứng và việc đến hạn" data-ux-scope="app-shell-v2">
       <header className="omni-evidence-dock__header">
-        <div>
-          <p className="omni-evidence-dock__eyebrow">Bằng chứng học tập</p>
-          <h2>Bằng chứng và việc đến hạn</h2>
+        <div className="omni-evidence-dock__header-copy">
+          <p className="omni-evidence-dock__eyebrow">Căn cứ & Đề xuất</p>
+          <h2>Cơ sở đề xuất</h2>
         </div>
         <button
           ref={collapseRef}
@@ -182,6 +183,7 @@ export function EvidenceDock() {
           className="omni-evidence-dock__collapse"
           data-ux-flow="app.navigation"
           data-ux-control="shell.evidence.collapse"
+          title="Thu gọn"
           onClick={() => setEvidenceDock('collapsed')}
         >
           <ChevronRight aria-hidden="true" />
@@ -189,36 +191,45 @@ export function EvidenceDock() {
         </button>
       </header>
 
-      {model.sections.map((section) => (
-        <section key={section.id} id={section.id} className="omni-evidence-dock__section">
-          <h3>{section.title}</h3>
-          {section.items.length === 0 ? (
-            <p className="omni-evidence-dock__empty">Chưa đủ bằng chứng</p>
-          ) : (
-            <ul>
-              {section.items.map((item) => {
-                const control = controlForItem(item);
-                const clickable = Boolean(item.destination && control);
-                return (
-                  <li key={item.id} data-status={item.status}>
-                    {clickable && control ? (
-                      <EvidenceDockButton item={item} control={control} onOpen={openDestination} />
-                    ) : (
-                      <div className="omni-evidence-dock__item is-static">
-                        <CircleAlert aria-hidden="true" />
-                        <div>
-                          <strong>{item.label}</strong>
-                          <span>{item.detail}</span>
+      <div className="omni-evidence-dock__sections">
+        {model.sections.map((section) => (
+          <section key={section.id} id={section.id} className="omni-evidence-dock__section">
+            <h3 className="omni-evidence-dock__section-title">{section.title}</h3>
+            {section.items.length === 0 ? (
+              <div className="omni-evidence-dock__empty-card">
+                <CircleAlert aria-hidden="true" className="w-4 h-4 text-stone-400" />
+                <p className="omni-evidence-dock__empty">
+                  {section.id === 'system-due'
+                    ? 'Không có việc đến hạn hôm nay.'
+                    : 'Chưa đủ dữ liệu độc lập.'}
+                </p>
+              </div>
+            ) : (
+              <ul className="omni-evidence-dock__list">
+                {section.items.map((item) => {
+                  const control = controlForItem(item);
+                  const clickable = Boolean(item.destination && control);
+                  return (
+                    <li key={item.id} data-status={item.status} className="omni-evidence-dock__list-item">
+                      {clickable && control ? (
+                        <EvidenceDockButton item={item} control={control} onOpen={openDestination} />
+                      ) : (
+                        <div className="omni-evidence-dock__item is-static">
+                          <CircleAlert aria-hidden="true" className="omni-evidence-dock__item-icon" />
+                          <div className="omni-evidence-dock__item-text">
+                            <strong>{item.label}</strong>
+                            <span>{item.detail}</span>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      ))}
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        ))}
+      </div>
     </aside>
   );
 }

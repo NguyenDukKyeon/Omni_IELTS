@@ -434,6 +434,90 @@ test('mobile shell controls activate all five destinations, grouped sheets, them
   await expect(nav.locator('[data-ux-control="shell.mobile.more"]')).toBeFocused();
 });
 
+test('Focus Dock deterministic layout assertions verify approved desktop and mobile proportions', async ({ page }, testInfo) => {
+  const mobile = isMobileProject(testInfo.project.name);
+  if (mobile) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await expect(page.locator('#dashboard-view')).toBeVisible();
+
+    const mobileLayout = await page.evaluate(() => {
+      const header = document.getElementById('app-header');
+      const headerRect = header?.getBoundingClientRect();
+      const actions = document.querySelector('.omni-shell-header__actions');
+      const actionsVisible = actions ? getComputedStyle(actions).display !== 'none' : false;
+      const primaryCta = document.querySelector('[data-ux-control="dashboard.coach.primary"]');
+      const ctaRect = primaryCta?.getBoundingClientRect();
+      const bottomNav = document.getElementById('mobile-bottom-nav');
+      const navRect = bottomNav?.getBoundingClientRect();
+      const main = document.getElementById('main-viewport-content');
+      const mainRect = main?.getBoundingClientRect();
+
+      return {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+        headerHeight: headerRect?.height ?? 0,
+        actionsVisible,
+        ctaVisibleInViewport: Boolean(ctaRect && ctaRect.top >= 0 && ctaRect.bottom <= window.innerHeight),
+        bottomNavVisible: Boolean(navRect && navRect.top < window.innerHeight),
+        mainWidth: mainRect?.width ?? 0,
+      };
+    });
+
+    expect(mobileLayout.documentWidth).toBeLessThanOrEqual(mobileLayout.viewportWidth + 1);
+    expect(mobileLayout.headerHeight).toBeLessThanOrEqual(72);
+    expect(mobileLayout.headerHeight).toBeGreaterThanOrEqual(56);
+    expect(mobileLayout.actionsVisible).toBe(false);
+    expect(mobileLayout.ctaVisibleInViewport).toBe(true);
+    expect(mobileLayout.bottomNavVisible).toBe(true);
+    expect(mobileLayout.mainWidth).toBeGreaterThan(mobileLayout.viewportWidth * 0.8);
+  } else {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await expect(page.locator('#dashboard-view')).toBeVisible();
+
+    const desktopLayout = await page.evaluate(() => {
+      const frame = document.querySelector('.omni-focus-dock__frame');
+      const frameRect = frame?.getBoundingClientRect();
+      const nav = document.getElementById('desktop-sidebar');
+      const navRect = nav?.getBoundingClientRect();
+      const dock = document.querySelector('.omni-evidence-dock:not(.is-collapsed)');
+      const dockRect = dock?.getBoundingClientRect();
+      const main = document.getElementById('main-viewport-content');
+      const mainRect = main?.getBoundingClientRect();
+      const title = document.querySelector('.omni-daily-coach h2');
+      const titleRect = title?.getBoundingClientRect();
+      const primaryCta = document.querySelector('[data-ux-control="dashboard.coach.primary"]');
+      const ctaRect = primaryCta?.getBoundingClientRect();
+
+      const leftMargin = frameRect?.left ?? 0;
+      const rightMargin = window.innerWidth - (frameRect?.right ?? window.innerWidth);
+      const isCentered = Math.abs(leftMargin - rightMargin) <= 6;
+      const titleToCtaDistance = ctaRect && titleRect ? ctaRect.top - titleRect.bottom : 999;
+
+      return {
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        isCentered,
+        navWidth: navRect?.width ?? 0,
+        dockWidth: dockRect?.width ?? 0,
+        mainWidth: mainRect?.width ?? 0,
+        titleToCtaDistance,
+      };
+    });
+
+    expect(desktopLayout.documentWidth).toBeLessThanOrEqual(desktopLayout.viewportWidth + 1);
+    expect(desktopLayout.isCentered).toBe(true);
+    expect(desktopLayout.navWidth).toBeGreaterThanOrEqual(160);
+    expect(desktopLayout.navWidth).toBeLessThanOrEqual(185);
+    expect(desktopLayout.dockWidth).toBeGreaterThanOrEqual(220);
+    expect(desktopLayout.dockWidth).toBeLessThanOrEqual(250);
+    expect(desktopLayout.mainWidth).toBeGreaterThanOrEqual(620);
+    expect(desktopLayout.titleToCtaDistance).toBeLessThan(120);
+  }
+});
+
 test('Focus Dock keeps the canvas dominant across accepted desktop and mobile widths', async ({ page }, testInfo) => {
   const mobile = isMobileProject(testInfo.project.name);
   const widths = mobile ? [360, 390, 430] : [1280, 1440, 1920];
