@@ -1,10 +1,10 @@
-import {
-  computeContentHash,
-  createSourceRecord,
-  type SourceMediaType,
-  type SourceProvenance,
-  type SourceRecord,
-  type SourceVersion,
+import { computeContentHash } from './contentHash';
+import { createSourceRecord } from './sourceFactories';
+import type {
+  SourceMediaType,
+  SourceProvenance,
+  SourceRecord,
+  SourceVersion,
 } from '../../types/sources';
 import { extractDocument } from './extractors';
 import { normalizeSourceError, type NormalizedSourceError } from './sourceErrors';

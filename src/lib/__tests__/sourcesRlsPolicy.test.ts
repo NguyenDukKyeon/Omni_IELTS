@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { sourcesStorage, SourceVersionConflictError } from '../../services/sourcesStorage';
-import { createSourceRecord, createSourceVersion } from '../../types/sources';
+import { createSourceRecord, createSourceVersion } from '../sources/sourceFactories';
 
 const sql = readFileSync('supabase/migrations/202608300001_sources_library.sql', 'utf8');
 

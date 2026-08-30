@@ -1,9 +1,8 @@
-import { randomUUID } from 'node:crypto';
-import {
-  createSourceVersion,
-  type SourceBlock,
-  type SourceMediaType,
-  type SourceVersion,
+import { createSourceVersion } from '../sourceFactories';
+import type {
+  SourceBlock,
+  SourceMediaType,
+  SourceVersion,
 } from '../../../types/sources';
 
 export type ExtractionInput = {
@@ -39,7 +38,7 @@ export function failExtraction(
       userMessageVi,
       suggestedActionVi: extras.suggestedActionVi ?? 'Hãy dán văn bản hoặc chọn định dạng P03 hỗ trợ.',
       retryable: extras.retryable ?? false,
-      diagnosticId: extras.diagnosticId ?? randomUUID(),
+      diagnosticId: extras.diagnosticId ?? globalThis.crypto.randomUUID(),
       owningModule: extras.owningModule,
     },
   };
@@ -51,7 +50,7 @@ export function succeedExtraction(
   extractor: string,
 ): ExtractionResult {
   const version = createSourceVersion({
-    sourceId: randomUUID(),
+    sourceId: globalThis.crypto.randomUUID(),
     versionNumber: 1,
     stage: 'normalised',
     plainText,

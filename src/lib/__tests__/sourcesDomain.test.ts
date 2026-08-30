@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createSourceRecord,
-  createSourceVersion,
-  computeContentHash,
-  type SourceProvenance,
-} from '../../types/sources';
+import { computeContentHash } from '../sources/contentHash';
+import { createSourceRecord, createSourceVersion } from '../sources/sourceFactories';
+import type { SourceProvenance } from '../../types/sources';
 
 describe('Sources Domain Contracts', () => {
   it('computes deterministic SHA-256 content hashes for versions', () => {
