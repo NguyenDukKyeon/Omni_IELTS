@@ -37,7 +37,7 @@ test('Daily Coach manual module choice opens a chooser and navigates', async ({ 
   if (!isMobileProject(testInfo.project.name)) {
     await page.getByRole('navigation', { name: 'Điều hướng học tập' }).getByRole('button', { name: 'Dashboard' }).click();
   } else {
-    await page.locator('#mobile-nav-dashboard').click();
+    await page.getByRole('navigation', { name: 'Điều hướng di động' }).getByRole('button', { name: 'Home' }).click();
   }
 
   await page.getByRole('region', { name: 'Daily Coach' }).locator('[data-ux-control="dashboard.coach.alternative-2"]').click();

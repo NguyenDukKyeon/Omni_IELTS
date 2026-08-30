@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures';
+import { navigateToModule } from './helpers/navigation';
 
 function isMobileProject(projectName: string): boolean {
   return projectName.includes('mobile');
@@ -64,6 +65,52 @@ test('mobile Focus Dock keeps a usable main canvas without horizontal overflow',
   await expect(cta).toBeInViewport();
 });
 
+test('mobile navigation groups seven modules into five destinations', async ({ page }, testInfo) => {
+  test.skip(!isMobileProject(testInfo.project.name), 'Mobile destination grouping');
+  await page.goto('/');
+  const nav = page.getByRole('navigation', { name: 'Điều hướng di động' });
+  await expect(nav.getByRole('button')).toHaveCount(5);
+
+  const barMetrics = await nav.evaluate((element) => ({
+    overflow: element.scrollWidth > element.clientWidth + 1,
+    width: element.getBoundingClientRect().width,
+  }));
+  expect(barMetrics.overflow).toBe(false);
+
+  await nav.getByRole('button', { name: 'Learn' }).click();
+  for (const label of ['Sources & Library', 'Vocabulary', 'Grammar & Strategy', 'Media Lab']) {
+    await expect(page.getByRole('dialog').getByRole('button', { name: new RegExp(label) })).toBeVisible();
+  }
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(nav.getByRole('button', { name: 'Learn' })).toBeFocused();
+
+  await nav.getByRole('button', { name: 'Review' }).click();
+  await expect(page.getByRole('heading', { name: 'Ôn lỗi đến hạn' })).toBeVisible();
+
+  await nav.getByRole('button', { name: 'Practice' }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: /IELTS Practice/ })).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('button', { name: /IELTS Mock/ })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Đóng' }).click();
+
+  await nav.getByRole('button', { name: 'More' }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'AI Tutor' })).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Hồ sơ' })).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('radio', { name: 'Sáng' })).toBeVisible();
+});
+
+test('knowledge remains renderable as a hidden compatibility route', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent('omni:compat-set-module', { detail: 'knowledge' }));
+  });
+  await expect(page.locator('#knowledge-module')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Học Kiến Thức & Chiến Thuật Làm Bài IELTS' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Điều hướng di động' }).getByRole('button', { name: 'Kiến thức' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Điều hướng học tập' }).getByRole('button', { name: 'Kiến thức' })).toHaveCount(0);
+});
+
 test('Evidence Dock is module-sensitive, persists collapse, and hides in Mock exam', async ({ page }, testInfo) => {
   test.skip(isMobileProject(testInfo.project.name), 'Evidence Dock is deferred on narrow viewports');
   await page.goto('/');
@@ -119,7 +166,7 @@ test('Theme menu Escape does not collapse Evidence Dock', async ({ page }, testI
 test('Grammar and Strategy tabs move with arrow keys', async ({ page }, testInfo) => {
   await page.goto('/');
   if (isMobileProject(testInfo.project.name)) {
-    await page.locator('#mobile-nav-grammar').click();
+    await navigateToModule(page, 'grammar');
   } else {
     await page.getByRole('navigation', { name: 'Điều hướng học tập' }).getByRole('button', { name: /Grammar & Strategy/ }).click();
   }

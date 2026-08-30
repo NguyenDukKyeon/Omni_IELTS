@@ -5,12 +5,13 @@ export type ResolvedTheme = 'light' | 'dark' | 'high_contrast';
 export type EvidenceDockState = 'open' | 'collapsed' | 'hidden';
 export type MobileDestinationId = 'home' | 'learn' | 'practice' | 'review' | 'more';
 export type ConnectivityState = 'online' | 'offline' | 'syncing' | 'needs_attention';
+export type MobileGroupId = 'learn' | 'practice' | 'review';
 
 export interface CanonicalModule {
   id: ModuleId;
   label: string;
   description: string;
-  mobileGroup: 'learn' | 'practice' | 'review';
+  mobileGroup: MobileGroupId;
 }
 
 export const CANONICAL_MODULES: readonly CanonicalModule[] = [
@@ -43,4 +44,15 @@ export function migrateLegacyTheme(value: string | null): ThemePreference {
   if (value === 'true') return 'dark';
   if (value === 'false') return 'light';
   return 'system';
+}
+
+export function destinationForModule(moduleId: ModuleId): MobileDestinationId | null {
+  if (moduleId === 'dashboard') return 'home';
+  if (moduleId === 'profile') return 'more';
+  const found = CANONICAL_MODULES.find((module) => module.id === moduleId);
+  return found?.mobileGroup ?? null;
+}
+
+export function modulesInMobileGroup(group: MobileGroupId): CanonicalModule[] {
+  return CANONICAL_MODULES.filter((module) => module.mobileGroup === group);
 }

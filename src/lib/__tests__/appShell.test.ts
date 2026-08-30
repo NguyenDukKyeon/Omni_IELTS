@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_MODULES,
+  destinationForModule,
   MOBILE_DESTINATIONS,
   migrateLegacyTheme,
+  modulesInMobileGroup,
   resolveTheme,
 } from '../appShell';
 
@@ -26,6 +28,25 @@ describe('app shell contracts', () => {
       'practice',
       'review',
       'more',
+    ]);
+  });
+
+  it('maps modules onto Home Learn Practice Review More groups', () => {
+    expect(destinationForModule('dashboard')).toBe('home');
+    expect(destinationForModule('sources')).toBe('learn');
+    expect(destinationForModule('mock_test')).toBe('practice');
+    expect(destinationForModule('review_progress')).toBe('review');
+    expect(destinationForModule('profile')).toBe('more');
+    expect(destinationForModule('knowledge')).toBeNull();
+    expect(modulesInMobileGroup('learn').map(({ id }) => id)).toEqual([
+      'sources',
+      'vocabulary',
+      'grammar',
+      'media',
+    ]);
+    expect(modulesInMobileGroup('practice').map(({ id }) => id)).toEqual([
+      'practice',
+      'mock_test',
     ]);
   });
 

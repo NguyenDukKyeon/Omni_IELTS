@@ -382,36 +382,48 @@ async function main() {
     await mobilePage.waitForSelector('#app-header');
     await safeSnapMobile('SCR-001-home-dashboard-mobile.png', 'Mobile Home Dashboard');
 
+    const mobileNav = () => mobilePage.getByRole('navigation', { name: 'Điều hướng di động' });
+    const openLearn = async (label) => {
+      await mobileNav().getByRole('button', { name: 'Learn' }).click();
+      await mobilePage.getByRole('dialog').getByRole('button', { name: new RegExp(label) }).click();
+    };
+    const openPractice = async (label) => {
+      await mobileNav().getByRole('button', { name: 'Practice' }).click();
+      await mobilePage.getByRole('dialog').getByRole('button', { name: new RegExp(label) }).click();
+    };
+
     await safeSnapMobile('SCR-002-source-ingestion-mobile.png', 'Mobile Sources Ingestion', async () => {
-      await mobilePage.locator('#mobile-nav-sources').click();
+      await openLearn('Sources & Library');
     });
 
     await safeSnapMobile('SCR-004-vocab-dashboard-mobile.png', 'Mobile Vocabulary SRS', async () => {
-      await mobilePage.locator('#mobile-nav-vocabulary').click();
+      await openLearn('Vocabulary');
     });
 
     await safeSnapMobile('SCR-006-grammar-hub-mobile.png', 'Mobile Grammar Hub', async () => {
-      await mobilePage.locator('#mobile-nav-grammar').click();
+      await openLearn('Grammar & Strategy');
     });
 
     await safeSnapMobile('SCR-008-media-lab-mobile.png', 'Mobile Media Lab', async () => {
-      await mobilePage.locator('#mobile-nav-media').click();
+      await openLearn('Media Lab');
     });
 
     await safeSnapMobile('SCR-011-practice-hub-mobile.png', 'Mobile Practice Hub', async () => {
-      await mobilePage.locator('#mobile-nav-practice').click();
+      await openPractice('IELTS Practice');
     });
 
     await safeSnapMobile('SCR-015-mock-test-mobile.png', 'Mobile Mock Test', async () => {
-      await mobilePage.locator('#mobile-nav-mock_test').click();
+      await openPractice('IELTS Mock');
     });
 
     await safeSnapMobile('SCR-019-knowledge-hub-mobile.png', 'Mobile Knowledge Hub', async () => {
-      await mobilePage.locator('#mobile-nav-knowledge').click();
+      await openLearn('Grammar & Strategy');
+      await mobilePage.getByRole('tab', { name: 'IELTS Strategy' }).click();
     });
 
     await safeSnapMobile('SCR-020-profile-mobile.png', 'Mobile Profile Settings', async () => {
-      await mobilePage.locator('#profile-nav-btn').click();
+      await mobileNav().getByRole('button', { name: 'More' }).click();
+      await mobilePage.getByRole('dialog').getByRole('button', { name: 'Hồ sơ' }).click();
     });
 
     console.log('\nAll screenshots completed!');

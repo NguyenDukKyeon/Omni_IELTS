@@ -13,7 +13,7 @@ test('global navigation opens every public beta learning module without runtime 
     ['media', 'Media Lab: Shadowing & Nghe Chép Chính Tả (Dictation)'],
     ['practice', 'Luyện Tập IELTS & Kho Nguồn/Dự Báo'],
     ['mock_test', 'Phòng Thi Thử IELTS-style (Full Mock Exam)'],
-    ['knowledge', 'Học Kiến Thức & Chiến Thuật Làm Bài IELTS'],
+    ['review_progress', 'Ôn lỗi đến hạn'],
     ['profile', 'Nguyễn Minh Anh'],
   ] as const;
 
