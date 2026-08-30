@@ -1074,3 +1074,103 @@
     border-radius: var(--omni-radius-lg);
   }
 }
+
+.omni-mobile-nav {
+  display: flex;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0;
+  min-height: 3.5rem;
+  padding: 0.25rem 0.2rem calc(0.25rem + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--omni-surface) 94%, transparent);
+  border-top: 1px solid var(--omni-border);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.omni-mobile-nav__item {
+  flex: 1 1 0;
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.35rem 0.15rem;
+  border: 0;
+  border-radius: var(--omni-radius-sm);
+  background: transparent;
+  color: var(--omni-text-muted);
+  cursor: pointer;
+}
+
+.omni-mobile-nav__item span {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.omni-mobile-nav__icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+}
+
+.omni-mobile-nav__item.is-active {
+  color: var(--omni-action-primary);
+}
+
+.omni-mobile-sheet__theme {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--omni-border);
+}
+
+.omni-mobile-sheet__theme h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--omni-text-muted);
+}
+
+.omni-mobile-sheet__theme-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.omni-mobile-sheet__theme-item {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--omni-border);
+  border-radius: var(--omni-radius-sm);
+  background: var(--omni-ground);
+  color: var(--omni-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.omni-mobile-sheet__theme-item.is-active {
+  border-color: var(--omni-action-primary);
+  color: var(--omni-action-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--omni-action-primary) 16%, transparent);
+}
+
+@media (min-width: 768px) {
+  .omni-mobile-nav {
+    display: none;
+  }
+}

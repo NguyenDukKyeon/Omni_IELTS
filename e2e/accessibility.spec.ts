@@ -10,7 +10,7 @@ const modules = [
   'media',
   'practice',
   'mock_test',
-  'knowledge',
+  'review_progress',
   'profile',
 ] as const;
 

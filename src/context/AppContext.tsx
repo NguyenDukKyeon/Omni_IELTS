@@ -122,6 +122,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notification, setNotification] = useState<NotificationState | null>(null);
   const [isExamModeActive, setIsExamModeActive] = useState<boolean>(false);
 
+  useEffect(() => {
+    const onCompat = (event: Event) => {
+      const moduleId = (event as CustomEvent<string>).detail;
+      if (moduleId === 'knowledge') setActiveModule('knowledge');
+    };
+    window.addEventListener('omni:compat-set-module', onCompat);
+    return () => window.removeEventListener('omni:compat-set-module', onCompat);
+  }, []);
+
   // Profile State
   const [profile, setProfile] = useState<UserProfile>(() => {
     try {
