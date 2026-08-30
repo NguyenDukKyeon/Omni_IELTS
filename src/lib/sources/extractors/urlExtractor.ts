@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import createDOMPurify from 'dompurify';
 import { failExtraction, paragraphsToBlocks, succeedExtraction, type ExtractionInput, type ExtractionResult } from './types';
+import { fetchPublicHtml, type UrlFetchDeps } from '../urlSafety';
 
 function htmlToParagraphs(html: string, url: string): string[] {
   const dom = new JSDOM(html, { url });
@@ -12,55 +13,44 @@ function htmlToParagraphs(html: string, url: string): string[] {
   return fallback ? [fallback] : [];
 }
 
-export async function extractUrl(input: ExtractionInput): Promise<ExtractionResult> {
-  const url = String(input.content).trim();
-  if (!/^https?:\/\//i.test(url)) {
-    return failExtraction(
-      'INVALID_INPUT',
-      'Đường dẫn bài viết không hợp lệ. Hãy dán URL http(s) hoặc dán nội dung bài.',
-    );
-  }
+function unreachable(): ExtractionResult {
+  return failExtraction(
+    'URL_UNREACHABLE',
+    'Không lấy được bài viết từ URL. Hãy dán nội dung bài thay vì phụ thuộc máy chủ gốc.',
+  );
+}
 
-  let html: string;
-  try {
-    const response = await fetch(url, { redirect: 'follow' });
-    if (!response.ok) {
+function rejected(): ExtractionResult {
+  return failExtraction(
+    'RIGHTS_REJECTED',
+    'URL này không được phép truy cập từ OMNI. Hãy dán nội dung bài viết.',
+  );
+}
+
+export async function extractUrl(input: ExtractionInput, deps: UrlFetchDeps = {}): Promise<ExtractionResult> {
+  const fetched = await fetchPublicHtml(String(input.content).trim(), deps);
+  if (!fetched.ok) {
+    if (fetched.code === 'RIGHTS_REJECTED') return rejected();
+    if (fetched.code === 'INVALID_INPUT') {
       return failExtraction(
-        'URL_UNREACHABLE',
-        'Không lấy được bài viết từ URL. Hãy dán nội dung bài thay vì phụ thuộc máy chủ gốc.',
-        { suggestedActionVi: 'Dán văn bản bài viết vào khung nhập.' },
+        'INVALID_INPUT',
+        'Đường dẫn bài viết không hợp lệ. Hãy dán URL http(s) hoặc dán nội dung bài.',
       );
     }
-    html = await response.text();
-  } catch {
-    return failExtraction(
-      'URL_UNREACHABLE',
-      'Không lấy được bài viết từ URL. Hãy dán nội dung bài thay vì phụ thuộc máy chủ gốc.',
-      { suggestedActionVi: 'Dán văn bản bài viết vào khung nhập.' },
-    );
+    return unreachable();
   }
 
   try {
-    const dom = new JSDOM(html, { url });
+    const dom = new JSDOM(fetched.html, { url: fetched.finalUrl });
     const article = new Readability(dom.window.document).parse();
-    if (!article?.content && !article?.textContent) {
-      return failExtraction(
-        'URL_UNREACHABLE',
-        'Không tách được nội dung bài viết. Hãy dán văn bản thủ công.',
-      );
-    }
+    if (!article?.content && !article?.textContent) return unreachable();
     const purify = createDOMPurify(dom.window);
     const cleanHtml = purify.sanitize(String(article.content || ''));
-    const paragraphs = htmlToParagraphs(`<div>${cleanHtml}</div>`, url);
+    const paragraphs = htmlToParagraphs(`<div>${cleanHtml}</div>`, fetched.finalUrl);
     const blocks = paragraphsToBlocks(paragraphs.length > 0 ? paragraphs : [String(article.textContent || '').trim()]);
-    if (blocks.length === 0) {
-      return failExtraction(
-        'URL_UNREACHABLE',
-        'Không tách được nội dung bài viết. Hãy dán văn bản thủ công.',
-      );
-    }
+    if (blocks.length === 0) return unreachable();
     const result = succeedExtraction(blocks.map((block) => block.text).join('\n\n'), blocks, 'url-readability');
-    if (result.success) {
+    if (result.success && result.version) {
       result.version.extractionReport = {
         extractor: 'url-readability',
         extractedAt: new Date().toISOString(),
@@ -76,3 +66,5 @@ export async function extractUrl(input: ExtractionInput): Promise<ExtractionResu
     );
   }
 }
+
+export type { UrlFetchDeps };
