@@ -2,26 +2,39 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild the OMNI Sources & Library module into a Library-First, multi-source learning workspace with immutable versioning, span-level provenance, strict selected-source grounded chat, and a single-destination artifact generation pipeline (`1 Source/Span → 1 Chosen Destination → 1 Validated Draft → Destination Owner Persists`).
+**Goal:** Rebuild the OMNI Sources & Library module into a Library-First, multi-source learning workspace with immutable versioning, span-level provenance, strict selected-source grounded chat, and a single-destination artifact generation pipeline (`1 SourceVersion/Span → 1 Chosen Destination → 1 Validated Draft → Destination Owner Persists`).
 
-**Architecture:** Domain contracts and Supabase RLS isolate private learner documents; an extraction pipeline normalizes heterogeneous inputs (Text, PDF, DOCX, URL, YouTube, Audio, Charts); `ImportJobMachine` manages parallel ingestion; `LibraryStore` manages search, filters, and collections; `GroundedChatEngine` queries selected source versions with block citations; `ArtifactJobMachine` generates validated single-destination drafts; destination handoff adapters deliver drafts to Practice, Mock, Vocabulary, and Note modules without creating premature learner mastery.
+**Architecture:** Domain contracts and Supabase RLS isolate private learner documents. P03 extraction covers pasted text/Markdown, article URL, text-layer PDF, DOCX, and VTT/SRT only. YouTube, audio, and Task 1 chart inputs create `handoff_required` / `unavailable` reference records owned later by P04 or P07. `ImportJobMachine` manages parallel ingestion. `LibraryStore` manages search, filters, and collections. Grounded Chat is `POST /api/sources/grounded-chat` through the existing central AI router. `ArtifactJobMachine` generates one validated destination draft. Destination handoff adapters deliver drafts without creating learner mastery. Route cut-over is gated by `sources_library_v2`.
 
-**Tech Stack:** React 19, TypeScript 5.8, Tailwind CSS v4, Lucide React, Supabase PostgreSQL with RLS, Vitest 3.2, Playwright, Mozilla Readability, DOMPurify, pdf-parse, mammoth.
+**Tech Stack:** React 19, TypeScript 5.8, Tailwind CSS v4, Lucide React, existing `@supabase/supabase-js`, existing `zod`, existing `xstate`, Vitest 3.2, Playwright. New packages only after Task 0 (Readability, jsdom, DOMPurify, pdf-parse, mammoth). Dexie is not added.
 
 **Spec:** `docs/superpowers/specs/2026-08-30-omni-sources-library-design.md`
 
+**ADR:** `docs/architecture/adr/2026-08-30-sources-library-domain-and-destination-boundary.md`
+
+**Coding epic gate:** Do not start Tasks 1–12 until P02 is merged into `origin/main` and Product Owner approves this corrected plan.
+
 ## Global Constraints
 
-- Library-first UX is the default landing view; no automatic multi-artifact generation on import.
+- Library-first UX is the default landing view when `sources_library_v2` is ON; no automatic multi-artifact generation on import.
+- Feature flag `sources_library_v2` / env `OMNI_SOURCES_LIBRARY_V2` defaults OFF. `sources` keeps rendering `SourceIngestionView` until the flag is ON. Rollback is flag OFF in one deploy. Keep the legacy view as a one-release facade; do not delete it in this epic.
+- P03 extraction input is only: pasted text/Markdown, article URL extraction, text-layer PDF, DOCX, VTT/SRT captions.
+- P03 must not implement YouTube caption retrieval, yt-dlp, `youtube-transcript` usage, audio download, audio transcription, waveform, media playback, or MediaSession ownership (P04).
+- P03 must not implement IELTS Task 1 chart/image parsing or rendering (P07).
+- For YouTube/audio/chart inputs, create a reference record with `unavailable` / `handoff_required` and direct the learner to the owning module. Do not claim extraction or transcription.
 - Immutable source versioning with SHA-256 content hashing; updates append new `SourceVersion`s.
-- Grounded chat answers *only* from explicitly selected `SourceVersion`s with block-level citations; fails closed with `unsupported_by_sources`; never silently triggers public web search.
-- External web search (`CAP-GLB-SEARCH`) is invoked only via explicit learner action ("Tra cứu dẫn chứng").
+- Grounded chat answers only from explicitly selected `SourceVersion`s with block-level citations; fails closed with `unsupported_by_sources`; never silently triggers public web search; uses existing `GroundedProviderRouter` / `CAP-GLB-AI-ROUTER`; never `AI_TASK_PROFILES.grounded` (search tools).
+- External web search (`CAP-GLB-SEARCH`) is invoked only via explicit learner action ("Tra cứu dẫn chứng") on `POST /api/sources/web-research`.
 - Strict single-destination generation: 1 SourceVersion/Span → 1 Destination (`practice` | `mock_section` | `vocabulary_deck` | `note` | `idea_bank`) → 1 Validated Draft → Destination Owner Persists.
 - Post-success CTA: Primary "Open artifact", Secondary "Create another output"; no auto-redirection.
-- Zero learner mastery or progress evidence emitted from Sources ingestion, chat, or AI draft creation.
+- Zero learner mastery, XP, vocabulary cards, progress evidence, or four-skill package generation from Sources ingestion, chat, or AI draft creation.
 - Complete 8 presentation states (loading, ready, empty, stale, degraded, unavailable, retryable_error, rejected) on all surfaces.
-- Normalized and scrubbed error responses without raw provider stacks, internal file paths, or API keys.
-- All interactive Beta controls have registered UX Flow Contracts (`data-ux-flow`).
+- Normalized and scrubbed error responses without raw provider stacks, `HTTP 429`, internal file paths, or API keys.
+- All interactive Beta controls have registered UX Flow Contracts (`data-ux-flow`) **and** unique literal `data-ux-control` IDs inside `data-ux-scope="sources-library-v2"` (UX Contract v2 evidence).
+- No public/paid Private Web Bridge dependency.
+- No unpinned or speculative npm dependencies. Package-lock-only installs after Task 0.
+- Do not invent or rename PRD, NFR, CAP, METRIC, or GUARD IDs.
+- No fake transcript, citation, score, mastery, or "real exam" / "Đề thi thật" claim.
 
 ---
 
@@ -30,64 +43,179 @@
 ```
 src/
 ├── types/
-│   └── sources.ts                      # Canonical SourceRecord, SourceVersion, Provenance & Job types
+│   └── sources.ts                         # Canonical SourceRecord, SourceVersion, Provenance & Job types
 ├── services/
-│   └── sourcesStorage.ts               # Supabase & IndexedDB persistence with RLS & offline cache
+│   └── sourcesStorage.ts                  # Supabase persistence with RLS; native IndexedDB/in-memory cache (no Dexie)
 ├── lib/
 │   └── sources/
+│       ├── featureFlags.ts                # sources_library_v2 kill switch
 │       ├── extractors/
-│       │   ├── textExtractor.ts        # Direct plain-text & Markdown normalizer
-│       │   ├── urlExtractor.ts         # Readability + DOMPurify web extractor
-│       │   ├── docxExtractor.ts        # Mammoth DOCX extractor
-│       │   ├── pdfExtractor.ts         # PDF text & page block extractor
-│       │   ├── youtubeExtractor.ts     # YouTube transcript & timestamp extractor
-│       │   ├── audioExtractor.ts       # Audio transcript turn adapter
-│       │   └── chartExtractor.ts       # Task 1 chart metadata extractor
-│       ├── importJobMachine.ts         # Batch ingestion state machine
-│       ├── sourceErrors.ts             # Normalized typed errors & scrubbed diagnostics
-│       ├── libraryStore.ts             # Library search, filter, and collection management
-│       ├── groundedChat.ts             # Context builder & citation validator
-│       ├── artifactJobMachine.ts       # Single-destination generation & quality validation
-│       └── destinationHandoff.ts       # Handoff adapters to Practice, Mock, Vocab, Note
+│       │   ├── textExtractor.ts           # Direct plain-text & Markdown normalizer
+│       │   ├── urlExtractor.ts            # Readability + DOMPurify web extractor
+│       │   ├── docxExtractor.ts           # Mammoth DOCX extractor
+│       │   ├── pdfExtractor.ts            # Text-layer PDF page block extractor
+│       │   ├── captionExtractor.ts        # VTT/SRT caption parser
+│       │   ├── handoffReference.ts        # YouTube/audio/chart unavailable records
+│       │   └── index.ts                   # extractDocument router
+│       ├── importJobMachine.ts            # Batch ingestion state machine
+│       ├── sourceErrors.ts                # Normalized typed errors & scrubbed diagnostics
+│       ├── libraryStore.ts                # Library search, filter, and collection management
+│       ├── groundedChat.ts                # Context builder, citation validator, Zod schemas
+│       ├── artifactJobMachine.ts          # Single-destination generation & quality validation
+│       └── destinationHandoff.ts          # Handoff adapters to Practice, Mock, Vocab, Note
 ├── components/
 │   └── sources/
-│       ├── SourcesLibraryExplorer.tsx  # Library grid/list view with multi-select & filters
-│       ├── SourceCard.tsx              # Source item card with status, type, and rights badges
-│       ├── SourcesFilterBar.tsx        # Search, format, rights, and sort controls
-│       ├── CollectionDrawer.tsx        # Collection management sidebar & modal
-│       ├── SourceReader.tsx            # Multi-page block reader with text selection
-│       ├── SourceGroundedChat.tsx      # Cited inquiry panel over selected sources
-│       ├── CitationDrawer.tsx          # Inspectable claim citation detail drawer
-│       ├── ArtifactStudioModal.tsx     # Single-destination generator modal
-│       ├── DestinationPicker.tsx       # 5-card destination selector
-│       └── ArtifactDraftPreview.tsx    # Draft inspector with "Open artifact" & "Create another"
+│       ├── SourcesLibraryExplorer.tsx
+│       ├── SourceCard.tsx
+│       ├── SourcesFilterBar.tsx
+│       ├── CollectionDrawer.tsx
+│       ├── SourceReader.tsx
+│       ├── SourceGroundedChat.tsx
+│       ├── CitationDrawer.tsx
+│       ├── ArtifactStudioModal.tsx
+│       ├── DestinationPicker.tsx
+│       └── ArtifactDraftPreview.tsx
 ├── views/
-│   └── SourcesView.tsx                 # Composed 3-zone desktop / 3-tab mobile workspace view
+│   ├── SourcesView.tsx                    # Flag-ON workspace
+│   └── SourceIngestionView.tsx            # One-release facade; do not delete
 └── lib/__tests__/
-    ├── sourcesDomain.test.ts           # Types, versioning, hashing & storage tests
-    ├── sourcesExtraction.test.ts       # Format extractor & sanitization tests
-    ├── sourcesImportMachine.test.ts    # Batch ingestion job machine tests
-    ├── sourcesGroundedChat.test.ts     # Selection context & citation tests
-    ├── sourcesArtifactJob.test.ts      # Single-destination generator & validation tests
-    ├── sourcesDestinationHandoff.test.ts # Handoff adapter tests
-    └── sourcesUxContracts.test.ts      # UX contract, a11y, and state transition tests
+    ├── sourcesFeatureFlags.test.ts
+    ├── sourcesDomain.test.ts
+    ├── sourcesExtraction.test.ts
+    ├── sourcesImportMachine.test.ts
+    ├── sourcesLibraryStore.test.ts
+    ├── sourcesGroundedChat.test.ts
+    ├── sourcesArtifactJob.test.ts
+    ├── sourcesDestinationHandoff.test.ts
+    └── sourcesUxContracts.test.ts
+server.ts                                  # POST /api/sources/grounded-chat and /api/sources/web-research
+e2e/sources-library.spec.ts
 ```
+
+Do not create `youtubeExtractor.ts`, `audioExtractor.ts`, or `chartExtractor.ts`.
 
 ---
 
 ## Tasks
 
+### Task 0: Dependency inventory, official-docs pin, and fallback paths
+
+**Files:**
+
+- Modify only if Task 0 decides a package is required: `package.json` and `package-lock.json`
+- Test: `src/lib/__tests__/sourcesFeatureFlags.test.ts` is not this task; this task is a documented gate that coding Tasks 1–12 must repeat before `npm install`
+
+**Interfaces:**
+
+- Consumes: current `package.json` / `package-lock.json` and official package documentation
+- Produces: a written adopt/reuse/reject decision for each candidate; exact pinned versions; license; fallback; removal path
+
+P03 currently needs **no** new packages to compile the flag, domain types, or job machines. Extraction packages are added only after this gate, during Task 2, as exact pins via `package-lock.json`.
+
+Existing packages that must be **reused, not re-added**:
+
+| Package | Current pin in `package.json` | P03 use | Forbidden P03 use |
+|---|---|---|---|
+| `zod` | `^4.4.3` (already present) | Grounded-chat and draft Zod schemas | None |
+| `xstate` | `^5.32.5` (already present) | Optional `ImportJobMachine` actor | None |
+| `@supabase/supabase-js` | `^2.57.4` (already present) | RLS-backed `sourcesStorage` | None |
+| `youtube-transcript` | `^1.3.1` (already present) | None in P03 | Caption retrieval |
+| `wavesurfer.js` | `^7.12.11` (already present) | None in P03 | Waveform / playback |
+| `@google/genai` | already present | Only through existing `GroundedProviderRouter` / `aiGateway` | New parallel Gemini client inside Sources |
+
+Candidate packages — adopt **only** if Task 2 extraction cannot be done with existing packages. Versions below were verified against official npm/GitHub on 2026-08-30 and **must be re-verified at implementation time** before any install. Pin the exact resolved version in `package-lock.json`. Do not commit `^` ranges for newly added packages.
+
+| Package | Decision | Exact version to re-verify | License | Official docs | Fallback if install/docs fail | Removal path |
+|---|---|---|---|---|---|---|
+| `@mozilla/readability` | ADOPT for article URL extraction (`CAP-SRC-EXTRACT`) | `0.6.0` | Apache-2.0 | https://github.com/mozilla/readability | `URL_UNREACHABLE` + paste-text | Uninstall; keep paste/URL-fail path |
+| `jsdom` | ADOPT as the documented Node DOM host for Readability and DOMPurify. Not a product capability. | Re-verify current Node-22 compatible release (npm latest was `30.0.1`; prefer the current documented Node 22 release) | MIT | https://github.com/jsdom/jsdom | Same as Readability: paste-text | Uninstall with Readability |
+| `dompurify` | ADOPT for HTML sanitization of Readability/mammoth HTML | Re-verify current `3.x` (npm latest was `3.4.14`) | MPL-2.0 OR Apache-2.0 | https://github.com/cure53/DOMPurify | Reject unsanitized HTML; paste-text | Uninstall; reject HTML inputs |
+| `pdf-parse` | ADOPT for **text-layer** PDF only | Re-verify current `2.4.5` or documented successor; confirm LICENSE file | Confirm LICENSE at install (Apache-2.0 expected for 2.x) | https://www.npmjs.com/package/pdf-parse and the package LICENSE | `PDF_SCANNED_NO_TEXT` + paste | Uninstall; paste-only PDF path |
+| `mammoth` | ADOPT for DOCX | Re-verify current `1.12.2` | BSD-2-Clause | https://github.com/mwilliamson/mammoth.js | `MALFORMED_DOCUMENT` + paste | Uninstall; paste-only DOCX path |
+| `dexie` | **REJECT for P03** | n/a | n/a | https://dexie.org (registry candidate only) | Native IndexedDB or in-memory cache in `sourcesStorage`; P09 owns offline queue | Never introduce |
+
+Unpinned, speculative, or program-map-violating packages are prohibited, including AnyDoc/firecrawl, yt-dlp, new AI provider SDKs, `@testing-library/react`, and Dexie.
+
+- [ ] **Step 1: Write the failing inventory test**
+
+```ts
+// src/lib/__tests__/sourcesDependencyPolicy.test.ts
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+
+describe('P03 dependency policy', () => {
+  it('does not add Dexie, yt-dlp, or unpinned new Sources packages before Task 0 verification', () => {
+    expect(pkg.dependencies.dexie).toBeUndefined();
+    expect(pkg.dependencies['yt-dlp']).toBeUndefined();
+  });
+
+  it('keeps youtube-transcript and wavesurfer unused by P03 extractors', () => {
+    expect(pkg.dependencies['youtube-transcript']).toBeDefined();
+    expect(pkg.dependencies['wavesurfer.js']).toBeDefined();
+  });
+
+  it('requires package-lock entries for any newly adopted extraction package', () => {
+    for (const name of ['@mozilla/readability', 'dompurify', 'pdf-parse', 'mammoth', 'jsdom']) {
+      if (pkg.dependencies?.[name] || pkg.devDependencies?.[name]) {
+        expect(pkg.dependencies?.[name] || pkg.devDependencies?.[name]).toMatch(/^\d/);
+        expect(lock.packages[`node_modules/${name}`] || lock.dependencies?.[name]).toBeTruthy();
+      }
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify RED or baseline**
+
+Run: `npx vitest run src/lib/__tests__/sourcesDependencyPolicy.test.ts`
+
+Expected: FAIL with `Cannot find module` until the test file exists; then PASS on the current lockfile (no Dexie, no new unpinned Sources packages).
+
+- [ ] **Step 3: Record the verification log inside the Task 2 commit message when a package is actually added**
+
+At Task 2 implementation time, open the official docs URLs above, copy the published version and LICENSE, then:
+
+```bash
+npm install @mozilla/readability@<verified> jsdom@<verified> dompurify@<verified> pdf-parse@<verified> mammoth@<verified> --save-exact
+```
+
+Do not run that command in this documentation PR. Do not add Dexie.
+
+- [ ] **Step 4: GREEN**
+
+Run: `npx vitest run src/lib/__tests__/sourcesDependencyPolicy.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit (documentation-only until coding epic)**
+
+During the coding epic only:
+
+```bash
+git add src/lib/__tests__/sourcesDependencyPolicy.test.ts package.json package-lock.json
+git commit -m "chore(sources): pin verified P03 extraction dependencies after official docs check"
+```
+
+---
+
 ### Task 1: Domain Schemas, Type Contracts & Storage Migration
 
 **Files:**
+
 - Create: `src/types/sources.ts`
+- Create: `src/lib/sources/featureFlags.ts`
 - Create: `supabase/migrations/202608300001_sources_library.sql`
 - Create: `src/services/sourcesStorage.ts`
 - Test: `src/lib/__tests__/sourcesDomain.test.ts`
+- Test: `src/lib/__tests__/sourcesFeatureFlags.test.ts`
 
 **Interfaces:**
+
 - Consumes: Supabase client from `src/services/supabase.ts`
-- Produces: `SourceRecord`, `SourceVersion`, `SourceBlock`, `SourceSpan`, `SourceProvenance`, `SourceCollection`, `SourceArtifactJob`, `ValidatedArtifactDraft`, `sourcesStorage`
+- Produces: `SourceRecord`, `SourceVersion`, `SourceBlock`, `SourceSpan`, `SourceProvenance`, `SourceCollection`, `SourceArtifactJob`, `ValidatedArtifactDraft`, `DestinationType`, `isSourcesLibraryV2Enabled`, `sourcesStorage`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -142,274 +270,87 @@ describe('Sources Domain Contracts', () => {
     expect(version.stage).toBe('raw');
     expect(version.contentHash).toBe(provenance.rawContentHash);
   });
+
+  it('stores YouTube/audio/chart records as handoff_required without a fake version', () => {
+    const record = createSourceRecord({
+      userId: 'user_123',
+      title: 'Lecture URL',
+      type: 'youtube',
+      provenance: {
+        originType: 'youtube_import',
+        retrievalDate: new Date().toISOString(),
+        rightsState: 'restricted_citation_only',
+        rawContentHash: computeContentHash('https://youtube.com/watch?v=example'),
+        canonicalCitation: 'YouTube reference',
+        owningModule: 'media',
+        handoffReasonVi: 'P04 Media Lab owns caption retrieval and playback.',
+      },
+      processingState: 'handoff_required',
+    });
+    expect(record.processingState).toBe('handoff_required');
+    expect(record.currentVersionId).toBe('');
+  });
+});
+```
+
+```ts
+// src/lib/__tests__/sourcesFeatureFlags.test.ts
+import { describe, expect, it } from 'vitest';
+import { isSourcesLibraryV2Enabled, resolveSourcesViewName } from '../sources/featureFlags';
+
+describe('sources_library_v2 kill switch', () => {
+  it('defaults OFF and keeps the legacy facade', () => {
+    expect(isSourcesLibraryV2Enabled({})).toBe(false);
+    expect(resolveSourcesViewName({})).toBe('SourceIngestionView');
+  });
+
+  it('routes to SourcesView only when the flag is ON', () => {
+    expect(resolveSourcesViewName({ OMNI_SOURCES_LIBRARY_V2: 'true' })).toBe('SourcesView');
+  });
+
+  it('rolls back to SourceIngestionView when the kill switch is false', () => {
+    expect(resolveSourcesViewName({ OMNI_SOURCES_LIBRARY_V2: 'false' })).toBe('SourceIngestionView');
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesDomain.test.ts`  
-Expected: FAIL with "Cannot find module '../../types/sources'"
+Run: `npx vitest run src/lib/__tests__/sourcesDomain.test.ts src/lib/__tests__/sourcesFeatureFlags.test.ts`
+
+Expected: FAIL with `Cannot find module '../../types/sources'` and `Cannot find module '../sources/featureFlags'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
+Implement `src/types/sources.ts` with the contracts from SPEC §3 and §6.2, including `SourceProcessingState` values `unavailable` and `handoff_required`, `DestinationType`, and `SourceArtifactJob`.
+
+Implement `src/lib/sources/featureFlags.ts`:
+
 ```ts
-// src/types/sources.ts
-import crypto from 'node:crypto';
-
-export type SourceMediaType =
-  | 'text'
-  | 'pdf'
-  | 'docx'
-  | 'url'
-  | 'youtube'
-  | 'audio'
-  | 'vtt_srt'
-  | 'chart_image';
-
-export type ContentRightsState =
-  | 'owned_by_learner'
-  | 'licensed_public'
-  | 'fair_use_academic'
-  | 'restricted_citation_only'
-  | 'rejected_unsupported';
-
-export interface SourceProvenance {
-  originType: 'user_upload' | 'pasted_text' | 'web_fetch' | 'youtube_import' | 'live_hub' | 'curated_benchmark';
-  originalUrl?: string;
-  originalFilename?: string;
-  authorOrSpeaker?: string;
-  publicationDate?: string;
-  retrievalDate: string;
-  license?: string;
-  rightsState: ContentRightsState;
-  rightsNotesVi?: string;
-  rawContentHash: string;
-  canonicalCitation: string;
+export function isSourcesLibraryV2Enabled(env: Record<string, string | undefined> = process.env): boolean {
+  return env.OMNI_SOURCES_LIBRARY_V2 === 'true';
 }
 
-export interface SourceBlock {
-  id: string;
-  order: number;
-  type: 'paragraph' | 'heading' | 'transcript_turn' | 'table_row' | 'chart_caption' | 'list_item';
-  text: string;
-  speaker?: string;
-  pageIndex?: number;
-  startMs?: number;
-  endMs?: number;
-}
-
-export interface SourceVersion {
-  id: string;
-  sourceId: string;
-  versionNumber: number;
-  stage: 'raw' | 'normalised' | 'edited';
-  contentHash: string;
-  plainText: string;
-  blocks: SourceBlock[];
-  wordCount: number;
-  pageCount?: number;
-  durationMs?: number;
-  mediaUrl?: string;
-  extractionReport?: {
-    extractor: string;
-    extractedAt: string;
-    sanitizationApplied: string[];
-    warnings: string[];
-  };
-  createdAt: string;
-}
-
-export interface SourceSpan {
-  sourceId: string;
-  sourceVersionId: string;
-  blockIds?: string[];
-  pageIndex?: number;
-  startMs?: number;
-  endMs?: number;
-  exactTextSnippet?: string;
-}
-
-export interface SourceRecord {
-  id: string;
-  userId: string;
-  title: string;
-  summary: string;
-  type: SourceMediaType;
-  collectionIds: string[];
-  tags: string[];
-  provenance: SourceProvenance;
-  currentVersionId: string;
-  targetBandEstimate?: number;
-  processingState: 'queued' | 'processing' | 'ready' | 'degraded' | 'failed' | 'rejected';
-  lastUsedAt: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SourceCollection {
-  id: string;
-  userId: string;
-  name: string;
-  color: string;
-  icon: string;
-  description?: string;
-  sourceIds: string[];
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt: string;
-}
-
-export function computeContentHash(content: string): string {
-  return crypto.createHash('sha256').update(content.trim()).digest('hex');
-}
-
-export function createSourceRecord(params: {
-  userId: string;
-  title: string;
-  type: SourceMediaType;
-  provenance: SourceProvenance;
-  collectionIds?: string[];
-  tags?: string[];
-}): SourceRecord {
-  const now = new Date().toISOString();
-  return {
-    id: `src_${crypto.randomUUID()}`,
-    userId: params.userId,
-    title: params.title,
-    summary: '',
-    type: params.type,
-    collectionIds: params.collectionIds || [],
-    tags: params.tags || [],
-    provenance: params.provenance,
-    currentVersionId: '',
-    processingState: 'queued',
-    lastUsedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-export function createSourceVersion(params: {
-  sourceId: string;
-  versionNumber: number;
-  stage: 'raw' | 'normalised' | 'edited';
-  plainText: string;
-  blocks?: SourceBlock[];
-  pageCount?: number;
-  durationMs?: number;
-  mediaUrl?: string;
-}): SourceVersion {
-  const plain = params.plainText || '';
-  const blocks: SourceBlock[] = params.blocks || [
-    {
-      id: 'b_001',
-      order: 1,
-      type: 'paragraph',
-      text: plain,
-    },
-  ];
-  return {
-    id: `ver_${crypto.randomUUID()}`,
-    sourceId: params.sourceId,
-    versionNumber: params.versionNumber,
-    stage: params.stage,
-    contentHash: computeContentHash(plain),
-    plainText: plain,
-    blocks,
-    wordCount: plain.split(/\s+/).filter(Boolean).length,
-    pageCount: params.pageCount,
-    durationMs: params.durationMs,
-    mediaUrl: params.mediaUrl,
-    createdAt: new Date().toISOString(),
-  };
+export function resolveSourcesViewName(env: Record<string, string | undefined> = process.env):
+  | 'SourceIngestionView'
+  | 'SourcesView' {
+  return isSourcesLibraryV2Enabled(env) ? 'SourcesView' : 'SourceIngestionView';
 }
 ```
 
-```sql
--- supabase/migrations/202608300001_sources_library.sql
-CREATE TABLE IF NOT EXISTS public.source_records (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  summary TEXT NOT NULL DEFAULT '',
-  media_type TEXT NOT NULL CHECK (media_type IN ('text', 'pdf', 'docx', 'url', 'youtube', 'audio', 'vtt_srt', 'chart_image')),
-  collection_ids UUID[] NOT NULL DEFAULT '{}',
-  tags TEXT[] NOT NULL DEFAULT '{}',
-  provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
-  current_version_id UUID,
-  processing_state TEXT NOT NULL DEFAULT 'queued' CHECK (processing_state IN ('queued', 'processing', 'ready', 'degraded', 'failed', 'rejected')),
-  last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.source_versions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  source_id UUID NOT NULL REFERENCES public.source_records(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  version_number INT NOT NULL DEFAULT 1,
-  stage TEXT NOT NULL CHECK (stage IN ('raw', 'normalised', 'edited')),
-  content_hash TEXT NOT NULL,
-  plain_text TEXT NOT NULL,
-  blocks JSONB NOT NULL DEFAULT '[]'::jsonb,
-  word_count INT NOT NULL DEFAULT 0,
-  page_count INT,
-  duration_ms INT,
-  media_url TEXT,
-  extraction_report JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.source_collections (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  color TEXT NOT NULL DEFAULT 'vermilion',
-  icon TEXT NOT NULL DEFAULT 'folder',
-  description TEXT,
-  source_ids UUID[] NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.source_artifact_jobs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  source_version_id UUID NOT NULL REFERENCES public.source_versions(id) ON DELETE CASCADE,
-  selection JSONB,
-  destination TEXT NOT NULL CHECK (destination IN ('practice', 'mock_section', 'vocabulary_deck', 'note', 'idea_bank')),
-  target_band NUMERIC(3,1) NOT NULL DEFAULT 7.0,
-  custom_instruction TEXT,
-  state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'processing', 'validating', 'ready', 'needs_review', 'retry_wait', 'rejected', 'failed', 'cancelled')),
-  artifact_draft JSONB,
-  destination_handoff JSONB NOT NULL DEFAULT '{"status": "pending"}'::jsonb,
-  error_details JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-ALTER TABLE public.source_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.source_versions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.source_collections ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.source_artifact_jobs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "source_records_owner" ON public.source_records FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "source_versions_owner" ON public.source_versions FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "source_collections_owner" ON public.source_collections FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "source_artifact_jobs_owner" ON public.source_artifact_jobs FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-```
+SQL migration matches SPEC §9.1 (`processing_state` CHECK includes `unavailable`, `handoff_required`). `sourcesStorage` talks to Supabase with the owner RLS policies and an in-memory/native IndexedDB cache. Do not import Dexie. Do not call `awardXP` or vocabulary insert APIs.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesDomain.test.ts`  
-Expected: PASS (2 tests)
+Run: `npx vitest run src/lib/__tests__/sourcesDomain.test.ts src/lib/__tests__/sourcesFeatureFlags.test.ts`
+
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/types/sources.ts supabase/migrations/202608300001_sources_library.sql src/lib/__tests__/sourcesDomain.test.ts
-git commit -m "feat(sources): define P03 domain contracts, types, and Supabase RLS schema"
+git add src/types/sources.ts src/lib/sources/featureFlags.ts supabase/migrations/202608300001_sources_library.sql src/services/sourcesStorage.ts src/lib/__tests__/sourcesDomain.test.ts src/lib/__tests__/sourcesFeatureFlags.test.ts
+git commit -m "feat(sources): define P03 domain contracts, flag, and Supabase RLS schema"
 ```
 
 ---
@@ -417,16 +358,19 @@ git commit -m "feat(sources): define P03 domain contracts, types, and Supabase R
 ### Task 2: Multi-Format Content Extraction & Sanitization Pipeline
 
 **Files:**
+
 - Create: `src/lib/sources/extractors/textExtractor.ts`
 - Create: `src/lib/sources/extractors/urlExtractor.ts`
 - Create: `src/lib/sources/extractors/docxExtractor.ts`
 - Create: `src/lib/sources/extractors/pdfExtractor.ts`
-- Create: `src/lib/sources/extractors/youtubeExtractor.ts`
+- Create: `src/lib/sources/extractors/captionExtractor.ts`
+- Create: `src/lib/sources/extractors/handoffReference.ts`
 - Create: `src/lib/sources/extractors/index.ts`
 - Test: `src/lib/__tests__/sourcesExtraction.test.ts`
 
 **Interfaces:**
-- Consumes: Raw text, URLs, files, buffers
+
+- Consumes: Raw text, URLs, files, buffers for P03-owned formats
 - Produces: `extractDocument(input: ExtractionInput): Promise<ExtractionResult>`
 
 - [ ] **Step 1: Write the failing test**
@@ -436,7 +380,7 @@ git commit -m "feat(sources): define P03 domain contracts, types, and Supabase R
 import { describe, expect, it } from 'vitest';
 import { extractDocument } from '../sources/extractors';
 
-describe('Multi-Format Extraction Pipeline', () => {
+describe('P03 extraction pipeline', () => {
   it('extracts plain text into structured paragraphs and word count', async () => {
     const raw = 'Paragraph one on climate policy.\n\nParagraph two with academic analysis.';
     const result = await extractDocument({ type: 'text', content: raw, title: 'Climate Policy' });
@@ -467,155 +411,63 @@ describe('Multi-Format Extraction Pipeline', () => {
       expect(result.version.blocks[0].endMs).toBe(4000);
     }
   });
+
+  it('does not extract or transcribe YouTube, audio, or chart inputs', async () => {
+    const yt = await extractDocument({
+      type: 'youtube',
+      content: 'https://youtube.com/watch?v=example',
+      title: 'Lecture',
+    });
+    expect(yt.success).toBe(false);
+    if (!yt.success) {
+      expect(yt.error.code).toBe('HANDOFF_REQUIRED');
+      expect(yt.error.owningModule).toBe('media');
+      expect(yt.error.userMessageVi).toMatch(/Media/i);
+    }
+
+    const audio = await extractDocument({ type: 'audio', content: 'fixture.mp3', title: 'Talk' });
+    expect(audio.success).toBe(false);
+    if (!audio.success) expect(audio.error.owningModule).toBe('media');
+
+    const chart = await extractDocument({ type: 'chart_image', content: 'chart.png', title: 'Task 1' });
+    expect(chart.success).toBe(false);
+    if (!chart.success) {
+      expect(chart.error.code).toBe('HANDOFF_REQUIRED');
+      expect(chart.error.owningModule).toBe('mock');
+    }
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesExtraction.test.ts`  
-Expected: FAIL with "Cannot find module '../sources/extractors'"
+Run: `npx vitest run src/lib/__tests__/sourcesExtraction.test.ts`
+
+Expected: FAIL with `Cannot find module '../sources/extractors'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```ts
-// src/lib/sources/extractors/textExtractor.ts
-import { SourceBlock } from '../../../types/sources';
+`extractDocument` routes:
 
-export function extractTextBlocks(rawText: string): SourceBlock[] {
-  const paragraphs = rawText
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
+- `text` → `extractTextBlocks`
+- `vtt_srt` → caption parser
+- `url` / `pdf` / `docx` → Task 0 packages, after pins
+- `youtube` / `audio` → `createHandoffRecord('media')` returning `success: false`, `code: 'HANDOFF_REQUIRED'`
+- `chart_image` → `createHandoffRecord('mock')`
 
-  return paragraphs.map((text, idx) => ({
-    id: `b_${String(idx + 1).padStart(3, '0')}`,
-    order: idx + 1,
-    type: 'paragraph',
-    text,
-  }));
-}
-```
-
-```ts
-// src/lib/sources/extractors/index.ts
-import { SourceBlock, SourceMediaType, SourceVersion } from '../../../types/sources';
-import { extractTextBlocks } from './textExtractor';
-import { computeContentHash } from '../../../types/sources';
-
-export interface ExtractionInput {
-  type: SourceMediaType;
-  content: string;
-  title: string;
-  sourceUrl?: string;
-  filename?: string;
-}
-
-export type ExtractionResult =
-  | {
-      success: true;
-      version: Omit<SourceVersion, 'id' | 'sourceId'>;
-    }
-  | {
-      success: false;
-      error: {
-        code: 'INVALID_INPUT' | 'EXTRACTION_FAILED' | 'UNSUPPORTED_FORMAT';
-        userMessageVi: string;
-      };
-    };
-
-export async function extractDocument(input: ExtractionInput): Promise<ExtractionResult> {
-  const trimmed = (input.content || '').trim();
-  if (!trimmed || trimmed.length < 5) {
-    return {
-      success: false,
-      error: {
-        code: 'INVALID_INPUT',
-        userMessageVi: 'Nội dung tài liệu quá ngắn hoặc không hợp lệ (tối thiểu 5 ký tự).',
-      },
-    };
-  }
-
-  if (input.type === 'vtt_srt') {
-    const blocks: SourceBlock[] = [];
-    const lines = trimmed.split('\n');
-    let currentBlock: Partial<SourceBlock> | null = null;
-    let blockIndex = 1;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      const timeMatch = line.match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
-      if (timeMatch) {
-        const startMs =
-          parseInt(timeMatch[1]) * 3600000 +
-          parseInt(timeMatch[2]) * 60000 +
-          parseInt(timeMatch[3]) * 1000 +
-          parseInt(timeMatch[4]);
-        const endMs =
-          parseInt(timeMatch[5]) * 3600000 +
-          parseInt(timeMatch[6]) * 60000 +
-          parseInt(timeMatch[7]) * 1000 +
-          parseInt(timeMatch[8]);
-        currentBlock = {
-          id: `b_${String(blockIndex++).padStart(3, '0')}`,
-          order: blockIndex - 1,
-          type: 'transcript_turn',
-          startMs,
-          endMs,
-          text: '',
-        };
-      } else if (currentBlock && line && !line.match(/^\d+$/)) {
-        currentBlock.text = (currentBlock.text ? currentBlock.text + ' ' : '') + line;
-        if (i === lines.length - 1 || !lines[i + 1].trim()) {
-          blocks.push(currentBlock as SourceBlock);
-          currentBlock = null;
-        }
-      }
-    }
-
-    const plainText = blocks.map((b) => b.text).join('\n');
-    return {
-      success: true,
-      version: {
-        versionNumber: 1,
-        stage: 'normalised',
-        contentHash: computeContentHash(plainText),
-        plainText,
-        blocks: blocks.length > 0 ? blocks : extractTextBlocks(trimmed),
-        wordCount: plainText.split(/\s+/).filter(Boolean).length,
-        createdAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  // Default plain-text extraction
-  const blocks = extractTextBlocks(trimmed);
-  const plainText = blocks.map((b) => b.text).join('\n\n');
-
-  return {
-    success: true,
-    version: {
-      versionNumber: 1,
-      stage: 'normalised',
-      contentHash: computeContentHash(plainText),
-      plainText,
-      blocks,
-      wordCount: plainText.split(/\s+/).filter(Boolean).length,
-      createdAt: new Date().toISOString(),
-    },
-  };
-}
-```
+Do not import `youtube-transcript`, `wavesurfer.js`, or any chart renderer. URL/PDF/DOCX adapters may be stubbed to `UNSUPPORTED_FORMAT` until Task 0 pins are installed in this same task; they must not silently no-op as success.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesExtraction.test.ts`  
-Expected: PASS (3 tests)
+Run: `npx vitest run src/lib/__tests__/sourcesExtraction.test.ts`
+
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/sources/extractors/ src/lib/__tests__/sourcesExtraction.test.ts
-git commit -m "feat(sources): implement multi-format extraction and sanitization pipeline"
+git add src/lib/sources/extractors/ src/lib/__tests__/sourcesExtraction.test.ts package.json package-lock.json
+git commit -m "feat(sources): extract P03-owned formats and hand off YouTube/audio/chart"
 ```
 
 ---
@@ -623,11 +475,13 @@ git commit -m "feat(sources): implement multi-format extraction and sanitization
 ### Task 3: Ingestion Job Machine & Error Normalization
 
 **Files:**
+
 - Create: `src/lib/sources/sourceErrors.ts`
 - Create: `src/lib/sources/importJobMachine.ts`
 - Test: `src/lib/__tests__/sourcesImportMachine.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ExtractionInput`, `extractDocument`
 - Produces: `ImportJobMachine`, `normalizeSourceError`, `NormalizedSourceError`
 
@@ -656,13 +510,39 @@ describe('Import Job Machine', () => {
     expect(updated.sourceRecord?.currentVersionId).toBeDefined();
   });
 
-  it('normalizes provider errors into scrubbed learner-friendly messages without exposing secrets', () => {
-    const rawError = new Error('HTTP 429: Rate limit exceeded on key AIzaSyFakeSecret123 at internal/gemini.ts:45');
+  it('keeps sibling jobs independent when one item is a YouTube handoff', async () => {
+    const textJob = await processImportJob(
+      createImportJob({
+        id: 'job_text',
+        userId: 'user_1',
+        title: 'Essay',
+        type: 'text',
+        rawContent: 'Capital expenditure in clean tech remains the core claim.',
+      }),
+    );
+    const ytJob = await processImportJob(
+      createImportJob({
+        id: 'job_yt',
+        userId: 'user_1',
+        title: 'Lecture',
+        type: 'youtube',
+        rawContent: 'https://youtube.com/watch?v=example',
+      }),
+    );
+    expect(textJob.state).toBe('ready');
+    expect(ytJob.state).toBe('handoff_required');
+    expect(ytJob.sourceRecord?.processingState).toBe('handoff_required');
+    expect(ytJob.sourceVersion).toBeUndefined();
+  });
+
+  it('normalizes provider errors into scrubbed learner-facing messages', () => {
+    const rawError = new Error('HTTP 429: provider quota at internal/provider.ts:45');
     const normalized = normalizeSourceError(rawError);
 
     expect(normalized.code).toBe('QUOTA_EXCEEDED');
     expect(normalized.userMessageVi).toContain('Hạn ngạch');
-    expect(normalized.userMessageVi).not.toContain('AIzaSyFakeSecret123');
+    expect(normalized.userMessageVi).not.toContain('HTTP 429');
+    expect(normalized.userMessageVi).not.toContain('internal/provider.ts');
     expect(normalized.retryable).toBe(true);
   });
 });
@@ -670,184 +550,25 @@ describe('Import Job Machine', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesImportMachine.test.ts`  
-Expected: FAIL with "Cannot find module '../sources/importJobMachine'"
+Run: `npx vitest run src/lib/__tests__/sourcesImportMachine.test.ts`
+
+Expected: FAIL with `Cannot find module '../sources/importJobMachine'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```ts
-// src/lib/sources/sourceErrors.ts
-export interface NormalizedSourceError {
-  code:
-    | 'AUTH_REQUIRED'
-    | 'QUOTA_EXCEEDED'
-    | 'PROVIDER_BUSY'
-    | 'UNSUPPORTED_FORMAT'
-    | 'EXTRACTION_FAILED'
-    | 'RIGHTS_REJECTED'
-    | 'VALIDATION_FAILED'
-    | 'NETWORK_DISCONNECTED';
-  userMessageVi: string;
-  suggestedActionVi: string;
-  retryable: boolean;
-  retryAfterSeconds?: number;
-  diagnosticId: string;
-}
-
-export function normalizeSourceError(error: unknown): NormalizedSourceError {
-  const message = error instanceof Error ? error.message : String(error);
-  const diagnosticId = `diag_${Date.now().toString(36)}`;
-
-  if (/429|quota|rate limit/i.test(message)) {
-    return {
-      code: 'QUOTA_EXCEEDED',
-      userMessageVi: 'Hạn ngạch AI hiện đang bận hoặc đã đạt giới hạn tạm thời.',
-      suggestedActionVi: 'Vui lòng chờ khoảng 15-30 giây và thử lại.',
-      retryable: true,
-      retryAfterSeconds: 30,
-      diagnosticId,
-    };
-  }
-
-  if (/401|403|auth|permission/i.test(message)) {
-    return {
-      code: 'AUTH_REQUIRED',
-      userMessageVi: 'Bạn cần đăng nhập để lưu trữ và xử lý tài liệu.',
-      suggestedActionVi: 'Vui lòng kiểm tra trạng thái tài khoản.',
-      retryable: false,
-      diagnosticId,
-    };
-  }
-
-  if (/unsupported|format|codec/i.test(message)) {
-    return {
-      code: 'UNSUPPORTED_FORMAT',
-      userMessageVi: 'Định dạng tài liệu không được hỗ trợ hoặc file bị hỏng.',
-      suggestedActionVi: 'Vui lòng chuyển đổi sang PDF, DOCX hoặc dán văn bản trực tiếp.',
-      retryable: false,
-      diagnosticId,
-    };
-  }
-
-  return {
-    code: 'EXTRACTION_FAILED',
-    userMessageVi: 'Không thể trích xuất nội dung từ tài liệu này.',
-    suggestedActionVi: 'Vui lòng sao chép và dán trực tiếp nội dung văn bản.',
-    retryable: true,
-    diagnosticId,
-  };
-}
-```
-
-```ts
-// src/lib/sources/importJobMachine.ts
-import {
-  createSourceRecord,
-  createSourceVersion,
-  computeContentHash,
-  SourceMediaType,
-  SourceRecord,
-  SourceVersion,
-} from '../../types/sources';
-import { extractDocument } from './extractors';
-import { normalizeSourceError, NormalizedSourceError } from './sourceErrors';
-
-export interface ImportJob {
-  id: string;
-  userId: string;
-  title: string;
-  type: SourceMediaType;
-  rawContent: string;
-  sourceUrl?: string;
-  state: 'queued' | 'processing' | 'ready' | 'failed';
-  sourceRecord?: SourceRecord;
-  sourceVersion?: SourceVersion;
-  error?: NormalizedSourceError;
-}
-
-export function createImportJob(params: {
-  id: string;
-  userId: string;
-  title: string;
-  type: SourceMediaType;
-  rawContent: string;
-  sourceUrl?: string;
-}): ImportJob {
-  return {
-    ...params,
-    state: 'queued',
-  };
-}
-
-export async function processImportJob(job: ImportJob): Promise<ImportJob> {
-  const updatedJob: ImportJob = { ...job, state: 'processing' };
-  try {
-    const extraction = await extractDocument({
-      type: job.type,
-      content: job.rawContent,
-      title: job.title,
-      sourceUrl: job.sourceUrl,
-    });
-
-    if (!extraction.success) {
-      return {
-        ...updatedJob,
-        state: 'failed',
-        error: normalizeSourceError(new Error(extraction.error.userMessageVi)),
-      };
-    }
-
-    const record = createSourceRecord({
-      userId: job.userId,
-      title: job.title,
-      type: job.type,
-      provenance: {
-        originType: job.sourceUrl ? 'web_fetch' : 'pasted_text',
-        originalUrl: job.sourceUrl,
-        retrievalDate: new Date().toISOString(),
-        rightsState: 'owned_by_learner',
-        rawContentHash: computeContentHash(job.rawContent),
-        canonicalCitation: job.title,
-      },
-    });
-
-    const version = createSourceVersion({
-      sourceId: record.id,
-      versionNumber: 1,
-      stage: 'normalised',
-      plainText: extraction.version.plainText,
-      blocks: extraction.version.blocks,
-    });
-
-    record.currentVersionId = version.id;
-    record.processingState = 'ready';
-
-    return {
-      ...updatedJob,
-      state: 'ready',
-      sourceRecord: record,
-      sourceVersion: version,
-    };
-  } catch (err) {
-    return {
-      ...updatedJob,
-      state: 'failed',
-      error: normalizeSourceError(err),
-    };
-  }
-}
-```
+`normalizeSourceError` maps quota/429 text to `QUOTA_EXCEEDED` and **rebuilds** `userMessageVi` from a fixed Vietnamese string. It must not concatenate the raw `error.message`. `processImportJob` maps `HANDOFF_REQUIRED` extraction errors to job state `handoff_required` without calling an extractor for captions, audio, or charts. Jobs are independent: throwing in one `processImportJob` call cannot mutate another job object.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesImportMachine.test.ts`  
-Expected: PASS (2 tests)
+Run: `npx vitest run src/lib/__tests__/sourcesImportMachine.test.ts`
+
+Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/lib/sources/sourceErrors.ts src/lib/sources/importJobMachine.ts src/lib/__tests__/sourcesImportMachine.test.ts
-git commit -m "feat(sources): implement import job machine and error normalization"
+git commit -m "feat(sources): implement import job machine and scrubbed error normalization"
 ```
 
 ---
@@ -855,10 +576,12 @@ git commit -m "feat(sources): implement import job machine and error normalizati
 ### Task 4: Library, Search & Collection State Store
 
 **Files:**
+
 - Create: `src/lib/sources/libraryStore.ts`
 - Test: `src/lib/__tests__/sourcesLibraryStore.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SourceRecord`, `SourceCollection`
 - Produces: `filterSources`, `searchSources`, `addSourceToCollection`, `removeSourceFromCollection`
 
@@ -936,74 +659,19 @@ describe('Library Search & Filter Store', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesLibraryStore.test.ts`  
-Expected: FAIL with "Cannot find module '../sources/libraryStore'"
+Run: `npx vitest run src/lib/__tests__/sourcesLibraryStore.test.ts`
+
+Expected: FAIL with `Cannot find module '../sources/libraryStore'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```ts
-// src/lib/sources/libraryStore.ts
-import { ContentRightsState, SourceMediaType, SourceRecord } from '../../types/sources';
-
-export interface SourceFilterCriteria {
-  mediaType?: SourceMediaType | 'all';
-  collectionId?: string | 'all';
-  rightsState?: ContentRightsState | 'all';
-  processingState?: SourceRecord['processingState'] | 'all';
-  sortBy?: 'last_used' | 'created_at' | 'title';
-  sortDirection?: 'asc' | 'desc';
-}
-
-export function filterSources(sources: SourceRecord[], criteria: SourceFilterCriteria): SourceRecord[] {
-  let filtered = [...sources];
-
-  if (criteria.mediaType && criteria.mediaType !== 'all') {
-    filtered = filtered.filter((s) => s.type === criteria.mediaType);
-  }
-
-  if (criteria.collectionId && criteria.collectionId !== 'all') {
-    filtered = filtered.filter((s) => s.collectionIds.includes(criteria.collectionId as string));
-  }
-
-  if (criteria.rightsState && criteria.rightsState !== 'all') {
-    filtered = filtered.filter((s) => s.provenance.rightsState === criteria.rightsState);
-  }
-
-  if (criteria.processingState && criteria.processingState !== 'all') {
-    filtered = filtered.filter((s) => s.processingState === criteria.processingState);
-  }
-
-  const direction = criteria.sortDirection === 'asc' ? 1 : -1;
-  filtered.sort((a, b) => {
-    if (criteria.sortBy === 'title') {
-      return a.title.localeCompare(b.title) * direction;
-    }
-    if (criteria.sortBy === 'created_at') {
-      return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * direction;
-    }
-    return (new Date(a.lastUsedAt).getTime() - new Date(b.lastUsedAt).getTime()) * direction;
-  });
-
-  return filtered;
-}
-
-export function searchSources(sources: SourceRecord[], query: string): SourceRecord[] {
-  const clean = query.trim().toLowerCase();
-  if (!clean) return sources;
-
-  return sources.filter((s) => {
-    const titleMatch = s.title.toLowerCase().includes(clean);
-    const summaryMatch = s.summary.toLowerCase().includes(clean);
-    const tagMatch = s.tags.some((t) => t.toLowerCase().includes(clean));
-    return titleMatch || summaryMatch || tagMatch;
-  });
-}
-```
+Implement `filterSources` and `searchSources` as pure functions over `SourceRecord[]`. Include `processingState` so `handoff_required` cards remain visible with an honest badge.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesLibraryStore.test.ts`  
-Expected: PASS (2 tests)
+Run: `npx vitest run src/lib/__tests__/sourcesLibraryStore.test.ts`
+
+Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1014,122 +682,188 @@ git commit -m "feat(sources): implement library search, filter, and collection s
 
 ---
 
-### Task 5: Selected-Source Context & Grounded Chat Engine
+### Task 5: Selected-Source Context & Executable Grounded Chat
 
 **Files:**
+
 - Create: `src/lib/sources/groundedChat.ts`
+- Modify: `server.ts` (add `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` only)
 - Test: `src/lib/__tests__/sourcesGroundedChat.test.ts`
 
 **Interfaces:**
-- Consumes: `SourceVersion[]`, query string, selected version IDs
-- Produces: `buildGroundedContext`, `validateGroundedCitation`, `GroundedResponse`
+
+- Consumes: selected `SourceVersion[]` plus `SourceRecord` metadata, existing `GroundedProviderRouter`, `AI_TASK_PROFILES.balanced`, `classifyApiFailure`, `zod`
+- Produces: `buildGroundedContext`, `validateGroundedCitations`, `executeGroundedChat`, `GroundedChatRequestSchema`, `GroundedChatResponseSchema`
+
+Exact API boundary:
+
+- `POST /api/sources/grounded-chat` body `{ selectedVersionIds: string[]; question: string; sourceSpan?: SourceSpan; conversationId?: string }`
+- `POST /api/sources/web-research` body `{ question: string; conversationId?: string }` — the only path that may invoke `CAP-GLB-SEARCH`
+- Server handler must call `router.execute` on the existing `GroundedProviderRouter` instance used by Live Hub / AI gateway. It must not construct `@google/genai` or fetch `/api/gemini/*`.
+- Model profile: `AI_TASK_PROFILES.balanced` (`capability: 'text'`, `tools: []`). Do not use `AI_TASK_PROFILES.grounded` (it enables `googleSearch`).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/__tests__/sourcesGroundedChat.test.ts
-import { describe, expect, it } from 'vitest';
-import { buildGroundedContext, parseGroundedCitations } from '../sources/groundedChat';
-import { SourceVersion } from '../../types/sources';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  buildGroundedContext,
+  executeGroundedChat,
+  validateGroundedCitations,
+  GroundedChatResponseSchema,
+} from '../sources/groundedChat';
+import { SourceRecord, SourceVersion } from '../../types/sources';
+import { normalizeSourceError } from '../sources/sourceErrors';
 
-describe('Grounded Chat Engine', () => {
-  const sampleVersion: SourceVersion = {
-    id: 'v_01',
-    sourceId: 's_01',
-    versionNumber: 1,
-    stage: 'normalised',
-    contentHash: 'abc',
-    plainText: 'Solar subsidies reduce macroeconomic risk.',
-    blocks: [
-      { id: 'b_001', order: 1, type: 'paragraph', text: 'Solar subsidies reduce macroeconomic risk.' },
-    ],
-    wordCount: 5,
-    createdAt: '2026-08-30T00:00:00Z',
-  };
+const selected: SourceVersion = {
+  id: 'v_01',
+  sourceId: 's_01',
+  versionNumber: 1,
+  stage: 'normalised',
+  contentHash: 'abc',
+  plainText: 'Solar subsidies reduce macroeconomic risk.',
+  blocks: [{ id: 'b_001', order: 1, type: 'paragraph', text: 'Solar subsidies reduce macroeconomic risk.' }],
+  wordCount: 5,
+  createdAt: '2026-08-30T00:00:00Z',
+};
 
-  it('builds grounded prompt context exclusively containing selected source blocks', () => {
-    const context = buildGroundedContext([sampleVersion], 'Macroeconomics');
+const record: SourceRecord = {
+  id: 's_01',
+  userId: 'u1',
+  title: 'Macroeconomics',
+  summary: '',
+  type: 'text',
+  collectionIds: [],
+  tags: [],
+  provenance: {
+    originType: 'pasted_text',
+    retrievalDate: '2026-08-30T00:00:00Z',
+    rightsState: 'owned_by_learner',
+    rawContentHash: 'abc',
+    canonicalCitation: 'Macroeconomics',
+  },
+  currentVersionId: 'v_01',
+  processingState: 'ready',
+  lastUsedAt: '2026-08-30T00:00:00Z',
+  createdAt: '2026-08-30T00:00:00Z',
+  updatedAt: '2026-08-30T00:00:00Z',
+};
+
+describe('Grounded Chat engine', () => {
+  it('builds context from selected versions and record metadata only', () => {
+    const context = buildGroundedContext([{ version: selected, record }], ['v_01']);
     expect(context).toContain('Solar subsidies reduce macroeconomic risk.');
-    expect(context).toContain('[Source: Macroeconomics, §b_001]');
+    expect(context).toContain('v_01');
+    expect(context).toContain('b_001');
+    expect(context).toContain('Macroeconomics');
   });
 
-  it('extracts and validates block citations from AI grounded answers', () => {
-    const aiAnswer = 'Clean energy investments mitigate inflation [Source: Macroeconomics, §b_001].';
-    const parsed = parseGroundedCitations(aiAnswer);
-    expect(parsed.citations).toHaveLength(1);
-    expect(parsed.citations[0].blockId).toBe('b_001');
-    expect(parsed.citations[0].sourceTitle).toBe('Macroeconomics');
+  it('rejects citations to unknown block IDs', () => {
+    const parsed = GroundedChatResponseSchema.parse({
+      groundingStatus: 'fully_grounded',
+      answer: 'Claim [Source: Macroeconomics, §b_999]',
+      citations: [{ sourceVersionId: 'v_01', sourceTitle: 'Macroeconomics', blockId: 'b_999' }],
+      webCitations: [],
+    });
+    const result = validateGroundedCitations(parsed, [selected]);
+    expect(result.groundingStatus).toBe('unsupported_by_sources');
+    expect(result.citations).toEqual([]);
+  });
+
+  it('rejects citations to unselected versions', () => {
+    const parsed = GroundedChatResponseSchema.parse({
+      groundingStatus: 'fully_grounded',
+      answer: 'Claim [Source: Other, §b_001]',
+      citations: [{ sourceVersionId: 'v_unselected', sourceTitle: 'Other', blockId: 'b_001' }],
+      webCitations: [],
+    });
+    const result = validateGroundedCitations(parsed, [selected]);
+    expect(result.groundingStatus).toBe('unsupported_by_sources');
+  });
+
+  it('returns unsupported_by_sources when the model answers with no citation', () => {
+    const parsed = GroundedChatResponseSchema.parse({
+      groundingStatus: 'fully_grounded',
+      answer: 'The moon is made of cheese.',
+      citations: [],
+      webCitations: [],
+    });
+    const result = validateGroundedCitations(parsed, [selected]);
+    expect(result.groundingStatus).toBe('unsupported_by_sources');
+  });
+
+  it('does not call web search from private-source chat', async () => {
+    const search = vi.fn();
+    const routerExecute = vi.fn(async () => ({
+      value: {
+        groundingStatus: 'fully_grounded',
+        answer: 'Solar subsidies reduce macroeconomic risk [Source: Macroeconomics, §b_001].',
+        citations: [{ sourceVersionId: 'v_01', sourceTitle: 'Macroeconomics', blockId: 'b_001' }],
+        webCitations: [],
+      },
+      provider: 'gemini',
+      model: 'gemini-3.7-flash',
+    }));
+
+    const result = await executeGroundedChat({
+      selectedVersionIds: ['v_01'],
+      question: 'What do subsidies do?',
+      versions: [selected],
+      records: [record],
+      routerExecute,
+      webSearch: search,
+    });
+
+    expect(search).not.toHaveBeenCalled();
+    expect(routerExecute).toHaveBeenCalledTimes(1);
+    expect(result.groundingStatus).toBe('fully_grounded');
+    expect(result.webCitations).toEqual([]);
+  });
+
+  it('scrubs provider failures before they reach the learner', () => {
+    const normalized = normalizeSourceError(new Error('HTTP 429: provider quota at internal/provider.ts:45'));
+    expect(normalized.userMessageVi).not.toContain('HTTP 429');
+    expect(normalized.userMessageVi).not.toContain('internal/provider.ts');
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesGroundedChat.test.ts`  
-Expected: FAIL with "Cannot find module '../sources/groundedChat'"
+Run: `npx vitest run src/lib/__tests__/sourcesGroundedChat.test.ts`
+
+Expected: FAIL with `Cannot find module '../sources/groundedChat'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
+`groundedChat.ts` must:
+
+1. Zod-parse the request and response.
+2. Build prompt context from selected versions + record title/rights/canonical citation only.
+3. Call `routerExecute` (the existing central router). Never instantiate a new provider client.
+4. Run `validateGroundedCitations` and coerce invalid/unselected/missing citations to `unsupported_by_sources`.
+5. Leave `webSearch` uncalled.
+6. Map thrown provider errors through `normalizeSourceError`.
+
+`server.ts` wires:
+
 ```ts
-// src/lib/sources/groundedChat.ts
-import { SourceVersion } from '../../types/sources';
-
-export interface GroundedCitation {
-  sourceTitle: string;
-  blockId: string;
-  exactSnippet?: string;
-}
-
-export interface GroundedResponse {
-  answer: string;
-  groundingStatus: 'fully_grounded' | 'partially_grounded' | 'unsupported_by_sources';
-  citations: GroundedCitation[];
-}
-
-export function buildGroundedContext(versions: SourceVersion[], sourceTitle: string): string {
-  const lines: string[] = [];
-  lines.push(`=== TÀI LIỆU NGUỒN: ${sourceTitle} ===`);
-
-  for (const v of versions) {
-    for (const block of v.blocks) {
-      lines.push(`[Source: ${sourceTitle}, §${block.id}]`);
-      lines.push(block.text);
-      lines.push('');
-    }
-  }
-
-  return lines.join('\n');
-}
-
-export function parseGroundedCitations(text: string): { cleanText: string; citations: GroundedCitation[] } {
-  const regex = /\[Source:\s*([^,\]]+),\s*§([a-zA-Z0-9_-]+)\]/g;
-  const citations: GroundedCitation[] = [];
-  let match;
-
-  while ((match = regex.exec(text)) !== null) {
-    citations.push({
-      sourceTitle: match[1].trim(),
-      blockId: match[2].trim(),
-    });
-  }
-
-  return {
-    cleanText: text,
-    citations,
-  };
-}
+app.post('/api/sources/grounded-chat', async (req, res) => { /* executeGroundedChat via GroundedProviderRouter */ });
+app.post('/api/sources/web-research', async (req, res) => { /* CAP-GLB-SEARCH only */ });
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesGroundedChat.test.ts`  
-Expected: PASS (2 tests)
+Run: `npx vitest run src/lib/__tests__/sourcesGroundedChat.test.ts`
+
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/sources/groundedChat.ts src/lib/__tests__/sourcesGroundedChat.test.ts
-git commit -m "feat(sources): implement grounded chat context builder and citation parser"
+git add src/lib/sources/groundedChat.ts src/lib/__tests__/sourcesGroundedChat.test.ts server.ts
+git commit -m "feat(sources): execute grounded chat through the central AI router"
 ```
 
 ---
@@ -1137,12 +871,14 @@ git commit -m "feat(sources): implement grounded chat context builder and citati
 ### Task 6: Artifact Job Machine & Single-Destination Draft Generators
 
 **Files:**
+
 - Create: `src/lib/sources/artifactJobMachine.ts`
 - Test: `src/lib/__tests__/sourcesArtifactJob.test.ts`
 
 **Interfaces:**
-- Consumes: `SourceVersion`, `SourceSpan`, `DestinationType`
-- Produces: `createArtifactJob`, `executeArtifactJob`, `ValidatedArtifactDraft`
+
+- Consumes: `SourceVersion`, `SourceSpan`, `DestinationType`, existing central AI router
+- Produces: `createArtifactJob`, `executeArtifactJob`, `validateDraftPayload`, `ValidatedArtifactDraft`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1187,92 +923,36 @@ describe('Artifact Job Machine', () => {
     const validation = validateDraftPayload('practice', validPayload);
     expect(validation.isValid).toBe(true);
   });
+
+  it('does not emit mastery, XP, or vocabulary side effects from draft creation', () => {
+    const job = createArtifactJob({
+      id: 'job_art_2',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'vocabulary_deck',
+      targetBand: 7.0,
+    });
+    expect(job).not.toHaveProperty('xpDelta');
+    expect(job).not.toHaveProperty('masteryUpdate');
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesArtifactJob.test.ts`  
-Expected: FAIL with "Cannot find module '../sources/artifactJobMachine'"
+Run: `npx vitest run src/lib/__tests__/sourcesArtifactJob.test.ts`
+
+Expected: FAIL with `Cannot find module '../sources/artifactJobMachine'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```ts
-// src/lib/sources/artifactJobMachine.ts
-import {
-  DestinationType,
-  SourceArtifactJob,
-  SourceSpan,
-  ValidatedPracticeDraft,
-  ValidatedVocabularyDraft,
-  ValidatedNoteDraft,
-} from '../../types/sources';
-
-export function createArtifactJob(params: {
-  id: string;
-  userId: string;
-  sourceVersionId: string;
-  destination: DestinationType;
-  targetBand: number;
-  selection?: SourceSpan;
-  customInstruction?: string;
-}): SourceArtifactJob {
-  const now = new Date().toISOString();
-  return {
-    id: params.id,
-    userId: params.userId,
-    sourceVersionId: params.sourceVersionId,
-    selection: params.selection,
-    destination: params.destination,
-    targetBand: params.targetBand,
-    customInstruction: params.customInstruction,
-    state: 'queued',
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-export function validateDraftPayload(
-  destination: DestinationType,
-  payload: any
-): { isValid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (!payload || typeof payload !== 'object') {
-    return { isValid: false, errors: ['Draft payload must be a non-null object'] };
-  }
-
-  if (destination === 'practice') {
-    if (!payload.skill || !['reading', 'listening', 'writing', 'speaking'].includes(payload.skill)) {
-      errors.push('Practice draft must specify a valid skill (reading, listening, writing, speaking)');
-    }
-    if (!payload.activityTitle) {
-      errors.push('Practice draft must specify activityTitle');
-    }
-    if (!payload.questionPayload) {
-      errors.push('Practice draft must provide questionPayload');
-    }
-  } else if (destination === 'vocabulary_deck') {
-    if (!payload.deckTitle) errors.push('Vocabulary draft must specify deckTitle');
-    if (!Array.isArray(payload.cards) || payload.cards.length === 0) {
-      errors.push('Vocabulary draft must provide at least one card');
-    }
-  } else if (destination === 'note') {
-    if (!payload.title) errors.push('Note draft must specify title');
-    if (!payload.summaryVi) errors.push('Note draft must specify summaryVi');
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-  };
-}
-```
+`createArtifactJob` stores exactly one `destination`. `validateDraftPayload` is destination-specific. Router calls for generation use `AI_TASK_PROFILES.balanced` or `deep` with empty tools, never search. Invalid drafts become `needs_review` or `failed`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesArtifactJob.test.ts`  
-Expected: PASS (2 tests)
+Run: `npx vitest run src/lib/__tests__/sourcesArtifactJob.test.ts`
+
+Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1286,10 +966,12 @@ git commit -m "feat(sources): implement artifact job machine and single-destinat
 ### Task 7: Destination Handoff Adapters
 
 **Files:**
+
 - Create: `src/lib/sources/destinationHandoff.ts`
 - Test: `src/lib/__tests__/sourcesDestinationHandoff.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SourceArtifactJob`, `ValidatedArtifactDraft`
 - Produces: `prepareDestinationHandoff`, `DestinationHandoffResult`
 
@@ -1336,81 +1018,26 @@ describe('Destination Handoff Adapters', () => {
     expect(handoff.targetRoute).toBe('/practice?draftId=draft_01');
     expect(handoff.ctaPrimaryLabelVi).toBe('Mở bài luyện tập');
     expect(handoff.ctaSecondaryLabelVi).toBe('Tạo đầu ra khác từ nguồn này');
+    expect(handoff.autoRedirect).toBe(false);
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/lib/__tests__/sourcesDestinationHandoff.test.ts`  
-Expected: FAIL with "Cannot find module '../sources/destinationHandoff'"
+Run: `npx vitest run src/lib/__tests__/sourcesDestinationHandoff.test.ts`
+
+Expected: FAIL with `Cannot find module '../sources/destinationHandoff'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-```ts
-// src/lib/sources/destinationHandoff.ts
-import { DestinationType, SourceArtifactJob } from '../../types/sources';
-
-export interface DestinationHandoffResult {
-  destination: DestinationType;
-  targetRoute: string;
-  ctaPrimaryLabelVi: string;
-  ctaSecondaryLabelVi: string;
-  draftId?: string;
-}
-
-export function prepareDestinationHandoff(job: SourceArtifactJob): DestinationHandoffResult {
-  const draftId = job.artifactDraft?.id;
-
-  switch (job.destination) {
-    case 'practice':
-      return {
-        destination: 'practice',
-        targetRoute: `/practice?draftId=${draftId || job.id}`,
-        ctaPrimaryLabelVi: 'Mở bài luyện tập',
-        ctaSecondaryLabelVi: 'Tạo đầu ra khác từ nguồn này',
-        draftId,
-      };
-    case 'mock_section':
-      return {
-        destination: 'mock_section',
-        targetRoute: `/mock?draftSectionId=${draftId || job.id}`,
-        ctaPrimaryLabelVi: 'Mở phần thi thử Mock',
-        ctaSecondaryLabelVi: 'Tạo đầu ra khác từ nguồn này',
-        draftId,
-      };
-    case 'vocabulary_deck':
-      return {
-        destination: 'vocabulary_deck',
-        targetRoute: `/vocabulary?deckDraftId=${draftId || job.id}`,
-        ctaPrimaryLabelVi: 'Mở bộ từ vựng',
-        ctaSecondaryLabelVi: 'Tạo đầu ra khác từ nguồn này',
-        draftId,
-      };
-    case 'note':
-      return {
-        destination: 'note',
-        targetRoute: `/tutor?noteDraftId=${draftId || job.id}`,
-        ctaPrimaryLabelVi: 'Mở ghi chú học tập',
-        ctaSecondaryLabelVi: 'Tạo đầu ra khác từ nguồn này',
-        draftId,
-      };
-    case 'idea_bank':
-      return {
-        destination: 'idea_bank',
-        targetRoute: `/knowledge?ideaDraftId=${draftId || job.id}`,
-        ctaPrimaryLabelVi: 'Mở ngân hàng ý tưởng (Idea Bank)',
-        ctaSecondaryLabelVi: 'Tạo đầu ra khác từ nguồn này',
-        draftId,
-      };
-  }
-}
-```
+`prepareDestinationHandoff` returns route + CTA labels + `autoRedirect: false`. It does not write Practice/Mock/Vocabulary rows.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npx vitest run src/lib/__tests__/sourcesDestinationHandoff.test.ts`  
-Expected: PASS (1 test)
+Run: `npx vitest run src/lib/__tests__/sourcesDestinationHandoff.test.ts`
+
+Expected: PASS (1 test).
 
 - [ ] **Step 5: Commit**
 
@@ -1424,50 +1051,83 @@ git commit -m "feat(sources): implement destination handoff adapters and deep li
 ### Task 8: Library Explorer, Collection Drawer & Filter UI Components
 
 **Files:**
+
 - Create: `src/components/sources/SourceCard.tsx`
 - Create: `src/components/sources/SourcesFilterBar.tsx`
 - Create: `src/components/sources/CollectionDrawer.tsx`
 - Create: `src/components/sources/SourcesLibraryExplorer.tsx`
+- Modify: `src/lib/uxFlowContracts.ts`
 - Test: `src/lib/__tests__/sourcesUxContracts.test.ts`
 
 **Interfaces:**
-- Consumes: `SourceRecord[]`, `SourceCollection[]`, `libraryStore`
-- Produces: React UI components with `data-ux-flow="sources.library.filter"`, `data-ux-flow="sources.selection.toggle"`, `data-ux-flow="sources.collection.create"`
 
-- [ ] **Step 1: Write the failing test**
+- Consumes: `SourceRecord[]`, `SourceCollection[]`, `libraryStore`, P02 `UxControlContract` (or the P02 plan types if the coding epic lands after that merge)
+- Produces: components inside `data-ux-scope="sources-library-v2"` with literal `data-ux-flow` and unique literal `data-ux-control` IDs listed in SPEC §8.3
+
+- [ ] **Step 1: Write the failing unit/component test**
 
 ```ts
 // src/lib/__tests__/sourcesUxContracts.test.ts
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { SourcesFilterBar } from '../../components/sources/SourcesFilterBar';
 import { UX_FLOW_CONTRACTS } from '../uxFlowContracts';
 
-describe('Sources UX Flow Contracts', () => {
-  it('registers all required P03 UX flow contracts with executable evidence', () => {
+describe('Sources Library Explorer UX contracts', () => {
+  it('registers P03 flow contracts with executable evidence', () => {
     const sourceFlowIds = UX_FLOW_CONTRACTS.filter((f) => f.module === 'sources').map((f) => f.id);
-    expect(sourceFlowIds).toContain('sources.manage');
+    expect(sourceFlowIds).toEqual(
+      expect.arrayContaining([
+        'sources.manage',
+        'sources.library.filter',
+        'sources.selection.toggle',
+        'sources.collection.create',
+      ]),
+    );
+  });
+
+  it('renders unique data-ux-control IDs on filter and search controls', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SourcesFilterBar, {
+        query: '',
+        onQueryChange: () => undefined,
+        mediaType: 'all',
+        onMediaTypeChange: () => undefined,
+      }),
+    );
+    expect(html).toContain('data-ux-scope="sources-library-v2"');
+    expect(html).toContain('data-ux-control="sources.library.search-input"');
+    expect(html).toContain('data-ux-flow="sources.library.filter"');
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it passes baseline**
+- [ ] **Step 2: Run RED**
 
-Run: `npx vitest run src/lib/__tests__/sourcesUxContracts.test.ts`  
-Expected: PASS
+Run: `npx vitest run src/lib/__tests__/sourcesUxContracts.test.ts`
 
-- [ ] **Step 3: Implement React Components**
+Expected: FAIL with `Cannot find module '../../components/sources/SourcesFilterBar'` (and missing new flow ids).
 
-Create `SourceCard.tsx`, `SourcesFilterBar.tsx`, `CollectionDrawer.tsx`, `SourcesLibraryExplorer.tsx` with complete accessible markup, tokens, keyboard navigation, and `data-ux-flow` tags.
+- [ ] **Step 3: Minimal implementation**
 
-- [ ] **Step 4: Run typecheck**
+Implement the four components with accessible names, keyboard focus, and the SPEC §8.3 control IDs. Register matching `UxControlContract` rows (owner, preconditions, action, before/after, side effects, failure categories, recovery, evidence `e2e/sources-library.spec.ts`). Do not mount Wavesurfer or a YouTube player on `handoff_required` cards.
 
-Run: `npx tsc --noEmit`  
-Expected: PASS with 0 errors
+- [ ] **Step 4: GREEN**
 
-- [ ] **Step 5: Commit**
+Run: `npx vitest run src/lib/__tests__/sourcesUxContracts.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Accessibility and control evidence**
+
+Each interactive element must have a visible label, 4.5:1 contrast, a unique `data-ux-control`, and a registered `data-ux-flow`. Add `aria-pressed` on selection toggles.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/components/sources/SourceCard.tsx src/components/sources/SourcesFilterBar.tsx src/components/sources/CollectionDrawer.tsx src/components/sources/SourcesLibraryExplorer.tsx
-git commit -m "feat(sources): implement Library Explorer, Filter Bar, and Collection Drawer UI"
+git add src/components/sources/SourceCard.tsx src/components/sources/SourcesFilterBar.tsx src/components/sources/CollectionDrawer.tsx src/components/sources/SourcesLibraryExplorer.tsx src/lib/uxFlowContracts.ts src/lib/__tests__/sourcesUxContracts.test.ts
+git commit -m "feat(sources): implement Library Explorer with UX Contract v2 controls"
 ```
 
 ---
@@ -1475,30 +1135,71 @@ git commit -m "feat(sources): implement Library Explorer, Filter Bar, and Collec
 ### Task 9: Source Reader, Span Selector & Grounded Chat Canvas UI
 
 **Files:**
+
 - Create: `src/components/sources/SourceReader.tsx`
 - Create: `src/components/sources/SourceGroundedChat.tsx`
 - Create: `src/components/sources/CitationDrawer.tsx`
+- Test: `src/lib/__tests__/sourcesGroundedChatUi.test.ts`
 
 **Interfaces:**
-- Consumes: `SourceRecord`, `SourceVersion`, `groundedChat`
-- Produces: Reader view with block selection, text annotations, cited chat conversation, and citation inspector drawer.
 
-- [ ] **Step 1: Implement SourceReader & GroundedChat UI**
-  - Reader renders ordered blocks with line numbers, speakers, and timestamps.
-  - Text selection opens quick action toolbar (`Ask about this`, `Create artifact from selection`).
-  - Chat renders message thread, source context chip (`Context: 1 source, 1,200 words`), inline citation badges (`[Source: §b_002]`), and missing support notification (`unsupported_by_sources`).
-  - CitationDrawer renders block context, original document URL/filename, retrieval date, and rights statement.
+- Consumes: `SourceRecord`, `SourceVersion`, `executeGroundedChat` client wrapper
+- Produces: Reader + chat that posts to `/api/sources/grounded-chat` and exposes a separate web-research control
 
-- [ ] **Step 2: Run typecheck**
+- [ ] **Step 1: Write the failing component test**
 
-Run: `npx tsc --noEmit`  
-Expected: PASS with 0 errors
+```ts
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it } from 'vitest';
+import { SourceGroundedChat } from '../../components/sources/SourceGroundedChat';
 
-- [ ] **Step 3: Commit**
+describe('Grounded Chat UI', () => {
+  it('separates private-source send from explicit web research controls', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SourceGroundedChat, {
+        selectedVersionIds: ['v_01'],
+        contextLabel: 'Context: 1 source, 5 words',
+      }),
+    );
+    expect(html).toContain('data-ux-control="sources.chat.send"');
+    expect(html).toContain('data-ux-flow="sources.chat.send"');
+    expect(html).toContain('data-ux-control="sources.chat.web-research"');
+    expect(html).toContain('data-ux-flow="sources.chat.web-research"');
+    expect(html).toContain('Tra cứu dẫn chứng');
+  });
+});
+```
+
+- [ ] **Step 2: Run RED**
+
+Run: `npx vitest run src/lib/__tests__/sourcesGroundedChatUi.test.ts`
+
+Expected: FAIL with `Cannot find module '../../components/sources/SourceGroundedChat'`.
+
+- [ ] **Step 3: Minimal implementation**
+
+- Reader renders ordered blocks; no waveform, no MediaSession, no Task 1 canvas.
+- `handoff_required` sources show an honest banner naming P04 or P07.
+- Chat send posts only to `/api/sources/grounded-chat`.
+- Web-research button is a separate control and is the only caller of `/api/sources/web-research`.
+- Citation drawer uses `data-ux-control="sources.chat.citation-open"`.
+
+- [ ] **Step 4: GREEN**
+
+Run: `npx vitest run src/lib/__tests__/sourcesGroundedChatUi.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Accessibility and control evidence**
+
+Chat composer is a labelled textbox. Send and web-research are focusable buttons. Citation chips are buttons, not dead spans. `unsupported_by_sources` is announced with `role="status"`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/components/sources/SourceReader.tsx src/components/sources/SourceGroundedChat.tsx src/components/sources/CitationDrawer.tsx
-git commit -m "feat(sources): implement Source Reader, Span Selector, and Grounded Chat UI"
+git add src/components/sources/SourceReader.tsx src/components/sources/SourceGroundedChat.tsx src/components/sources/CitationDrawer.tsx src/lib/__tests__/sourcesGroundedChatUi.test.ts src/lib/uxFlowContracts.ts
+git commit -m "feat(sources): implement reader and grounded chat UI with isolated web research"
 ```
 
 ---
@@ -1506,175 +1207,234 @@ git commit -m "feat(sources): implement Source Reader, Span Selector, and Ground
 ### Task 10: Artifact Studio Modal, Destination Picker & Draft Preview UI
 
 **Files:**
+
 - Create: `src/components/sources/DestinationPicker.tsx`
 - Create: `src/components/sources/ArtifactDraftPreview.tsx`
 - Create: `src/components/sources/ArtifactStudioModal.tsx`
+- Test: `src/lib/__tests__/sourcesArtifactStudioUi.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SourceVersion`, `SourceSpan`, `artifactJobMachine`, `destinationHandoff`
-- Produces: Modal with 5-option destination picker, generation progress with step indicator, draft preview, primary "Open artifact" CTA, and secondary "Create another output" CTA.
+- Produces: modal with five destination cards, eight presentation states, primary "Open artifact", secondary "Create another output"
 
-- [ ] **Step 1: Implement DestinationPicker & ArtifactStudioModal UI**
-  - DestinationPicker renders 5 distinct destination cards: Practice Activity, Mock Section, Vocabulary Deck, Study Note, Idea Bank.
-  - Progress indicator displays 8 states cleanly (loading, ready, empty, stale, degraded, unavailable, retryable_error, rejected).
-  - Draft preview allows inspecting questions/cards before handing off.
-  - Post-success buttons: `Open artifact` (primary), `Create another output` (secondary).
-
-- [ ] **Step 2: Run typecheck**
-
-Run: `npx tsc --noEmit`  
-Expected: PASS with 0 errors
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/components/sources/DestinationPicker.tsx src/components/sources/ArtifactDraftPreview.tsx src/components/sources/ArtifactStudioModal.tsx
-git commit -m "feat(sources): implement Artifact Studio Modal, Destination Picker, and Draft Preview UI"
-```
-
----
-
-### Task 11: Main Sources View Integration & Route Facade
-
-**Files:**
-- Create: `src/views/SourcesView.tsx`
-- Modify: `src/App.tsx` (route mapping for `sources`)
-- Deprecate: legacy `src/views/SourceIngestionView.tsx`
-
-**Interfaces:**
-- Consumes: `SourcesLibraryExplorer`, `SourceReader`, `SourceGroundedChat`, `ArtifactStudioModal`
-- Produces: Responsive 3-zone desktop and 3-tab mobile workspace view (`views/SourcesView.tsx`).
-
-- [ ] **Step 1: Implement SourcesView.tsx**
-  - Desktop: Left Zone = Library Explorer & Collections, Center Zone = Reader / Grounded Chat Canvas, Right Zone / Evidence Dock = Recent Jobs & Provenance.
-  - Mobile: Tabs for `Library`, `Reader & Chat`, `Create`.
-  - Connects to `AppContext` and `sourcesStorage`.
-
-- [ ] **Step 2: Run typecheck & dev server smoke test**
-
-Run: `npx tsc --noEmit`  
-Expected: PASS with 0 errors
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/views/SourcesView.tsx src/App.tsx
-git commit -m "feat(sources): integrate main SourcesView and update shell navigation"
-```
-
----
-
-### Task 12: UX Contracts v2, Test Fixtures, Deterministic E2E & Accessibility Suite
-
-**Files:**
-- Create: `e2e/sources-library.spec.ts`
-- Create: `src/lib/__tests__/sourcesFullFlow.test.ts`
-- Modify: `src/lib/uxFlowContracts.ts`
-
-**Interfaces:**
-- Consumes: Full Sources stack
-- Produces: Automated E2E tests, UX flow contract verification, accessibility proofs.
-
-- [ ] **Step 1: Write comprehensive Vitest integration suite**
+- [ ] **Step 1: Write the failing component test**
 
 ```ts
-// src/lib/__tests__/sourcesFullFlow.test.ts
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { extractDocument } from '../sources/extractors';
-import { createSourceRecord, createSourceVersion } from '../../types/sources';
-import { createArtifactJob, validateDraftPayload } from '../sources/artifactJobMachine';
-import { prepareDestinationHandoff } from '../sources/destinationHandoff';
+import { DestinationPicker } from '../../components/sources/DestinationPicker';
+import { ArtifactDraftPreview } from '../../components/sources/ArtifactDraftPreview';
 
-describe('P03 Sources & Library Full Integration Flow', () => {
-  it('executes the full pipeline: import -> version -> 1 destination -> draft -> handoff without auto-redirect', async () => {
-    // 1. Ingest
-    const raw = 'Renewable energy subsidies accelerate global decarbonization.';
-    const extract = await extractDocument({ type: 'text', content: raw, title: 'Clean Tech' });
-    expect(extract.success).toBe(true);
+describe('Artifact Studio UI', () => {
+  it('exposes exactly one selectable destination control set', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DestinationPicker, { selected: 'practice', onSelect: () => undefined }),
+    );
+    expect(html).toContain('data-ux-control="sources.artifact.destination-practice"');
+    expect(html).toContain('data-ux-control="sources.artifact.destination-mock"');
+    expect(html).toContain('data-ux-control="sources.artifact.destination-vocabulary"');
+    expect(html).toContain('data-ux-control="sources.artifact.destination-note"');
+    expect(html).toContain('data-ux-control="sources.artifact.destination-idea-bank"');
+    expect(html).toContain('data-ux-control="sources.artifact.generate"');
+  });
 
-    // 2. Version
-    if (extract.success) {
-      const record = createSourceRecord({
-        userId: 'u1',
-        title: 'Clean Tech',
-        type: 'text',
-        provenance: {
-          originType: 'pasted_text',
-          retrievalDate: new Date().toISOString(),
-          rightsState: 'owned_by_learner',
-          rawContentHash: 'h1',
-          canonicalCitation: 'Clean Tech',
-        },
-      });
-
-      const version = createSourceVersion({
-        sourceId: record.id,
-        versionNumber: 1,
-        stage: 'normalised',
-        plainText: extract.version.plainText,
-        blocks: extract.version.blocks,
-      });
-
-      // 3. One Destination Job
-      const job = createArtifactJob({
-        id: 'job_01',
-        userId: 'u1',
-        sourceVersionId: version.id,
-        destination: 'vocabulary_deck',
-        targetBand: 7.0,
-      });
-
-      job.artifactDraft = {
-        id: 'draft_vocab_01',
-        destination: 'vocabulary_deck',
-        payload: {
-          deckTitle: 'Clean Tech Vocabulary',
-          targetBand: 7.0,
-          cards: [
-            {
-              word: 'decarbonization',
-              pos: 'noun',
-              contextSentence: 'Subsidies accelerate global decarbonization.',
-              definitionVi: 'sự giảm thiểu khí thải carbon',
-              definitionEn: 'the reduction of carbon emissions',
-              phonetic: '/diːˌkɑː.bən.aɪˈzeɪ.ʃən/',
-              collocations: ['global decarbonization'],
-              cefrLevel: 'C1',
-              sourceSpan: { sourceId: record.id, sourceVersionId: version.id },
-            },
-          ],
-          provenance: record.provenance,
-        },
-      };
-
-      const validation = validateDraftPayload('vocabulary_deck', job.artifactDraft.payload);
-      expect(validation.isValid).toBe(true);
-
-      // 4. Handoff
-      const handoff = prepareDestinationHandoff(job);
-      expect(handoff.targetRoute).toBe('/vocabulary?deckDraftId=draft_vocab_01');
-      expect(handoff.ctaPrimaryLabelVi).toBe('Mở bộ từ vựng');
-      expect(handoff.ctaSecondaryLabelVi).toBe('Tạo đầu ra khác từ nguồn này');
-    }
+  it('shows open-artifact and create-another without auto-redirect attributes', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ArtifactDraftPreview, {
+        jobId: 'job_01',
+        destination: 'practice',
+        targetRoute: '/practice?draftId=draft_01',
+      }),
+    );
+    expect(html).toContain('data-ux-control="sources.artifact.open"');
+    expect(html).toContain('data-ux-control="sources.artifact.create-another"');
+    expect(html).not.toContain('data-auto-redirect="true"');
   });
 });
 ```
 
-- [ ] **Step 2: Run all test suites**
+- [ ] **Step 2: Run RED**
 
-Run: `npx vitest run`  
-Expected: ALL test files pass
+Run: `npx vitest run src/lib/__tests__/sourcesArtifactStudioUi.test.ts`
 
-- [ ] **Step 3: Run documentation and UX contract checks**
+Expected: FAIL with `Cannot find module '../../components/sources/DestinationPicker'`.
 
-Run: `npm run check:product-docs`  
-Expected: PASS: 5 documents, 99 stable IDs
+- [ ] **Step 3: Minimal implementation**
 
-- [ ] **Step 4: Commit**
+Five destination cards are mutually exclusive (`role="radio"` or equivalent). Generate stays disabled until one destination is chosen. Success state renders the two CTAs and does not call `navigate` until `sources.artifact.open` is activated.
+
+- [ ] **Step 4: GREEN**
+
+Run: `npx vitest run src/lib/__tests__/sourcesArtifactStudioUi.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Accessibility and control evidence**
+
+Modal uses `role="dialog"` and initial focus on the destination group. Escape closes. All 8 states have visible copy. Controls listed in SPEC §8.3 are present as literals.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add e2e/sources-library.spec.ts src/lib/__tests__/sourcesFullFlow.test.ts src/lib/uxFlowContracts.ts
-git commit -m "test(sources): add P03 E2E test specs, integration proof, and UX contract validation"
+git add src/components/sources/DestinationPicker.tsx src/components/sources/ArtifactDraftPreview.tsx src/components/sources/ArtifactStudioModal.tsx src/lib/__tests__/sourcesArtifactStudioUi.test.ts src/lib/uxFlowContracts.ts
+git commit -m "feat(sources): implement Artifact Studio destination picker and draft preview"
+```
+
+---
+
+### Task 11: Main Sources View Integration, Feature Flag & Route Facade
+
+**Files:**
+
+- Create: `src/views/SourcesView.tsx`
+- Modify: `src/App.tsx` (flagged route mapping for `sources`)
+- Keep: `src/views/SourceIngestionView.tsx` as one-release facade (do not delete)
+- Test: `src/lib/__tests__/sourcesViewFacade.test.ts`
+
+**Interfaces:**
+
+- Consumes: `resolveSourcesViewName`, explorer, reader, chat, artifact modal
+- Produces: 3-zone desktop / 3-tab mobile workspace when flag ON; legacy view when flag OFF
+
+- [ ] **Step 1: Write the failing unit test**
+
+```ts
+// src/lib/__tests__/sourcesViewFacade.test.ts
+import { describe, expect, it } from 'vitest';
+import { resolveSourcesViewName } from '../sources/featureFlags';
+
+describe('Sources route facade', () => {
+  it('does not route sources to SourcesView while the kill switch is off', () => {
+    expect(resolveSourcesViewName({ OMNI_SOURCES_LIBRARY_V2: undefined })).toBe('SourceIngestionView');
+    expect(resolveSourcesViewName({ OMNI_SOURCES_LIBRARY_V2: 'false' })).toBe('SourceIngestionView');
+  });
+
+  it('routes sources to SourcesView only when sources_library_v2 is on', () => {
+    expect(resolveSourcesViewName({ OMNI_SOURCES_LIBRARY_V2: 'true' })).toBe('SourcesView');
+  });
+});
+```
+
+Also add a component assertion that `SourcesView` markup includes `data-ux-scope="sources-library-v2"` and does not import `SourceToLearningPackageModal` or call `awardXP`.
+
+- [ ] **Step 2: Run RED**
+
+Run: `npx vitest run src/lib/__tests__/sourcesViewFacade.test.ts`
+
+Expected: FAIL until `App.tsx` uses `resolveSourcesViewName` / the flag helper (the helper exists from Task 1; this test fails on missing `SourcesView` export and missing flag branch).
+
+- [ ] **Step 3: Minimal implementation**
+
+```tsx
+case 'sources':
+  return isSourcesLibraryV2Enabled() ? <SourcesView /> : <SourceIngestionView />;
+```
+
+`SourcesView` desktop: Library | Reader/Chat | Evidence/jobs. Mobile tabs: Library, Reader & Chat, Create. Do not auto-redirect after draft success. Do not generate four-skill packages, XP, or vocabulary cards. Leave `SourceIngestionView.tsx` in the tree as the rollback facade.
+
+Rollback: `OMNI_SOURCES_LIBRARY_V2=false` restores `SourceIngestionView` in one deploy. No schema down-migration.
+
+- [ ] **Step 4: GREEN**
+
+Run: `npx vitest run src/lib/__tests__/sourcesViewFacade.test.ts`
+
+Expected: PASS.
+
+Run: `npx tsc --noEmit`
+
+Expected: PASS with 0 errors.
+
+- [ ] **Step 5: Accessibility and control evidence**
+
+Workspace tabs are keyboard reachable. Flag-OFF path is covered by existing `e2e/sources.spec.ts`. Flag-ON path is covered by Task 12.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/views/SourcesView.tsx src/App.tsx src/lib/__tests__/sourcesViewFacade.test.ts
+git commit -m "feat(sources): gate SourcesView behind sources_library_v2 with one-release facade"
+```
+
+---
+
+### Task 12: UX Contracts v2, Fixtures, Deterministic Playwright & Accessibility Suite
+
+**Files:**
+
+- Create: `e2e/sources-library.spec.ts`
+- Create: `src/lib/__tests__/sourcesFullFlow.test.ts`
+- Modify: `src/lib/uxFlowContracts.ts`
+- Modify: `playwright.config.ts` only if needed to inject `OMNI_SOURCES_LIBRARY_V2=true` for this spec
+- Fixtures under `e2e/fixtures/sources/` for `fix-src-text-01`, `fix-src-pdf-01`, `fix-src-pdf-scanned`, `fix-src-docx-01`, `fix-src-url-01`, `fix-src-url-blocked`, `fix-src-vtt-01`, `fix-src-yt-01`, `fix-src-audio-01`, `fix-src-chart-01`
+
+**Interfaces:**
+
+- Consumes: Full Sources stack with flag ON
+- Produces: Deterministic unit + Playwright evidence for AC-SRC-001…016
+
+- [ ] **Step 1: Write the failing integration test**
+
+Keep the Task 12 unit flow from import → version → one destination → handoff with `autoRedirect === false` and assert XP/mastery counters remain `0`.
+
+- [ ] **Step 2: Write failing Playwright coverage**
+
+`e2e/sources-library.spec.ts` must be executable, use `data-ux-control` locators, and cover:
+
+| AC | Playwright test title | Exact assertion |
+|---|---|---|
+| AC-SRC-001 | `library-first initial state` | Flag ON; `sources.library.search-input` visible; no `SourceToLearningPackageModal`; no auto quiz |
+| AC-SRC-002 | `independent batch jobs` | PDF + URL + pasted text create three job rows; one can `ready` while another `failed` or `handoff_required` |
+| AC-SRC-003 | `immutable edited version` | Edit extracted text; UI shows v2 `edited`; v1 still listed |
+| AC-SRC-004 | `selected-source chat` | Send on `sources.chat.send` cites selected block; unsupported question shows `unsupported_by_sources` |
+| AC-SRC-005 | `explicit web research` | `sources.chat.send` does not call `/api/sources/web-research`; `sources.chat.web-research` does and labels `[Web:` |
+| AC-SRC-006 | `exactly one destination` | Selecting a second destination deselects the first; generate disabled until one is chosen |
+| AC-SRC-008 | `no auto-redirect after success` | After ready draft, URL stays on Sources; both CTAs visible; navigation happens only after `sources.artifact.open` |
+| AC-SRC-010 | `no mastery/progress/XP from import/draft` | Snapshot XP / vocab count / competency before and after import+draft; all remain unchanged |
+| AC-SRC-011 | `typed recovery for malformed input` | Corrupted PDF shows `EXTRACTION_FAILED` and paste CTA; no page error |
+| AC-SRC-012 | `typed scanned PDF rejection` | `fix-src-pdf-scanned` shows `PDF_SCANNED_NO_TEXT` |
+| AC-SRC-013 | `typed quota recovery` | Mock provider 429; `retry_wait` + retry control; text excludes `HTTP 429` and `internal/provider.ts` |
+| AC-SRC-014 | `desktop and mobile presentation states` | Desktop Chromium and 390×844 each show loading/ready/empty/unavailable (YouTube card without player) |
+| AC-SRC-015 | `RLS policy verification strategy` | Two storage-state users; user B `GET` of user A `source_records` returns 0 rows (Playwright API request + documented SQL policy test) |
+| AC-SRC-016 | `keyboard and axe coverage` | Tab/Shift+Tab/Enter/Esc through search, select, import, chat, destination, generate; `@axe-core/playwright` 0 violations |
+
+AC-SRC-007 and AC-SRC-009 remain covered by unit tests in Tasks 6–7 plus the generate/`Open artifact` path in this spec.
+
+- [ ] **Step 3: Run RED**
+
+Run: `npx playwright test e2e/sources-library.spec.ts --project=chromium-desktop`
+
+Expected: FAIL because `SourcesView` / flag-ON workspace and locators do not exist yet if this task is started early; during this task, FAIL on missing spec file first (`No tests found`), then on missing locators until Task 8–11 land.
+
+- [ ] **Step 4: Minimal implementation of the spec and fixtures**
+
+Add the Playwright file, fixture bytes, and UX control evidence IDs. Do not weaken assertions. Do not hit live YouTube, live OCR, or Private Web Bridge.
+
+- [ ] **Step 5: GREEN**
+
+Run:
+
+```bash
+npx vitest run src/lib/__tests__/sourcesFullFlow.test.ts src/lib/__tests__/sourcesGroundedChat.test.ts
+npx playwright test e2e/sources-library.spec.ts --project=chromium-desktop
+npx playwright test e2e/sources-library.spec.ts --project=chromium-mobile
+npx playwright test e2e/accessibility.spec.ts --project=chromium-desktop
+npm run check:ux-contracts
+npm run check:product-docs
+```
+
+Expected: all listed commands PASS. Product-docs output: `Product documentation gate passed: 5 documents, N stable IDs.` (stable ID count is the existing product baseline; this plan must not mint IDs).
+
+- [ ] **Step 6: Accessibility and control evidence**
+
+`check-ux-contracts` must count migrated `sources-library-v2` controls. Every SPEC §8.3 `data-ux-control` is activated or table-asserted in `e2e/sources-library.spec.ts`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add e2e/sources-library.spec.ts e2e/fixtures/sources src/lib/__tests__/sourcesFullFlow.test.ts src/lib/uxFlowContracts.ts
+git commit -m "test(sources): prove P03 acceptance criteria with Playwright and UX Contract v2"
 ```
 
 ---
@@ -1682,16 +1442,19 @@ git commit -m "test(sources): add P03 E2E test specs, integration proof, and UX 
 ## Plan Self-Review Checklist
 
 1. **Spec Coverage**:
-   - Library-First UX, Explorer, Collections, Search/Filters -> Tasks 4, 8, 11
-   - SourceRecord, SourceVersion, Spans, Provenance -> Tasks 1, 2
-   - Multi-format Ingestion & Extractor Adapters -> Tasks 2, 3
-   - Selected-Source Grounded Chat & Citation Isolation -> Tasks 5, 9
-   - 1 Source/Span -> 1 Destination Pipeline -> Tasks 6, 10
-   - Destination Handoff Adapters (No auto-redirect) -> Tasks 7, 10
-   - Zero Mastery Policy -> Verified in Tasks 1, 6, 12
-   - Complete 8 Presentation States & Error Scrubbing -> Tasks 3, 8, 10
-   - Supabase RLS & Storage -> Task 1
-   - Acceptance Criteria AC-SRC-001 to AC-SRC-016 -> Verified in Task 12
-
-2. **No Placeholders**: Zero instances of "TBD", "TODO", "implement later", "fill in details".
-3. **Type Consistency**: `SourceRecord`, `SourceVersion`, `SourceSpan`, `SourceArtifactJob`, `ValidatedArtifactDraft` names and fields are 100% consistent across all tasks.
+   - Library-First UX, Explorer, Collections, Search/Filters → Tasks 4, 8, 11
+   - SourceRecord, SourceVersion, Spans, Provenance → Tasks 1, 2
+   - P03-owned extractors + YouTube/audio/chart handoff → Tasks 2, 3
+   - Selected-Source executable Grounded Chat & citation isolation → Tasks 5, 9
+   - 1 Source/Span → 1 Destination Pipeline → Tasks 6, 10
+   - Destination Handoff Adapters (No auto-redirect) → Tasks 7, 10
+   - Feature flag / one-release facade / rollback → Tasks 1, 11
+   - Zero Mastery / XP / vocab / four-skill package policy → Tasks 1, 6, 11, 12
+   - Complete 8 Presentation States & Error Scrubbing → Tasks 3, 8, 10, 12
+   - Supabase RLS & Storage → Tasks 1, 12 (AC-SRC-015)
+   - Acceptance Criteria AC-SRC-001 to AC-SRC-016 → Task 12
+   - Dependency pins and Dexie rejection → Task 0
+2. **No unfinished-work placeholders** in these P03 planning files.
+3. **Type Consistency**: `SourceRecord`, `SourceVersion`, `SourceSpan`, `SourceArtifactJob`, `ValidatedArtifactDraft` names and fields are consistent across all tasks.
+4. **Program map**: P04 owns YouTube/audio/playback; P07 owns Task 1 rendering; P03 does not implement those runtimes.
+5. **Dispatch gate**: P03 coding remains blocked until P02 is on `origin/main` and Product Owner approves this corrected plan.
