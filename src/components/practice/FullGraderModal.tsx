@@ -536,7 +536,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
                           >
                             <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
                               <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-mono font-bold text-[10px] uppercase">
-                                {err.errorTag}
+                                {err.errorCategory}
                               </span>
 
                               <button data-ux-flow="practice.skills"
@@ -556,10 +556,7 @@ export const FullGraderModal: React.FC<FullGraderModalProps> = ({
 
                             <div className="space-y-1 text-xs">
                               <p className="text-rose-600 line-through font-serif">
-                                {err.originalText}
-                              </p>
-                              <p className="text-emerald-600 font-serif font-bold">
-                                {err.correctedText}
+                                {err.errorSubstring}
                               </p>
                               <p className="text-slate-600 dark:text-slate-400 text-[11px]">
                                 {err.explanationVi}

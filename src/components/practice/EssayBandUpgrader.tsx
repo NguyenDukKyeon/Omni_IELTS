@@ -148,20 +148,20 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
     addMistake({
       id: `mistake_upg_${Date.now()}`,
       skill: 'writing',
-      title: `Nâng cấp: ${diff.originalPhrase} ➔ ${diff.band85Mastery}`,
-      originalSentence: diff.contrastAnalysis.spokenOrBasic,
-      correctedSentence: diff.contrastAnalysis.academicC1C2,
+      errorText: diff.originalPhrase,
+      correctedText: diff.band85Mastery,
       explanation: diff.whyBetterVi,
-      category: 'lexical_upgrade',
-      trapCategory: 'Word Choice & Collocation',
+      errorType: 'vocab',
+      trapCategory: 'trap_lexical_context',
+      originModule: 'writing_eval',
       tags: ['Essay Upgrader', 'Band 8.5', diff.category],
-      masteryLevel: 0,
+      srsStage: 0,
       createdAt: new Date().toISOString(),
-      lastReviewedAt: new Date().toISOString(),
       nextReviewDate: new Date().toISOString(),
       intervalDays: 1,
       easeFactor: 2.5,
-      reviewHistory: [],
+      reviewCount: 0,
+      mastered: false,
     });
 
     setSavedPhrases((prev) => new Set([...prev, diff.id]));
@@ -181,13 +181,14 @@ export const EssayBandUpgrader: React.FC<EssayBandUpgraderProps> = ({
       exampleVi: `Cụm từ học thuật C1/C2 chủ đề: ${colloc.ieltsTopic}`,
       collocations: [colloc.phrase],
       cefrLevel: colloc.cefrLevel,
-      topic: colloc.ieltsTopic,
-      deckId: 'deck_writing_collocations',
-      masteryLevel: 0,
+      topicDeck: colloc.ieltsTopic,
+      originModule: 'writing_eval',
+      srsStage: 0,
       intervalDays: 1,
       easeFactor: 2.5,
+      repetitions: 0,
       nextReviewDate: new Date().toISOString(),
-      reviewHistory: [],
+      mastered: false,
     });
 
     setSavedPhrases((prev) => new Set([...prev, colloc.id]));

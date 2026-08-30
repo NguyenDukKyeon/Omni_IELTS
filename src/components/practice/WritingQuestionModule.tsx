@@ -274,7 +274,7 @@ export const WritingQuestionModule: React.FC = () => {
       // Đổ tất cả các lỗi chi tiết vào MistakeNotebook với phân loại bẫy chuẩn Cambridge
       if (result.detailedMistakes && result.detailedMistakes.length > 0) {
         result.detailedMistakes.forEach((m) => {
-          const isTask1 = prompt.type === 'task_1';
+          const isTask1 = prompt.type === 'task1_academic' || prompt.type === 'task1_general';
           let trapCat: TrapCategory = 'trap_task1_tenses';
 
           if (isTask1 && (m.category === 'grammar' || m.ruleExplanationVi.toLowerCase().includes('quá khứ') || m.ruleExplanationVi.toLowerCase().includes('thì'))) {
