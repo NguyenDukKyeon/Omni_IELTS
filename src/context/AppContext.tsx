@@ -28,6 +28,7 @@ import { calculateNextSRS, ReviewRating } from '../services/srsScheduler';
 import { calculateLevel, updateStreak, XP_REWARDS } from '../services/gamification';
 import { askAITutor } from '../services/aiTutor';
 import { transitionMistakeLifecycle } from '../lib/mistakeDrill';
+import { useAppShell } from './AppShellContext';
 
 interface NotificationState {
   id: string;
@@ -102,10 +103,11 @@ const STORAGE_KEYS = {
   GRAMMAR: 'omni_ielts_grammar_v1',
   PRACTICE: 'omni_ielts_practice_v1',
   MOCKS: 'omni_ielts_mocks_v1',
-  DARK_MODE: 'omni_ielts_dark_v1',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { resolvedTheme, setThemePreference } = useAppShell();
+  const darkMode = resolvedTheme === 'dark';
   const [activeModule, setActiveModule] = useState<ModuleId>('dashboard');
   const [isAITutorOpen, setIsAITutorOpen] = useState<boolean>(false);
   const [isMistakeNotebookOpen, setIsMistakeNotebookOpen] = useState<boolean>(false);
@@ -120,15 +122,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notification, setNotification] = useState<NotificationState | null>(null);
   const [isExamModeActive, setIsExamModeActive] = useState<boolean>(false);
 
-  // Dark mode state
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DARK_MODE);
-      return saved !== null ? JSON.parse(saved) : false;
-    } catch {
-      return false;
-    }
-  });
+  useEffect(() => {
+    const onCompat = (event: Event) => {
+      const moduleId = (event as CustomEvent<string>).detail;
+      if (moduleId === 'knowledge') setActiveModule('knowledge');
+    };
+    window.addEventListener('omni:compat-set-module', onCompat);
+    return () => window.removeEventListener('omni:compat-set-module', onCompat);
+  }, []);
 
   // Profile State
   const [profile, setProfile] = useState<UserProfile>(() => {
@@ -405,25 +406,15 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
     }
   }, [mockResults]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DARK_MODE, JSON.stringify(darkMode));
-    } catch (e) {
-      console.warn('Storage sync failed for dark mode', e);
-    }
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
-
   // Initial streak check on mount
   useEffect(() => {
     setProfile((prev) => updateStreak(prev));
   }, []);
 
-  const toggleDarkMode = () => setDarkMode((prev) => !prev);
+  // Compatibility facade for legacy module controls. Theme ownership lives in AppShellContext.
+  const toggleDarkMode = () => {
+    setThemePreference(resolvedTheme === 'dark' ? 'light' : 'dark');
+  };
 
   const awardXP = (amount: number, reason?: string) => {
     setProfile((prev) => {

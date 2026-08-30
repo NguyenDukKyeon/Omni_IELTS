@@ -1,9 +1,12 @@
 # Omni IELTS Product Traceability Matrix
 
-Status: Draft — awaiting Product Owner review
+Status: Approved by Product Owner
 
 Approved Design Baseline:
 [Omni IELTS Product Rebuild Design](../superpowers/specs/2026-08-29-omni-ielts-product-rebuild-design.md)
+
+Approved Brand and UX Baseline:
+[OMNI Brand and UX Rebuild Design](../superpowers/specs/2026-08-30-omni-brand-ux-rebuild-design.md)
 
 Product Strategy:
 [Omni IELTS Product Strategy](./PRODUCT_STRATEGY.md)

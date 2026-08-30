@@ -1,6 +1,13 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { UX_FLOW_CONTRACTS, auditInteractiveSource, validateUxFlowContracts } from '../src/lib/uxFlowContracts';
+import {
+  UX_CONTROL_CONTRACTS,
+  UX_FLOW_CONTRACTS,
+  auditInteractiveSource,
+  auditMigratedControlScope,
+  validateUxControlContracts,
+  validateUxFlowContracts,
+} from '../src/lib/uxFlowContracts';
 
 const root = process.cwd();
 
@@ -13,6 +20,7 @@ function collectTsxFiles(directory: string): string[] {
 }
 
 const issues = validateUxFlowContracts(UX_FLOW_CONTRACTS);
+issues.push(...validateUxControlContracts(UX_CONTROL_CONTRACTS, root));
 for (const contract of UX_FLOW_CONTRACTS) {
   for (const evidence of contract.evidence) {
     if (!existsSync(path.join(root, evidence))) issues.push(`${contract.id} evidence is missing: ${evidence}`);
@@ -20,7 +28,9 @@ for (const contract of UX_FLOW_CONTRACTS) {
 }
 
 let controls = 0;
+let migratedControls = 0;
 const seenUxControls = new Map<string, string>();
+const seenMigratedControls = new Map<string, string>();
 const REQUIRED_CONSENT_CONTROL_MAPPINGS: Record<string, string> = {
   'live-hub.consent.close-button': 'live-hub.consent.dismiss',
   'live-hub.consent.search-more-button': 'live-hub.consent.search-more',
@@ -34,6 +44,16 @@ for (const file of collectTsxFiles(path.join(root, 'src'))) {
   const source = readFileSync(file, 'utf8');
   controls += (source.match(/<(button|a|input|select|textarea|form)(?=[\s>])/g) || []).length;
   issues.push(...auditInteractiveSource(source, relative, UX_FLOW_CONTRACTS));
+  if (source.includes('data-ux-scope="app-shell-v2"')) {
+    issues.push(...auditMigratedControlScope(source, relative, UX_CONTROL_CONTRACTS));
+    for (const match of source.matchAll(/data-ux-control=["']([^"']+)["']/g)) {
+      const controlId = match[1];
+      if (!seenMigratedControls.has(controlId)) {
+        seenMigratedControls.set(controlId, relative);
+        migratedControls += 1;
+      }
+    }
+  }
 
   // Audit data-ux-control literals for uniqueness
   const controlMatches = source.matchAll(/data-ux-control=["']([^"']+)["']/g);
@@ -44,6 +64,12 @@ for (const file of collectTsxFiles(path.join(root, 'src'))) {
     } else {
       seenUxControls.set(controlId, relative);
     }
+  }
+}
+
+for (const contract of UX_CONTROL_CONTRACTS) {
+  if (!seenMigratedControls.has(contract.id)) {
+    issues.push(`Migrated control contract "${contract.id}" is not used inside app-shell-v2.`);
   }
 }
 
@@ -84,5 +110,5 @@ if (issues.length) {
 }
 
 console.log(
-  `UX flow contract gate passed: ${controls} native controls mapped to ${UX_FLOW_CONTRACTS.length} contracts; ${Object.keys(REQUIRED_CONSENT_CONTROL_MAPPINGS).length} consent controls verified with flow mapping and test evidence.`
+  `UX contract gate passed: ${controls} native controls mapped to ${UX_FLOW_CONTRACTS.length} flow contracts; ${migratedControls} migrated app-shell controls mapped to ${UX_CONTROL_CONTRACTS.length} control contracts.`
 );
