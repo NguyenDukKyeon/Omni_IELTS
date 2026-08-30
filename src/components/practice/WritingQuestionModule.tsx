@@ -386,31 +386,38 @@ export const WritingQuestionModule: React.FC = () => {
         />
       ) : (
         <div className="space-y-6">
-          {/* 1. Selector bar: Task 1 Academic / General & Task 2 Essays */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <PenTool className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              Luyện từng dạng đề IELTS Writing (Task 1 & Task 2)
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Soạn bài trực tiếp trong app — Giám khảo AI chấm chuẩn theo đúng 4 tiêu chí chính thức của Cambridge.
-            </p>
+          {/* 1. Selector Bar: All 8 IELTS Writing Task Types */}
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-200 dark:border-amber-800/40">
+              <PenTool className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Luyện Từng Dạng Bài IELTS Writing
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Luyện đề Task 1 Academic / General & Task 2 Essay — Chấm điểm 4 tiêu chí Cambridge.
+              </p>
+            </div>
           </div>
 
-          <button data-ux-flow="practice.skills"
-            onClick={() => handleGenerateNewPrompt(selectedTask)}
-            disabled={isGenerating}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
-          >
-            {isGenerating ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="w-3.5 h-3.5" />
-            )}
-            {isGenerating ? 'Đang tạo đề AI...' : 'Tạo đề AI mới'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              data-ux-flow="practice.skills"
+              onClick={() => handleGenerateNewPrompt(selectedTask)}
+              disabled={isGenerating}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {isGenerating ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              <span>{isGenerating ? 'Đang tạo đề AI...' : 'Tạo đề mới'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Task Selection Cards */}
@@ -419,20 +426,19 @@ export const WritingQuestionModule: React.FC = () => {
             const isSelected =
               selectedTask.category === task.category && selectedTask.type === task.type;
             return (
-              <button data-ux-flow="practice.skills"
+              <button
+                data-ux-flow="practice.skills"
                 key={idx}
                 onClick={() => handleSelectTask(task)}
-                className={`text-left p-3 rounded-xl border transition-all text-xs flex flex-col justify-between ${
+                className={`text-left p-3.5 rounded-2xl border transition-all text-xs flex flex-col justify-between cursor-pointer ${
                   isSelected
-                    ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-semibold shadow-sm'
+                    ? 'border-amber-600 bg-amber-50/70 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-semibold shadow-sm ring-1 ring-amber-500/20'
                     : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold truncate">{task.category}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                  <div className="font-bold truncate text-slate-900 dark:text-white mb-0.5">{task.category}</div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
                     {task.desc}
                   </p>
                 </div>

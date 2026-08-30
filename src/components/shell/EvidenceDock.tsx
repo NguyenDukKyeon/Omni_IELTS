@@ -234,19 +234,18 @@ export function EvidenceDock() {
         {currentMedia && (
           <section id="continue-learning" className="omni-evidence-dock__section omni-evidence-dock__continue">
             <h3 className="omni-evidence-dock__section-title">Tiếp tục học</h3>
-            <button
-              type="button"
-              className="omni-evidence-dock__item"
-              data-ux-flow="app.navigation"
-              data-ux-control="shell.evidence.open-media"
-              onClick={() => openDestination('media')}
-            >
-              <BookOpenCheck aria-hidden="true" className="omni-evidence-dock__item-icon" />
-              <span className="omni-evidence-dock__item-text">
-                <strong>{currentMedia.title}</strong>
-                <span>Mở Media Lab từ bài đã lưu</span>
-              </span>
-            </button>
+            <EvidenceDockButton
+              item={{
+                id: 'continue-media',
+                label: currentMedia.title,
+                detail: 'Mở Media Lab từ bài đã lưu',
+                destination: 'media',
+                action: 'open_module',
+                status: 'recent',
+              }}
+              control="shell.evidence.open-media"
+              onOpen={openDestination}
+            />
           </section>
         )}
       </div>

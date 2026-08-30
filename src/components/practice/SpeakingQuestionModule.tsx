@@ -396,25 +396,25 @@ export const SpeakingQuestionModule: React.FC = () => {
   return (
     <div id="ielts_speaking_module" className="space-y-6">
       {/* Top Speaking Mode Switcher Header */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-2 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
-        <div className="grid grid-cols-2 w-full sm:w-auto gap-1">
-          <button data-ux-flow="practice.skills"
+      <div className="flex bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800">
+          <button
+            data-ux-flow="practice.skills"
             onClick={() => setSpeakingMode('virtual_room')}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
               speakingMode === 'virtual_room'
-                ? 'bg-indigo-600 text-white shadow-md'
+                ? 'bg-violet-600 text-white shadow-md'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Radio className="w-4 h-4 text-amber-300 animate-pulse" />
-            <span>Phòng Thi 1:1 Giám Khảo Khảo Thí AI</span>
+            <Headphones className="w-4 h-4" />
+            <span>Phòng Thi Ảo 1:1 Với Giám Khảo (Virtual Room)</span>
           </button>
-
-          <button data-ux-flow="practice.skills"
+          <button
+            data-ux-flow="practice.skills"
             onClick={() => setSpeakingMode('drill')}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
               speakingMode === 'drill'
-                ? 'bg-indigo-600 text-white shadow-md'
+                ? 'bg-violet-600 text-white shadow-md'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
@@ -422,12 +422,6 @@ export const SpeakingQuestionModule: React.FC = () => {
             <span>Luyện Từng Dạng Bài (Part 1, 2, 3)</span>
           </button>
         </div>
-
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 px-3 flex items-center gap-1.5 font-medium">
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <span>Nhận dạng transcript + phân tích audio thật theo 4 tiêu chí IELTS</span>
-        </div>
-      </div>
 
       {/* Mode 1: Virtual Examiner Room */}
       {speakingMode === 'virtual_room' && (
@@ -438,29 +432,34 @@ export const SpeakingQuestionModule: React.FC = () => {
       {speakingMode === 'drill' && (
         <div className="space-y-6 animate-fadeIn">
           {/* 1. Selector bar: Part 1, Part 2 (Cue Card with 1m+2m timers), Part 3 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Mic className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                  Luyện từng phần thi IELTS Speaking (Part 1, Part 2 & Part 3)
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Mô phỏng đối thoại với Giám khảo AI Cambridge qua giọng đọc tự nhiên và đồng hồ chuẩn phòng thi.
-                </p>
+          <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 flex items-center justify-center border border-violet-200 dark:border-violet-800/40">
+                  <Mic className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Luyện Từng Phần Thi IELTS Speaking
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Mô phỏng đối thoại với Giám khảo AI Cambridge qua giọng đọc tự nhiên và đồng hồ chuẩn phòng thi.
+                  </p>
+                </div>
               </div>
 
-              <button data-ux-flow="practice.skills"
+              <button
+                data-ux-flow="practice.skills"
                 onClick={() => handleGenerateNew(selectedPart)}
                 disabled={isGenerating}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
               >
                 {isGenerating ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <Sparkles className="w-3.5 h-3.5" />
                 )}
-                {isGenerating ? 'Đang tạo đề AI...' : 'Tạo đề AI mới'}
+                <span>{isGenerating ? 'Đang tạo đề AI...' : 'Tạo đề mới'}</span>
               </button>
             </div>
 
@@ -469,24 +468,25 @@ export const SpeakingQuestionModule: React.FC = () => {
               {SPEAKING_PARTS.map((p) => {
                 const isSelected = selectedPart === p.part;
                 return (
-                  <button data-ux-flow="practice.skills"
+                  <button
+                    data-ux-flow="practice.skills"
                     key={p.part}
                     onClick={() => handleSelectPart(p.part)}
-                    className={`text-left p-4 rounded-xl border transition-all text-xs flex flex-col justify-between ${
+                    className={`text-left p-4 rounded-2xl border transition-all text-xs flex flex-col justify-between cursor-pointer ${
                       isSelected
-                        ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-semibold shadow-sm'
+                        ? 'border-violet-600 bg-violet-50/70 dark:bg-violet-950/40 text-violet-950 dark:text-violet-200 font-semibold shadow-sm ring-1 ring-violet-500/20'
                         : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-sm">{p.title}</span>
+                        <span className="font-bold text-sm text-slate-900 dark:text-white">{p.title}</span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed">
                         {p.desc}
                       </p>
                     </div>
-                    <span className="mt-3 inline-block px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 w-fit">
+                    <span className="mt-3 inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 w-fit">
                       {p.badge}
                     </span>
                   </button>

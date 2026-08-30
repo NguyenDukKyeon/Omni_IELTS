@@ -15,6 +15,7 @@ import {
   MapPin,
   FileText,
   Zap,
+  Gauge,
 } from 'lucide-react';
 import { ListeningQuestionType, ListeningPracticeExercise, TrapCategory } from '../../types';
 import { generateListeningPracticeApi, speakExaminerText } from '../../services/practiceService';
@@ -127,6 +128,7 @@ export const ListeningQuestionModule: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [selectedTopic, setSelectedTopic] = useState<string>('Campus Facilities & Student Services');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('Band 7.0-8.0');
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
 
   // Audio Playback State
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
@@ -145,7 +147,7 @@ export const ListeningQuestionModule: React.FC = () => {
       setIsPlayingAudio(false);
     } else {
       setIsPlayingAudio(true);
-      const cancel = speakExaminerText(exercise.audioTranscript, 0.95, () => {
+      const cancel = speakExaminerText(exercise.audioTranscript, playbackSpeed, () => {
         setIsPlayingAudio(false);
       });
       setStopAudioFn(() => cancel);
@@ -188,7 +190,7 @@ export const ListeningQuestionModule: React.FC = () => {
   const handleSubmit = () => {
     if (isSubmitted) return;
     setIsSubmitted(true);
-    setShowTranscript(true); // Reveal transcript for review
+    setShowTranscript(true);
 
     let correctCount = 0;
     exercise.questions.forEach((q) => {
@@ -208,10 +210,9 @@ export const ListeningQuestionModule: React.FC = () => {
           ? 'trap_listening_plural_spelling'
           : 'trap_distractor_numbers';
 
-        // Tự động ghi lỗi vào MistakeEntry với phân loại bẫy
         addMistake({
           id: `mistake_listen_${Date.now()}_${q.id}`,
-          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.questionText}"`,
+          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.prompt}"`,
           correctedText: `Đáp án chuẩn: "${q.correctAnswer}" (Bạn đã ghi: "${userAnswers[q.id] || 'Bỏ trống'}")`,
           explanation: `${q.explanationVi} ${q.spellingOrGrammarTrap ? `(Bẫy: ${q.spellingOrGrammarTrap})` : ''}`,
           trapCategory: trapCat,
@@ -252,26 +253,40 @@ export const ListeningQuestionModule: React.FC = () => {
     }
   };
 
+  const answeredCount = exercise.questions.filter((q) => Boolean(userAnswers[q.id]?.trim())).length;
+  const correctCount = exercise.questions.filter((q) => {
+    const userAns = (userAnswers[q.id] || '').trim().toLowerCase();
+    const correct = q.correctAnswer.trim().toLowerCase();
+    const accepted = (q.acceptableAnswers || []).map((a) => a.trim().toLowerCase());
+    return userAns === correct || accepted.includes(userAns);
+  }).length;
+  const scorePercent = Math.round((correctCount / exercise.questions.length) * 100);
+
   return (
     <div id="ielts_listening_module" className="space-y-6">
       {/* 1. Selector bar: All 4 IELTS Listening Question Types */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Headphones className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              Luyện từng dạng câu hỏi IELTS Listening
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Đề thi và giọng đọc mô phỏng Cambridge Audio sinh bởi AI không giới hạn.
-            </p>
+      <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 flex items-center justify-center border border-sky-200 dark:border-sky-800/40">
+              <Headphones className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Luyện Từng Dạng Bài IELTS Listening
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Đề thi và giọng đọc mô phỏng Cambridge Audio sinh bởi AI không giới hạn.
+              </p>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <select data-ux-flow="practice.skills"
+            <select
+              data-ux-flow="practice.skills"
               value={selectedTopic}
               onChange={(e) => setSelectedTopic(e.target.value)}
-              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
             >
               <option value="Campus Facilities & Student Services">🏫 Campus & Facilities</option>
               <option value="Environmental Fieldwork & Ecology">🌱 Fieldwork & Ecology</option>
@@ -281,54 +296,55 @@ export const ListeningQuestionModule: React.FC = () => {
               </option>
             </select>
 
-            <select data-ux-flow="practice.skills"
+            <select
+              data-ux-flow="practice.skills"
               value={selectedDifficulty}
               onChange={(e) => setSelectedDifficulty(e.target.value)}
-              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="text-xs px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
             >
               <option value="Band 5.5-6.5">Band 5.5 - 6.5 (Standard)</option>
               <option value="Band 7.0-8.0">Band 7.0 - 8.0 (Academic)</option>
               <option value="Band 8.5+">Band 8.5+ (Mastery)</option>
             </select>
 
-            <button data-ux-flow="practice.skills"
+            <button
+              data-ux-flow="practice.skills"
               onClick={() => handleGenerateNew(selectedType)}
               disabled={isGenerating}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
               {isGenerating ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <Sparkles className="w-3.5 h-3.5" />
               )}
-              {isGenerating ? 'Đang sinh đề...' : 'Tạo bài AI mới'}
+              <span>{isGenerating ? 'Đang sinh đề...' : 'Tạo bài mới'}</span>
             </button>
           </div>
         </div>
 
         {/* Listening Question Type Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {LISTENING_TYPES.map((t) => {
             const isSelected = selectedType === t.type;
             return (
-              <button data-ux-flow="practice.skills"
+              <button
+                data-ux-flow="practice.skills"
                 key={t.type}
                 onClick={() => handleSelectType(t.type)}
-                className={`text-left p-3.5 rounded-xl border transition-all text-xs flex flex-col justify-between ${
+                className={`text-left p-3.5 rounded-2xl border transition-all text-xs flex flex-col justify-between cursor-pointer ${
                   isSelected
-                    ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-semibold shadow-sm'
+                    ? 'border-sky-600 bg-sky-50/70 dark:bg-sky-950/40 text-sky-950 dark:text-sky-200 font-semibold shadow-sm ring-1 ring-sky-500/20'
                     : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300'
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold truncate">{t.title}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                  <div className="font-bold truncate text-slate-900 dark:text-white mb-0.5">{t.title}</div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
                     {t.desc}
                   </p>
                 </div>
-                <span className="mt-2 inline-block px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 w-fit">
+                <span className="mt-2.5 inline-block px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300 w-fit">
                   {t.badge}
                 </span>
               </button>
@@ -337,54 +353,74 @@ export const ListeningQuestionModule: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Audio Player Header Bar */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 border border-indigo-800/40 shadow-md">
+      {/* 2. Modern Audio Player Header Bar (IZONE Practice Style) */}
+      <div className="bg-slate-900 text-white rounded-3xl p-5 border border-slate-800 shadow-lg space-y-3">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-indigo-600/30 border border-indigo-500/50 flex items-center justify-center flex-shrink-0">
-              <Headphones className="w-6 h-6 text-indigo-400" />
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center flex-shrink-0 text-sky-400">
+              <Headphones className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/30 text-indigo-300">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
                   {exercise.section}
                 </span>
-                <span className="text-xs text-slate-400">{exercise.difficulty}</span>
+                <span className="text-xs text-slate-400 font-medium">{exercise.difficulty}</span>
               </div>
-              <h3 className="text-base font-bold text-white mt-0.5">{exercise.title}</h3>
+              <h3 className="text-base font-bold text-white mt-1">{exercise.title}</h3>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-            <button data-ux-flow="practice.skills"
+          {/* Audio Action Controls */}
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
+            {/* Speed Selector */}
+            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl p-0.5 text-xs font-semibold text-slate-300">
+              {[0.8, 1.0, 1.2].map((spd) => (
+                <button
+                  data-ux-flow="practice.skills"
+                  key={spd}
+                  type="button"
+                  onClick={() => setPlaybackSpeed(spd)}
+                  className={`px-2 py-1 rounded-lg transition-all ${
+                    playbackSpeed === spd ? 'bg-sky-600 text-white font-bold' : 'hover:text-white'
+                  }`}
+                >
+                  {spd}x
+                </button>
+              ))}
+            </div>
+
+            <button
+              data-ux-flow="practice.skills"
               onClick={handlePlayAudio}
-              className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all ${
+              className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer ${
                 isPlayingAudio
                   ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  : 'bg-sky-600 hover:bg-sky-700 text-white'
               }`}
             >
               {isPlayingAudio ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              {isPlayingAudio ? 'Dừng phát Audio' : 'Phát Audio Cambridge'}
+              <span>{isPlayingAudio ? 'Dừng phát Audio' : 'Phát Audio Cambridge'}</span>
             </button>
 
-            <button data-ux-flow="practice.skills"
+            <button
+              data-ux-flow="practice.skills"
               onClick={() => setShowTranscript(!showTranscript)}
-              className="px-3.5 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition-all"
+              className="px-3.5 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <FileText className="w-3.5 h-3.5 text-indigo-400" />
-              {showTranscript ? 'Ẩn Transcript' : 'Xem Transcript'}
+              <FileText className="w-3.5 h-3.5 text-sky-400" />
+              <span>{showTranscript ? 'Ẩn Transcript' : 'Xem Transcript'}</span>
             </button>
           </div>
         </div>
 
         {/* Revealed Transcript Box */}
         {showTranscript && (
-          <div className="mt-4 pt-4 border-t border-slate-800 text-xs leading-relaxed text-slate-300 bg-slate-950/60 p-4 rounded-xl">
-            <div className="font-bold text-indigo-400 mb-2 flex items-center gap-1.5">
+          <div className="mt-3 pt-3 border-t border-slate-800 text-xs leading-relaxed text-slate-300 bg-slate-950/70 p-4 rounded-2xl">
+            <div className="font-bold text-sky-400 mb-2 flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5" /> Toàn văn Audio Transcript:
             </div>
-            <p className="whitespace-pre-line font-mono text-[11px] text-slate-300">
+            <p className="whitespace-pre-line font-mono text-[11px] text-slate-300 leading-relaxed">
               {exercise.audioTranscript}
             </p>
           </div>
@@ -394,16 +430,16 @@ export const ListeningQuestionModule: React.FC = () => {
       {/* 3. Main Workspace: Map Canvas or Question Form */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Visual Map Schematic (for Map labelling) or Form Layout */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+        <div className="lg:col-span-7 bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
             <h4 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-indigo-600" />
+              <MapPin className="w-4 h-4 text-sky-600" />
               {exercise.type === 'map_plan_diagram_labelling'
                 ? 'Sơ đồ Bản đồ IELTS (Campus / Map Layout)'
                 : 'Ngữ cảnh bài thi Listening'}
             </h4>
             {exercise.wordLimit && (
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300">
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300">
                 {exercise.wordLimit}
               </span>
             )}
@@ -411,19 +447,19 @@ export const ListeningQuestionModule: React.FC = () => {
 
           {/* Interactive Map Canvas if Map Labelling */}
           {exercise.type === 'map_plan_diagram_labelling' && exercise.mapDiagramData ? (
-            <div className="relative w-full aspect-[16/10] bg-slate-900 rounded-2xl border-2 border-indigo-900/60 overflow-hidden p-4 select-none">
+            <div className="relative w-full aspect-[16/10] bg-slate-900 rounded-2xl border-2 border-sky-900/60 overflow-hidden p-4 select-none shadow-inner">
               {/* Grid Background Lines */}
               <div className="absolute inset-0 opacity-20 bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:24px_24px]" />
 
               {/* Compass Rose */}
-              <div className="absolute top-3 right-3 bg-slate-800/80 border border-slate-700 text-[10px] text-slate-300 px-2 py-1 rounded font-mono font-bold flex flex-col items-center">
+              <div className="absolute top-3 right-3 bg-slate-800/90 border border-slate-700 text-[10px] text-slate-300 px-2 py-1 rounded-lg font-mono font-bold flex flex-col items-center shadow-xs">
                 <span>▲ N</span>
                 <span>W ◄ ► E</span>
                 <span>▼ S</span>
               </div>
 
               {/* Title overlay */}
-              <div className="absolute top-3 left-4 text-xs font-bold text-indigo-300 bg-slate-800/80 px-2.5 py-1 rounded border border-indigo-800/60">
+              <div className="absolute top-3 left-4 text-xs font-bold text-sky-300 bg-slate-800/90 px-2.5 py-1 rounded-lg border border-sky-800/60">
                 {exercise.mapDiagramData.title}
               </div>
 
@@ -445,7 +481,7 @@ export const ListeningQuestionModule: React.FC = () => {
                   style={{ left: `${loc.xPercent}%`, top: `${loc.yPercent}%` }}
                   className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group cursor-pointer"
                 >
-                  <div className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs flex items-center justify-center shadow-lg border-2 border-white ring-4 ring-indigo-500/30 transition-transform group-hover:scale-110">
+                  <div className="w-8 h-8 rounded-full bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs flex items-center justify-center shadow-lg border-2 border-white ring-4 ring-sky-500/30 transition-transform group-hover:scale-110">
                     {loc.letter}
                   </div>
                   {isSubmitted && (
@@ -457,11 +493,11 @@ export const ListeningQuestionModule: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 space-y-2">
-              <p>
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 space-y-2">
+              <p className="leading-relaxed">
                 <strong>Hướng dẫn:</strong> {exercise.instructionsVi}
               </p>
-              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg text-amber-900 dark:text-amber-200 text-xs">
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl text-amber-900 dark:text-amber-200 text-xs">
                 💡 <strong>Mẹo Listening:</strong> Chú ý các từ đánh vần ký tự, các số điện
                 thoại/ngày tháng, và người nói tự sửa lời bằng các cụm như <em>"Actually,..."</em>{' '}
                 hoặc <em>"No, wait..."</em>.
@@ -471,20 +507,32 @@ export const ListeningQuestionModule: React.FC = () => {
         </div>
 
         {/* Right Column: Questions List */}
-        <div className="lg:col-span-5 bg-white dark:bg-slate-800 rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+        <div className="lg:col-span-5 bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
-            <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-              Câu hỏi Listening ({exercise.questions.length} câu)
-            </h3>
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                Câu hỏi Listening ({exercise.questions.length} câu)
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Đã làm {answeredCount}/{exercise.questions.length} câu
+              </p>
+            </div>
+
             {isSubmitted && (
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
-                Đã nộp bài
+              <span
+                className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                  scorePercent >= 80
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800'
+                    : 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800'
+                }`}
+              >
+                Đúng {correctCount}/{exercise.questions.length} ({scorePercent}%)
               </span>
             )}
           </div>
 
           <div className="space-y-4">
-            {exercise.questions.map((q) => {
+            {exercise.questions.map((q, idx) => {
               const userVal = userAnswers[q.id] || '';
               const correct = q.correctAnswer.trim().toLowerCase();
               const accepted = (q.acceptableAnswers || []).map((a) => a.trim().toLowerCase());
@@ -492,30 +540,33 @@ export const ListeningQuestionModule: React.FC = () => {
                 isSubmitted &&
                 (userVal.trim().toLowerCase() === correct ||
                   accepted.includes(userVal.trim().toLowerCase()));
+              const isWrong = isSubmitted && !isCorrect;
 
               return (
                 <div
                   key={q.id}
-                  className={`p-4 rounded-xl border transition-all ${
+                  className={`p-4 rounded-2xl border transition-all ${
                     isSubmitted
                       ? isCorrect
                         ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20'
                         : 'border-rose-300 bg-rose-50/50 dark:border-rose-800 dark:bg-rose-950/20'
+                      : userVal
+                      ? 'border-sky-200 dark:border-sky-900/60 bg-sky-50/20 dark:bg-sky-950/10'
                       : 'border-slate-200 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/30'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
-                    <span className="font-bold text-xs text-indigo-600 dark:text-indigo-400">
-                      Câu {q.questionNumber}:
+                    <span className="font-bold text-xs text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-lg bg-sky-100/70 dark:bg-sky-950/50">
+                      Câu {q.questionNumber || idx + 1}:
                     </span>
                     {isSubmitted && (
                       <span className="flex items-center gap-1 text-xs font-semibold">
                         {isCorrect ? (
-                          <span className="text-emerald-600 flex items-center gap-1">
+                          <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                             <CheckCircle2 className="w-4 h-4" /> Đúng
                           </span>
                         ) : (
-                          <span className="text-rose-600 flex items-center gap-1">
+                          <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1">
                             <XCircle className="w-4 h-4" /> Sai
                           </span>
                         )}
@@ -523,22 +574,23 @@ export const ListeningQuestionModule: React.FC = () => {
                     )}
                   </div>
 
-                  <p className="text-xs text-slate-800 dark:text-slate-200 font-medium mb-3">
+                  <p className="text-xs text-slate-800 dark:text-slate-200 font-semibold mb-3">
                     {q.prompt}
                   </p>
 
                   {/* Input form */}
                   {exercise.type === 'map_plan_diagram_labelling' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {['A', 'B', 'C', 'D', 'E'].map((letter) => (
-                        <button data-ux-flow="practice.skills"
+                        <button
+                          data-ux-flow="practice.skills"
                           key={letter}
                           disabled={isSubmitted}
                           onClick={() => handleAnswerChange(q.id, letter)}
-                          className={`w-9 h-8 rounded-lg text-xs font-bold border transition-all ${
+                          className={`w-10 h-9 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                             userVal === letter
-                              ? 'bg-indigo-600 text-white border-indigo-600'
-                              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                              ? 'bg-sky-600 text-white border-sky-600 shadow-sm'
+                              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
                           }`}
                         >
                           {letter}
@@ -547,15 +599,16 @@ export const ListeningQuestionModule: React.FC = () => {
                     </div>
                   ) : q.options && q.options.length > 0 ? (
                     <div className="space-y-1.5">
-                      {q.options.map((opt, idx) => (
-                        <button data-ux-flow="practice.skills"
-                          key={idx}
+                      {q.options.map((opt, oIdx) => (
+                        <button
+                          data-ux-flow="practice.skills"
+                          key={oIdx}
                           disabled={isSubmitted}
                           onClick={() => handleAnswerChange(q.id, opt)}
-                          className={`w-full text-left p-2 rounded-lg text-xs border transition-all ${
+                          className={`w-full text-left p-2.5 rounded-xl text-xs border transition-all cursor-pointer ${
                             userVal === opt
-                              ? 'bg-indigo-600 text-white border-indigo-600 font-semibold'
-                              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                              ? 'bg-sky-600 text-white border-sky-600 font-semibold shadow-sm'
+                              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
                           }`}
                         >
                           {opt}
@@ -564,31 +617,32 @@ export const ListeningQuestionModule: React.FC = () => {
                     </div>
                   ) : (
                     <div>
-                      <input data-ux-flow="practice.skills"
+                      <input
+                        data-ux-flow="practice.skills"
                         type="text"
                         disabled={isSubmitted}
                         placeholder="Nhập từ bạn nghe được..."
                         value={userVal}
                         onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                        className="w-full text-xs p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 font-medium"
                       />
                     </div>
                   )}
 
                   {/* Feedback explanation after submit */}
                   {isSubmitted && (
-                    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
+                    <div className="mt-3.5 pt-3.5 border-t border-slate-200 dark:border-slate-700 text-xs space-y-2">
                       <div className="text-slate-700 dark:text-slate-300">
                         <strong className="text-emerald-600 dark:text-emerald-400">
                           Đáp án đúng:
                         </strong>{' '}
                         <span className="font-bold">{q.correctAnswer}</span>
                       </div>
-                      <p className="text-slate-600 dark:text-slate-400">
+                      <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
                         <strong>Phân tích:</strong> {q.explanationVi}
                       </p>
                       {q.spellingOrGrammarTrap && (
-                        <div className="p-2 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-1.5">
+                        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
                           <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
                           <span>
                             <strong>Bẫy chính tả / ngữ âm:</strong> {q.spellingOrGrammarTrap}
@@ -602,37 +656,74 @@ export const ListeningQuestionModule: React.FC = () => {
             })}
           </div>
 
-          {/* Action buttons */}
-          <div className="pt-2">
-            {!isSubmitted ? (
-              <button data-ux-flow="practice.skills"
-                onClick={handleSubmit}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
-              >
-                <CheckCircle2 className="w-4 h-4" /> Nộp bài & Xem phân tích chi tiết
-              </button>
-            ) : (
-              <div className="flex gap-2">
-                <button data-ux-flow="practice.skills"
-                  onClick={() => handleGenerateNew(selectedType)}
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+          {/* Action & Submit buttons with question palette */}
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-semibold text-slate-500 mr-1">Bảng câu hỏi:</span>
+              {exercise.questions.map((q, idx) => {
+                const userVal = userAnswers[q.id] || '';
+                const correct = q.correctAnswer.trim().toLowerCase();
+                const accepted = (q.acceptableAnswers || []).map((a) => a.trim().toLowerCase());
+                const isCorrect =
+                  isSubmitted &&
+                  (userVal.trim().toLowerCase() === correct ||
+                    accepted.includes(userVal.trim().toLowerCase()));
+                const isAnswered = Boolean(userVal);
+
+                return (
+                  <div
+                    key={q.id}
+                    className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center border transition-all ${
+                      isSubmitted
+                        ? isCorrect
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-rose-600 text-white border-rose-600'
+                        : isAnswered
+                        ? 'bg-slate-800 text-white border-slate-800 dark:bg-slate-200 dark:text-slate-900'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    <span>{q.questionNumber || idx + 1}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div>
+              {!isSubmitted ? (
+                <button
+                  data-ux-flow="practice.skills"
+                  onClick={handleSubmit}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4" /> Sinh đề AI tiếp theo
+                  <CheckCircle2 className="w-4 h-4" /> Nộp bài & Chấm điểm
                 </button>
-                <button data-ux-flow="practice.skills"
-                  onClick={() => {
-                    setIsSubmitted(false);
-                    setUserAnswers({});
-                  }}
-                  className="px-4 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300"
-                >
-                  Làm lại
-                </button>
-              </div>
-            )}
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    data-ux-flow="practice.skills"
+                    onClick={() => handleGenerateNew(selectedType)}
+                    className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" /> Sinh đề tiếp
+                  </button>
+                  <button
+                    data-ux-flow="practice.skills"
+                    onClick={() => {
+                      setIsSubmitted(false);
+                      setUserAnswers({});
+                    }}
+                    className="px-3.5 py-2.5 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 transition-all cursor-pointer"
+                  >
+                    Làm lại
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 };
+

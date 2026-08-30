@@ -219,6 +219,8 @@ function shellControl(
 export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('shell.header.home', 'app.navigation', 'AppHeader', 'Open OMNI Home', 'any shell route', 'dashboard'),
   shellControl('shell.header.open-tutor', 'tutor.chat', 'AppHeader', 'Open AI Tutor', 'tutor closed', 'tutor open', ['Open the contextual Tutor panel']),
+  shellControl('shell.header.open-review', 'app.navigation', 'AppHeader', 'Open due work review', 'any shell route', 'review_progress'),
+  shellControl('shell.header.open-account-menu', 'app.navigation', 'AppHeader', 'Open account menu', 'account menu closed', 'account menu open', ['Toggle account menu']),
   shellControl('shell.theme.open', 'app.navigation', 'ThemeMenu', 'Open theme choices', 'theme menu closed', 'theme menu open', ['Set theme menu open']),
   shellControl('shell.theme.system', 'app.navigation', 'ThemeMenu', 'Choose system theme', 'theme menu open', 'system theme active', ['Persist theme preference']),
   shellControl('shell.theme.light', 'app.navigation', 'ThemeMenu', 'Choose light theme', 'theme menu open', 'light theme active', ['Persist theme preference']),
