@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { BookOpenCheck, ChevronLeft, ChevronRight, CircleAlert, Clock3 } from 'lucide-react';
+import { ArrowRight, BookOpenCheck, ChevronLeft, ChevronRight, CircleAlert, Clock3 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAppShell } from '../../context/AppShellContext';
 import { buildEvidenceDockModel, type EvidenceDockItem } from '../../lib/evidenceDock';
@@ -11,16 +11,13 @@ import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
 import type { ModuleId } from '../../types';
 
 function controlForItem(item: EvidenceDockItem):
-  | 'shell.evidence.open-due-review'
-  | 'shell.evidence.open-due-vocab'
   | 'shell.evidence.open-context'
   | 'shell.evidence.open-practice'
   | 'shell.evidence.open-mock'
   | 'shell.evidence.open-media'
   | null {
   if (item.action === 'none' || !item.destination) return null;
-  if (item.id === 'due-mistakes') return 'shell.evidence.open-due-review';
-  if (item.id === 'due-vocab') return 'shell.evidence.open-due-vocab';
+  if (item.id === 'due-mistakes' || item.id === 'due-vocab') return null;
   if (item.action === 'open_module' && item.destination === 'practice') return 'shell.evidence.open-practice';
   if (item.action === 'open_module' && item.destination === 'mock_test') return 'shell.evidence.open-mock';
   if (item.action === 'open_module' && item.destination === 'media') return 'shell.evidence.open-media';
@@ -56,12 +53,6 @@ function EvidenceDockButton({
     className: 'omni-evidence-dock__item',
   };
 
-  if (control === 'shell.evidence.open-due-review') {
-    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-due-review" onClick={() => onOpen(item.destination)}>{content}</button>;
-  }
-  if (control === 'shell.evidence.open-due-vocab') {
-    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-due-vocab" onClick={() => onOpen(item.destination)}>{content}</button>;
-  }
   if (control === 'shell.evidence.open-practice') {
     return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-practice" onClick={() => onOpen(item.destination)}>{content}</button>;
   }
@@ -101,11 +92,24 @@ export function EvidenceDock() {
   const latestMock = [...mockResults]
     .filter(isExplicitMockEvidence)
     .sort((a, b) => Date.parse(b.completedDate) - Date.parse(a.completedDate))[0];
-  const recentEvidence = latestAttempt
-    ? [{ id: latestAttempt.id, label: latestAttempt.taskType, destination: 'practice' as ModuleId }]
-    : latestMock
-      ? [{ id: latestMock.id, label: latestMock.testTitle, destination: 'mock_test' as ModuleId }]
-      : [];
+  const recentEvidence = [
+    ...(latestAttempt ? [{
+      id: latestAttempt.id,
+      label: latestAttempt.taskType,
+      destination: 'practice' as ModuleId,
+      recordedAt: latestAttempt.timestamp,
+    }] : []),
+    ...(latestMock ? [{
+      id: latestMock.id,
+      label: latestMock.testTitle,
+      destination: 'mock_test' as ModuleId,
+      recordedAt: latestMock.completedDate,
+    }] : []),
+  ]
+    .sort((left, right) => Date.parse(right.recordedAt) - Date.parse(left.recordedAt))
+    .slice(0, 3)
+    .map(({ recordedAt: _recordedAt, ...item }) => item);
+  const dueDestination: ModuleId = dueMistakes.length > 0 ? 'review_progress' : 'vocabulary';
 
   const model = buildEvidenceDockModel({
     activeModule,
@@ -194,10 +198,27 @@ export function EvidenceDock() {
         {model.sections.map((section) => (
           <section key={section.id} id={section.id} className="omni-evidence-dock__section">
             <h3 className="omni-evidence-dock__section-title">{section.title}</h3>
-            {section.id === 'system-due' && totalDue > 0 && (
-              <p className="omni-evidence-dock__due-total">{totalDue}</p>
-            )}
-            {section.items.length === 0 ? (
+            {section.id === 'system-due' ? totalDue > 0 ? (
+              <>
+                <p className="omni-evidence-dock__due-description">Ưu tiên những mục đã đến lịch ôn hôm nay.</p>
+                <p className="omni-evidence-dock__due-total">{totalDue}</p>
+                <button
+                  type="button"
+                  className="omni-evidence-dock__due-action"
+                  data-ux-flow="app.navigation"
+                  data-ux-control="shell.evidence.open-due-summary"
+                  onClick={() => openDestination(dueDestination)}
+                >
+                  <span>Ôn tập ngay</span>
+                  <ArrowRight aria-hidden="true" />
+                </button>
+              </>
+            ) : (
+              <div className="omni-evidence-dock__empty-card">
+                <CircleAlert aria-hidden="true" className="w-4 h-4 text-stone-400" />
+                <p className="omni-evidence-dock__empty">Không có việc đến hạn hôm nay.</p>
+              </div>
+            ) : section.items.length === 0 ? (
               <div className="omni-evidence-dock__empty-card">
                 <CircleAlert aria-hidden="true" className="w-4 h-4 text-stone-400" />
                 <p className="omni-evidence-dock__empty">
@@ -231,14 +252,14 @@ export function EvidenceDock() {
             )}
           </section>
         ))}
-        {currentMedia && (
+        {currentMedia && activeModule !== 'media' && (
           <section id="continue-learning" className="omni-evidence-dock__section omni-evidence-dock__continue">
             <h3 className="omni-evidence-dock__section-title">Tiếp tục học</h3>
             <button
               type="button"
               className="omni-evidence-dock__item"
               data-ux-flow="app.navigation"
-              data-ux-control="shell.evidence.open-media"
+              data-ux-control="shell.evidence.open-resumable-media"
               onClick={() => openDestination('media')}
             >
               <BookOpenCheck aria-hidden="true" className="omni-evidence-dock__item-icon" />

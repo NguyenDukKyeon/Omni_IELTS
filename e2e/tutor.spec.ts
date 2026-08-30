@@ -11,7 +11,8 @@ test('AI Tutor sends a learner question and renders the structured response', as
     }),
   }));
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open AI Tutor' }).click();
+  await page.locator('[data-ux-control="shell.header.open-account-menu"]').click();
+  await page.locator('[data-ux-control="shell.header.open-tutor"]').click();
   const input = page.getByRole('textbox', { name: /Hỏi về/ });
   await input.fill('Tôi nên cải thiện Writing như thế nào?');
   await page.getByRole('button', { name: 'Gửi câu hỏi' }).click();

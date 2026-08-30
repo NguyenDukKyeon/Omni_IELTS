@@ -218,6 +218,8 @@ function shellControl(
 
 export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('shell.header.home', 'app.navigation', 'AppHeader', 'Open OMNI Home', 'any shell route', 'dashboard'),
+  shellControl('shell.header.open-review', 'app.navigation', 'AppHeader', 'Open due review from the notification control', 'any shell route', 'review_progress'),
+  shellControl('shell.header.open-account-menu', 'app.navigation', 'AppHeader', 'Open or close the account tools menu', 'account tools menu closed or open', 'account tools menu toggled', ['Update account menu presentation state'], ['storage_unavailable'], ['Activate the account control again']),
   shellControl('shell.header.open-tutor', 'tutor.chat', 'AppHeader', 'Open AI Tutor', 'tutor closed', 'tutor open', ['Open the contextual Tutor panel']),
   shellControl('shell.theme.open', 'app.navigation', 'ThemeMenu', 'Open theme choices', 'theme menu closed', 'theme menu open', ['Set theme menu open']),
   shellControl('shell.theme.system', 'app.navigation', 'ThemeMenu', 'Choose system theme', 'theme menu open', 'system theme active', ['Persist theme preference']),
@@ -242,6 +244,8 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('dashboard.coach.alternative-2', 'dashboard.daily', 'DailyCoachCard', 'Open the second alternative', 'dashboard with alternatives', 'second alternative destination or chooser', ['Navigate to the selected alternative']),
   shellControl('dashboard.coach.plan-manual-module', 'dashboard.daily', 'DailyCoachCard', 'Open module chooser from the daily plan', 'dashboard daily plan visible', 'module chooser open', ['Open the manual module chooser']),
   shellControl('dashboard.coach.plan-source', 'dashboard.daily', 'DailyCoachCard', 'Open Sources from the daily plan', 'dashboard daily plan visible', 'sources', ['Navigate to Sources & Library']),
+  shellControl('dashboard.coach.open-plan-module', 'dashboard.daily', 'DailyCoachCard', 'Open the module chooser from the daily plan footer', 'dashboard daily plan visible', 'module chooser open', ['Open the manual module chooser']),
+  shellControl('dashboard.mobile.open-due-work', 'dashboard.daily', 'DailyCoachCard', 'Open the highest-priority due work on mobile', 'mobile due summary visible', 'review or vocabulary destination', ['Navigate to the learner work due today']),
   shellControl('dashboard.coach.open-evidence', 'dashboard.daily', 'DailyCoachCard', 'Show or hide recommendation evidence', 'evidence disclosure closed or open', 'evidence disclosure toggled', ['Persist no learner evidence; update presentation state'], ['storage_unavailable'], ['Toggle the disclosure again']),
   shellControl('dashboard.open-latest-practice', 'dashboard.daily', 'DashboardView', 'Open latest valid independent Practice evidence', 'valid Practice evidence visible', 'practice route', ['Navigate to IELTS Practice']),
   shellControl('dashboard.open-latest-mock', 'dashboard.daily', 'DashboardView', 'Open latest valid Mock evidence', 'valid Mock evidence visible', 'mock route', ['Navigate to IELTS Mock']),
@@ -256,12 +260,12 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
 
   shellControl('shell.evidence.collapse', 'app.navigation', 'EvidenceDock', 'Collapse learning evidence dock', 'evidence dock open', 'evidence dock collapsed', ['Persist dock preference'], ['storage_unavailable'], ['Expand the evidence dock']),
   shellControl('shell.evidence.expand', 'app.navigation', 'EvidenceDock', 'Expand learning evidence dock', 'evidence dock collapsed', 'evidence dock open', ['Persist dock preference'], ['storage_unavailable'], ['Collapse the evidence dock']),
-  shellControl('shell.evidence.open-due-review', 'app.navigation', 'EvidenceDock', 'Open due mistake review', 'due mistake item visible', 'review_progress'),
-  shellControl('shell.evidence.open-due-vocab', 'app.navigation', 'EvidenceDock', 'Open due vocabulary review', 'due vocabulary item visible', 'vocabulary'),
+  shellControl('shell.evidence.open-due-summary', 'app.navigation', 'EvidenceDock', 'Open the highest-priority due work from the due summary', 'due summary visible', 'review or vocabulary destination'),
   shellControl('shell.evidence.open-context', 'app.navigation', 'EvidenceDock', 'Open the current context action', 'context action visible', 'context destination'),
   shellControl('shell.evidence.open-practice', 'app.navigation', 'EvidenceDock', 'Open recent Practice destination', 'recent Practice evidence visible', 'practice'),
   shellControl('shell.evidence.open-mock', 'app.navigation', 'EvidenceDock', 'Open recent Mock destination', 'recent Mock evidence visible', 'mock_test'),
   shellControl('shell.evidence.open-media', 'app.navigation', 'EvidenceDock', 'Open saved Media lesson', 'saved Media lesson visible', 'media'),
+  shellControl('shell.evidence.open-resumable-media', 'app.navigation', 'EvidenceDock', 'Open the current resumable Media lesson', 'resumable Media lesson visible', 'media'),
 
   shellControl('shell.grammar.tab-grammar', 'grammar.learning', 'GrammarStrategyView', 'Select Grammar curriculum tab', 'strategy tab active', 'grammar tab active', ['Update active curriculum tab']),
   shellControl('shell.grammar.tab-strategy', 'grammar.learning', 'GrammarStrategyView', 'Select IELTS Strategy tab', 'grammar tab active', 'strategy tab active', ['Update active curriculum tab']),

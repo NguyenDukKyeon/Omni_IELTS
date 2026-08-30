@@ -90,8 +90,8 @@ async function run() {
 </head>
 <body>
   <div class="header">
-    <h1>OMNI Focus Dock · Visual review comparison (Pass 3)</h1>
-    <p>Approved reference against deterministic build captures. Composition review only; not a pixel baseline.</p>
+    <h1>OMNI Focus Dock · Visual reference comparison (Pass 4)</h1>
+    <p>Approved reference against deterministic build captures. Regional surfaces, dashboard composition, and mobile density are reviewed at the same interaction state.</p>
   </div>
   <div class="grid">
     <div style="display: flex; flex-direction: column; gap: 28px;">

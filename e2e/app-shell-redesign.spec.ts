@@ -32,6 +32,8 @@ const SHELL_CONTROL_IDS = [
   'dashboard.coach.alternative-2',
   'dashboard.coach.plan-manual-module',
   'dashboard.coach.plan-source',
+  'dashboard.coach.open-plan-module',
+  'dashboard.mobile.open-due-work',
   'dashboard.coach.open-evidence',
   'dashboard.open-latest-practice',
   'dashboard.open-latest-mock',
@@ -45,12 +47,12 @@ const SHELL_CONTROL_IDS = [
   'shell.chooser.module-review',
   'shell.evidence.collapse',
   'shell.evidence.expand',
-  'shell.evidence.open-due-review',
-  'shell.evidence.open-due-vocab',
+  'shell.evidence.open-due-summary',
   'shell.evidence.open-context',
   'shell.evidence.open-practice',
   'shell.evidence.open-mock',
   'shell.evidence.open-media',
+  'shell.evidence.open-resumable-media',
   'shell.grammar.tab-grammar',
   'shell.grammar.tab-strategy',
   'review.open-due-workout',
@@ -178,6 +180,9 @@ test('desktop shell controls activate real navigation, disclosure, theme, and re
   await activate(page, 'dashboard.coach.plan-manual-module');
   await expect(page.getByRole('dialog', { name: 'Chọn module học tập' })).toBeVisible();
   await activate(page, 'shell.chooser.close');
+  await activate(page, 'dashboard.coach.open-plan-module');
+  await expect(page.getByRole('dialog', { name: 'Chọn module học tập' })).toBeVisible();
+  await activate(page, 'shell.chooser.close');
   await activate(page, 'dashboard.coach.plan-source');
   await expect(page.getByRole('heading', { name: /Nguồn Học Liệu/ }).first()).toBeVisible();
   await activate(page, 'shell.nav.dashboard');
@@ -199,11 +204,8 @@ test('desktop shell controls activate real navigation, disclosure, theme, and re
 
   await activate(page, 'dashboard.coach.open-evidence');
   await expect(page.locator('.omni-daily-coach__evidence')).toBeVisible();
-  await activate(page, 'shell.evidence.open-due-review');
+  await activate(page, 'shell.evidence.open-due-summary');
   await expect(page.locator('#review-progress-view')).toBeVisible();
-  await activate(page, 'shell.nav.dashboard');
-  await activate(page, 'shell.evidence.open-due-vocab');
-  await expect(page.getByRole('heading', { name: /Kho Từ Vựng/ }).first()).toBeVisible();
   await activate(page, 'shell.nav.dashboard');
   await activate(page, 'shell.evidence.open-context');
   await expect(page.locator('#ielts_practice_view')).toBeVisible();
@@ -236,6 +238,8 @@ test('desktop shell controls activate valid evidence and review destinations', a
   await activate(page, 'shell.evidence.open-practice');
   await expect(page.locator('#ielts_practice_view')).toBeVisible();
   await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'shell.evidence.open-resumable-media');
+  await expect(page.getByRole('heading', { name: /Media Lab/ }).first()).toBeVisible();
   await activate(page, 'shell.evidence.open-media');
   await expect(page.getByRole('heading', { name: /Media Lab/ }).first()).toBeVisible();
   await activate(page, 'shell.nav.dashboard');
@@ -378,6 +382,9 @@ test('mobile shell controls activate all five destinations, grouped sheets, them
 
   await activate(page, 'shell.mobile.home');
   await expect(page.locator('#dashboard-view')).toBeVisible();
+  await activate(page, 'dashboard.mobile.open-due-work');
+  await expect(page.locator('#review-progress-view')).toBeVisible();
+  await activate(page, 'shell.mobile.home');
 
   await activate(page, 'shell.mobile.learn');
   await expect(page.getByRole('dialog', { name: 'Learn' })).toBeVisible();
@@ -469,8 +476,10 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
       const navRect = bottomNav?.getBoundingClientRect();
       const main = document.getElementById('main-viewport-content');
       const mainRect = main?.getBoundingClientRect();
-      const planRow = document.querySelector('.omni-daily-coach__plan-row');
-      const planRowHeight = planRow?.getBoundingClientRect().height ?? 0;
+      const plan = document.querySelector('.omni-daily-coach__plan');
+      const planRowsVisible = Boolean(plan && getComputedStyle(plan).display !== 'none');
+      const mobileSignal = document.querySelector('.omni-daily-coach__mobile-signal');
+      const mobileDueCard = document.querySelector('.omni-daily-coach__mobile-due');
 
       return {
         viewportWidth: window.innerWidth,
@@ -481,7 +490,9 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
         ctaVisibleInViewport: Boolean(ctaRect && ctaRect.top >= 0 && ctaRect.bottom <= window.innerHeight),
         bottomNavVisible: Boolean(navRect && navRect.top < window.innerHeight),
         mainWidth: mainRect?.width ?? 0,
-        planRowHeight,
+        planRowsVisible,
+        hasCompactMobileSignal: Boolean(mobileSignal),
+        hasMobileDueCard: Boolean(mobileDueCard),
       };
     });
 
@@ -492,8 +503,9 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
     expect(mobileLayout.ctaVisibleInViewport).toBe(true);
     expect(mobileLayout.bottomNavVisible).toBe(true);
     expect(mobileLayout.mainWidth).toBeGreaterThan(mobileLayout.viewportWidth * 0.8);
-    expect(mobileLayout.planRowHeight).toBeLessThanOrEqual(72);
-    expect(mobileLayout.planRowHeight).toBeGreaterThanOrEqual(48);
+    expect(mobileLayout.planRowsVisible).toBe(false);
+    expect(mobileLayout.hasCompactMobileSignal).toBe(true);
+    expect(mobileLayout.hasMobileDueCard).toBe(true);
   } else {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
@@ -513,6 +525,8 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
       const primaryCta = document.querySelector('[data-ux-control="dashboard.coach.primary"]');
       const ctaRect = primaryCta?.getBoundingClientRect();
       const focusGrid = document.querySelector('.omni-daily-coach__focus-grid');
+       const coach = document.querySelector('.omni-daily-coach');
+       const coachRect = coach?.getBoundingClientRect();
        const focusMain = document.querySelector('.omni-daily-coach__focus-main');
        const focusSignal = document.querySelector('.omni-daily-coach__focus-signal');
        const signalValue = document.querySelector('.omni-focus-signal__value')?.textContent || '';
@@ -520,7 +534,9 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
        const focusSignalRect = focusSignal?.getBoundingClientRect();
        const planRows = Array.from(document.querySelectorAll('.omni-daily-coach__plan-row'));
        const planRowHeight = planRows[0]?.getBoundingClientRect().height ?? 0;
-       const emptyCards = document.querySelectorAll('.omni-evidence-dock__empty-card');
+      const emptyCards = document.querySelectorAll('.omni-evidence-dock__empty-card');
+      const dueItems = document.querySelectorAll('#system-due .omni-evidence-dock__list-item');
+      const dueSummaryAction = document.querySelector('[data-ux-control="shell.evidence.open-due-summary"]');
 
       const leftMargin = frameRect?.left ?? 0;
       const rightMargin = window.innerWidth - (frameRect?.right ?? window.innerWidth);
@@ -535,7 +551,8 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
         isCentered,
         navWidth: navRect?.width ?? 0,
         dockWidth: dockRect?.width ?? 0,
-        mainWidth: mainRect?.width ?? 0,
+         mainWidth: mainRect?.width ?? 0,
+         coachWidth: coachRect?.width ?? 0,
         titleToCtaDistance,
          hasTwoZoneGrid,
          signalValue,
@@ -544,6 +561,8 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
          planRowHeight,
          planRowsAreButtons: planRows.length === 3 && planRows.every((row) => row.tagName === 'BUTTON'),
          emptyCardCount: emptyCards.length,
+         dueItemCount: dueItems.length,
+         hasDueSummaryAction: Boolean(dueSummaryAction),
       };
     });
 
@@ -554,6 +573,8 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
     expect(desktopLayout.dockWidth).toBeGreaterThanOrEqual(220);
     expect(desktopLayout.dockWidth).toBeLessThanOrEqual(250);
     expect(desktopLayout.mainWidth).toBeGreaterThanOrEqual(620);
+     expect(desktopLayout.coachWidth).toBeGreaterThanOrEqual(560);
+     expect(desktopLayout.coachWidth).toBeLessThanOrEqual(660);
      expect(desktopLayout.titleToCtaDistance).toBeLessThan(120);
      expect(desktopLayout.hasTwoZoneGrid).toBe(true);
      expect(desktopLayout.signalValue.length).toBeGreaterThan(0);
@@ -561,10 +582,12 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
      expect(desktopLayout.focusMainShare).toBeLessThanOrEqual(0.70);
      expect(desktopLayout.focusSignalShare).toBeGreaterThanOrEqual(0.30);
      expect(desktopLayout.focusSignalShare).toBeLessThanOrEqual(0.42);
-     expect(desktopLayout.planRowHeight).toBeLessThanOrEqual(68);
+     expect(desktopLayout.planRowHeight).toBeLessThanOrEqual(84);
      expect(desktopLayout.planRowHeight).toBeGreaterThanOrEqual(48);
      expect(desktopLayout.planRowsAreButtons).toBe(true);
      expect(desktopLayout.emptyCardCount).toBeLessThanOrEqual(1);
+     expect(desktopLayout.dueItemCount).toBe(0);
+     expect(desktopLayout.hasDueSummaryAction).toBe(true);
   }
 });
 
@@ -699,6 +722,7 @@ test('Theme menu Escape does not collapse Evidence Dock', async ({ page }, testI
   const dock = page.getByRole('complementary', { name: 'Bằng chứng và việc đến hạn' });
   await expect(dock.getByRole('button', { name: 'Thu gọn' })).toBeVisible();
 
+  await page.getByRole('button', { name: 'Mở tài khoản và công cụ' }).click();
   await page.getByRole('button', { name: 'Giao diện' }).click();
   await expect(page.getByRole('menu', { name: 'Chọn giao diện' })).toBeVisible();
   await page.keyboard.press('Escape');

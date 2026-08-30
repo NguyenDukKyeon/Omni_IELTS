@@ -29,6 +29,17 @@ describe('OMNI brand contracts', () => {
     expect(shell).not.toContain('--omni-shell-border: #e6e1d9;');
   });
 
+  it('assigns a distinct cool surface to each Focus Dock region', () => {
+    const shell = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+
+    expect(shell).toContain('--omni-shell-frame-surface: #ffffff;');
+    expect(shell).toContain('--omni-shell-main-surface: #ffffff;');
+    expect(shell).toContain('--omni-shell-dock-surface: #f8fafc;');
+    expect(shell).toContain('--omni-shell-row-surface: #ffffff;');
+    expect(shell).toContain('--omni-shell-due-surface: #fff6f6;');
+    expect(shell).toContain('--omni-shell-due-border: #f7c5c7;');
+  });
+
   it('ships a path-only wordmark and no embedded raster', () => {
     const svg = readFileSync(
       resolve(process.cwd(), 'src/assets/brand/omni-wordmark.svg'),

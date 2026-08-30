@@ -14,6 +14,38 @@ function daysUntilExam(examDate: string): number | null {
   return Math.max(0, Math.ceil((target.getTime() - today.getTime()) / 86_400_000));
 }
 
+function DailyCoachPlanRowContent({
+  action,
+  icon: Icon,
+  fallbackMeta,
+}: {
+  action: DailyCoachAction;
+  icon: typeof BookOpen;
+  fallbackMeta: string;
+}) {
+  return (
+    <>
+      <div className="omni-daily-coach__plan-row-main">
+        <div className="omni-daily-coach__plan-row-icon">
+          <Icon aria-hidden="true" />
+        </div>
+        <div className="omni-daily-coach__plan-row-text">
+          <strong>{action.title}</strong>
+          <span>{action.reason}</span>
+        </div>
+      </div>
+      <div className="omni-daily-coach__plan-row-meta">
+        <span>
+          {typeof action.estimatedMinutes === 'number'
+            ? `${action.estimatedMinutes} phút`
+            : fallbackMeta}
+        </span>
+        <ChevronRight aria-hidden="true" />
+      </div>
+    </>
+  );
+}
+
 export function DailyCoachCard() {
   const {
     profile,
@@ -57,27 +89,6 @@ export function DailyCoachCard() {
     estimatedMinutes: 12,
     confidence: 'medium',
   };
-  const planRows = [
-    {
-      action: firstAlternative,
-      control: 'dashboard.coach.alternative-1',
-      icon: BookOpen,
-      fallbackMeta: 'Nhiệm vụ',
-    },
-    {
-      action: sourceAction,
-      control: 'dashboard.coach.plan-source',
-      icon: FilePlus2,
-      fallbackMeta: 'Tạo mới',
-    },
-    {
-      action: secondAlternative,
-      control: 'dashboard.coach.plan-manual-module',
-      icon: Layers,
-      fallbackMeta: 'Tự chọn',
-    },
-  ] as const;
-
   // Truthful FocusSignal calculation
   const isDueReviewState = dueMistakes.length > 0;
   const isDueVocabState = !isDueReviewState && dueVocab.length > 0;
@@ -111,6 +122,11 @@ export function DailyCoachCard() {
   const signalDetail = totalDueCount > 0
     ? `${selectedDueCount} trong ${totalDueCount} việc cần ôn hôm nay`
     : 'Chưa có việc đến hạn';
+  const dueDestination = dueMistakes.length > 0 ? 'review_progress' : 'vocabulary';
+  const mobileSignalText = totalDueCount > 0
+    ? `${selectedDueCount}/${totalDueCount}`
+    : '—';
+  const mobileSignalWidth = `${Math.round(ringFraction * 100)}%`;
 
   return (
     <section className="omni-daily-coach" aria-label="Daily Coach" data-ux-scope="app-shell-v2">
@@ -161,6 +177,28 @@ export function DailyCoachCard() {
                 data-confidence={model.primary.confidence}
               >
                 {model.primary.confidence === 'low' ? 'Độ tin cậy thấp' : 'Bám bằng chứng học tập'}
+              </span>
+            </div>
+          </div>
+
+          <div
+            className="omni-daily-coach__mobile-signal"
+            aria-label={signalAriaLabel}
+            data-total-due={totalDueCount}
+            data-selected-due={selectedDueCount}
+          >
+            <span className="omni-daily-coach__mobile-signal-label">Việc cần ưu tiên</span>
+            <div className="omni-daily-coach__mobile-signal-summary">
+              <strong>{mobileSignalText}</strong>
+              <span
+                className="omni-daily-coach__mobile-meter"
+                role="meter"
+                aria-label="Tỷ lệ việc được ưu tiên trong lịch ôn hôm nay"
+                aria-valuemin={0}
+                aria-valuemax={Math.max(totalDueCount, 1)}
+                aria-valuenow={selectedDueCount}
+              >
+                <span style={{ width: mobileSignalWidth }} />
               </span>
             </div>
           </div>
@@ -226,44 +264,78 @@ export function DailyCoachCard() {
         </div>
       </div>
 
+      {totalDueCount > 0 && (
+        <section className="omni-daily-coach__mobile-due" aria-label="Việc đến hạn hôm nay">
+          <div className="omni-daily-coach__mobile-due-copy">
+            <span className="omni-daily-coach__mobile-due-icon"><Clock aria-hidden="true" /></span>
+            <div>
+              <strong>{totalDueCount} việc đến hạn</strong>
+              <p>Ưu tiên ôn tập theo lịch và bằng chứng học tập.</p>
+            </div>
+          </div>
+          <div className="omni-daily-coach__mobile-due-action">
+            <strong>{totalDueCount}</strong>
+            <button
+              type="button"
+              data-ux-flow="dashboard.daily"
+              data-ux-control="dashboard.mobile.open-due-work"
+              onClick={() => setActiveModule(dueDestination)}
+            >
+              <span>Ôn tập ngay</span>
+              <ArrowRight aria-hidden="true" />
+            </button>
+          </div>
+        </section>
+      )}
+
       <div className="omni-daily-coach__plan">
         <h3 className="omni-daily-coach__plan-title">Kế hoạch hôm nay</h3>
         <div className="omni-daily-coach__plan-list">
-          {planRows.map(({ action, control, icon: Icon, fallbackMeta }) => (
-            <button
-              key={action.id}
-              type="button"
-              className="omni-daily-coach__plan-row"
-              data-ux-flow="dashboard.daily"
-              data-ux-control={control}
-              onClick={() => runAction(action)}
-            >
-              <div className="omni-daily-coach__plan-row-main">
-                <div className="omni-daily-coach__plan-row-icon">
-                  <Icon aria-hidden="true" />
-                </div>
-                <div className="omni-daily-coach__plan-row-text">
-                  <strong>{action.title}</strong>
-                  <span>{action.reason}</span>
-                </div>
-              </div>
-              <div className="omni-daily-coach__plan-row-meta">
-                <span>
-                  {typeof action.estimatedMinutes === 'number'
-                    ? `${action.estimatedMinutes} phút`
-                    : fallbackMeta}
-                </span>
-                <ChevronRight aria-hidden="true" />
-              </div>
-            </button>
-          ))}
+          <button
+            type="button"
+            className="omni-daily-coach__plan-row"
+            data-ux-flow="dashboard.daily"
+            data-ux-control="dashboard.coach.alternative-1"
+            onClick={() => runAction(firstAlternative)}
+          >
+            <DailyCoachPlanRowContent action={firstAlternative} icon={BookOpen} fallbackMeta="Nhiệm vụ" />
+          </button>
+          <button
+            type="button"
+            className="omni-daily-coach__plan-row"
+            data-ux-flow="dashboard.daily"
+            data-ux-control="dashboard.coach.plan-source"
+            onClick={() => runAction(sourceAction)}
+          >
+            <DailyCoachPlanRowContent action={sourceAction} icon={FilePlus2} fallbackMeta="Tạo mới" />
+          </button>
+          <button
+            type="button"
+            className="omni-daily-coach__plan-row"
+            data-ux-flow="dashboard.daily"
+            data-ux-control="dashboard.coach.plan-manual-module"
+            onClick={() => runAction(secondAlternative)}
+          >
+            <DailyCoachPlanRowContent action={secondAlternative} icon={Layers} fallbackMeta="Tự chọn" />
+          </button>
         </div>
       </div>
 
       {examDays !== null && (
         <footer className="omni-daily-coach__deadline">
-          <CalendarDays aria-hidden="true" />
-          <span>Còn {examDays} ngày thi</span>
+          <span className="omni-daily-coach__deadline-copy">
+            <CalendarDays aria-hidden="true" />
+            <span>Còn {examDays} ngày thi</span>
+          </span>
+          <button
+            type="button"
+            data-ux-flow="dashboard.daily"
+            data-ux-control="dashboard.coach.open-plan-module"
+            onClick={() => setChooserOpen(true)}
+          >
+            <span>Chọn hướng học</span>
+            <ArrowRight aria-hidden="true" />
+          </button>
         </footer>
       )}
 

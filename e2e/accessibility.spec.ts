@@ -87,16 +87,17 @@ test('System, Light, Dark, High Contrast, offline copy, and evidence status reta
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/dark/);
 
-  await page.getByRole('button', { name: 'Giao diện' }).click();
+  await page.locator('[data-ux-control="shell.header.open-account-menu"]').click();
+  await page.locator('[data-ux-control="shell.theme.open"]').click();
   await page.locator('[data-ux-control="shell.theme.light"]').click();
   await expect(page.locator('html')).not.toHaveClass(/dark/);
-  await page.getByRole('button', { name: 'Giao diện' }).click();
+  await page.locator('[data-ux-control="shell.theme.open"]').click();
   await page.locator('[data-ux-control="shell.theme.dark"]').click();
   await expect(page.locator('html')).toHaveClass(/dark/);
-  await page.getByRole('button', { name: 'Giao diện' }).click();
+  await page.locator('[data-ux-control="shell.theme.open"]').click();
   await page.locator('[data-ux-control="shell.theme.high-contrast"]').click();
   await expect(page.locator('html')).toHaveClass(/high-contrast/);
-  await page.getByRole('button', { name: 'Giao diện' }).click();
+  await page.locator('[data-ux-control="shell.theme.open"]').click();
   await page.locator('[data-ux-control="shell.theme.system"]').click();
   await expect(page.locator('html')).toHaveClass(/dark/);
   await page.emulateMedia({ colorScheme: 'light' });
@@ -111,9 +112,9 @@ test('System, Light, Dark, High Contrast, offline copy, and evidence status reta
   await page.waitForTimeout(250);
   await expect(offlineStatus).toHaveCount(1);
 
-  const dueItem = page.locator('li[data-status="due"]').first();
-  await expect(dueItem.locator('svg')).toHaveCount(1);
-  await expect(dueItem).toContainText(/lỗi đến hạn|từ đến hạn/);
+  const dueSummary = page.locator('#system-due');
+  await expect(dueSummary).toContainText('Đến hạn');
+  await expect(dueSummary.locator('[data-ux-control="shell.evidence.open-due-summary"]')).toBeVisible();
 });
 
 test('Mobile sheets trap focus, make the background inert, and restore Escape focus', async ({ page }, testInfo) => {

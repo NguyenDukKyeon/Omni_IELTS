@@ -29,7 +29,8 @@ export async function navigateToModule(page: Page, module: NavigableModule) {
   const mobile = await isMobileNavVisible(page);
   if (!mobile) {
     if (module === 'profile') {
-      await page.locator('#profile-nav-btn').click();
+      await page.locator('[data-ux-control="shell.header.open-account-menu"]').click();
+      await page.locator('[data-ux-control="shell.header.open-profile"]').click();
       return;
     }
     if (module === 'dashboard') {
