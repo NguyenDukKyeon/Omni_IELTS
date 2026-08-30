@@ -40,7 +40,7 @@ export function ThemeMenu() {
   };
 
   return (
-    <div className="omni-theme-menu" ref={menuRef}>
+    <div className="omni-theme-menu" ref={menuRef} data-ux-scope="app-shell-v2">
       <button
         ref={triggerRef}
         type="button"

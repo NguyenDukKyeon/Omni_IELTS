@@ -8,7 +8,7 @@ export function AppHeader() {
   const { setActiveModule, setIsAITutorOpen, activeModule } = useApp();
 
   return (
-    <header id="app-header" className="omni-shell-header">
+    <header id="app-header" className="omni-shell-header" data-ux-scope="app-shell-v2">
       <button
         type="button"
         id="brand-home-btn"

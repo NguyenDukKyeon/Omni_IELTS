@@ -8,11 +8,17 @@ export interface MobileSheetItem {
   onSelect: () => void;
 }
 
+export type MobileSheetCloseControl =
+  | 'shell.mobile.learn.sheet-close'
+  | 'shell.mobile.practice.sheet-close'
+  | 'shell.mobile.more.sheet-close';
+
 export interface MobileModuleSheetProps {
   open: boolean;
   title: string;
   titleId: string;
   items: MobileSheetItem[];
+  closeControl: MobileSheetCloseControl;
   onClose: () => void;
   children?: ReactNode;
 }
@@ -22,6 +28,7 @@ export function MobileModuleSheet({
   title,
   titleId,
   items,
+  closeControl,
   onClose,
   children,
 }: MobileModuleSheetProps) {
@@ -33,7 +40,8 @@ export function MobileModuleSheet({
     if (!open) return undefined;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusFirst = () => {
-      panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+      const first = panelRef.current?.querySelector('button') as HTMLButtonElement | null;
+      first?.focus();
     };
     const timer = window.setTimeout(focusFirst, 0);
 
@@ -44,7 +52,7 @@ export function MobileModuleSheet({
         return;
       }
       if (event.key !== 'Tab' || !panelRef.current) return;
-      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLButtonElement>('button'));
+      const focusable = Array.from(panelRef.current.querySelectorAll('button')) as HTMLButtonElement[];
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -70,6 +78,7 @@ export function MobileModuleSheet({
   return (
     <div
       className="omni-module-chooser"
+      data-ux-scope="app-shell-v2"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -83,31 +92,48 @@ export function MobileModuleSheet({
       >
         <header className="omni-module-chooser__header">
           <h2 id={titleId}>{title}</h2>
-          <button
-            type="button"
-            className="omni-module-chooser__close"
-            data-ux-flow="app.navigation"
-            data-ux-control="shell.mobile.sheet-close"
-            onClick={onClose}
-          >
-            Đóng
-          </button>
+          {closeControl === 'shell.mobile.learn.sheet-close' ? (
+            <button type="button" className="omni-module-chooser__close" data-ux-flow="app.navigation" data-ux-control="shell.mobile.learn.sheet-close" onClick={onClose}>Đóng</button>
+          ) : closeControl === 'shell.mobile.practice.sheet-close' ? (
+            <button type="button" className="omni-module-chooser__close" data-ux-flow="app.navigation" data-ux-control="shell.mobile.practice.sheet-close" onClick={onClose}>Đóng</button>
+          ) : (
+            <button type="button" className="omni-module-chooser__close" data-ux-flow="app.navigation" data-ux-control="shell.mobile.more.sheet-close" onClick={onClose}>Đóng</button>
+          )}
         </header>
         <ul className="omni-module-chooser__list">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="omni-module-chooser__item"
-                data-ux-flow="app.navigation"
-                data-ux-control={item.control}
-                onClick={item.onSelect}
-              >
+          {items.map((item) => {
+            const content = (
+              <>
                 <strong>{item.label}</strong>
                 {item.description ? <span>{item.description}</span> : null}
-              </button>
-            </li>
-          ))}
+              </>
+            );
+            if (item.control === 'shell.mobile.learn-sources') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.learn-sources" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.learn-vocabulary') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.learn-vocabulary" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.learn-grammar') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.learn-grammar" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.learn-media') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.learn-media" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.practice-practice') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.practice-practice" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.practice-mock') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.practice-mock" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.more-tutor') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="tutor.chat" data-ux-control="shell.mobile.more-tutor" onClick={item.onSelect}>{content}</button></li>;
+            }
+            if (item.control === 'shell.mobile.more-profile') {
+              return <li key={item.id}><button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.mobile.more-profile" onClick={item.onSelect}>{content}</button></li>;
+            }
+            return null;
+          })}
         </ul>
         {children}
       </div>

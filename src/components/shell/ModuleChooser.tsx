@@ -2,16 +2,6 @@ import { useEffect, useRef } from 'react';
 import { CANONICAL_MODULES } from '../../lib/appShell';
 import type { ModuleId } from '../../types';
 
-function chooserControl(id: (typeof CANONICAL_MODULES)[number]['id']): string {
-  if (id === 'sources') return 'shell.chooser.module-sources';
-  if (id === 'vocabulary') return 'shell.chooser.module-vocabulary';
-  if (id === 'grammar') return 'shell.chooser.module-grammar';
-  if (id === 'media') return 'shell.chooser.module-media';
-  if (id === 'practice') return 'shell.chooser.module-practice';
-  if (id === 'mock_test') return 'shell.chooser.module-mock';
-  return 'shell.chooser.module-review';
-}
-
 export interface ModuleChooserProps {
   open: boolean;
   onClose: () => void;
@@ -27,7 +17,8 @@ export function ModuleChooser({ open, onClose, onSelect }: ModuleChooserProps) {
     if (!open) return undefined;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusFirst = () => {
-      panelRef.current?.querySelector<HTMLButtonElement>('button[data-ux-control^="shell.chooser.module-"]')?.focus();
+      const first = panelRef.current?.querySelector('button[data-ux-control^="shell.chooser.module-"]') as HTMLButtonElement | null;
+      first?.focus();
     };
     const timer = window.setTimeout(focusFirst, 0);
 
@@ -38,7 +29,7 @@ export function ModuleChooser({ open, onClose, onSelect }: ModuleChooserProps) {
         return;
       }
       if (event.key !== 'Tab' || !panelRef.current) return;
-      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLButtonElement>('button'));
+      const focusable = Array.from(panelRef.current.querySelectorAll('button')) as HTMLButtonElement[];
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -64,6 +55,7 @@ export function ModuleChooser({ open, onClose, onSelect }: ModuleChooserProps) {
   return (
     <div
       className="omni-module-chooser"
+      data-ux-scope="app-shell-v2"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -88,20 +80,61 @@ export function ModuleChooser({ open, onClose, onSelect }: ModuleChooserProps) {
           </button>
         </header>
         <ul className="omni-module-chooser__list">
-          {CANONICAL_MODULES.map((module) => (
-            <li key={module.id}>
-              <button
-                type="button"
-                className="omni-module-chooser__item"
-                data-ux-flow="app.navigation"
-                data-ux-control={chooserControl(module.id)}
-                onClick={() => onSelect(module.id)}
-              >
+          {CANONICAL_MODULES.map((module) => {
+            const content = (
+              <>
                 <strong>{module.label}</strong>
                 <span>{module.description}</span>
-              </button>
-            </li>
-          ))}
+              </>
+            );
+            if (module.id === 'sources') {
+              return (
+                <li key={module.id}>
+                  <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-sources" onClick={() => onSelect(module.id)}>{content}</button>
+                </li>
+              );
+            }
+            if (module.id === 'vocabulary') {
+              return (
+                <li key={module.id}>
+                  <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-vocabulary" onClick={() => onSelect(module.id)}>{content}</button>
+                </li>
+              );
+            }
+            if (module.id === 'grammar') {
+              return (
+                <li key={module.id}>
+                  <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-grammar" onClick={() => onSelect(module.id)}>{content}</button>
+                </li>
+              );
+            }
+            if (module.id === 'media') {
+              return (
+                <li key={module.id}>
+                  <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-media" onClick={() => onSelect(module.id)}>{content}</button>
+                </li>
+              );
+            }
+            if (module.id === 'practice') {
+              return (
+                <li key={module.id}>
+                  <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-practice" onClick={() => onSelect(module.id)}>{content}</button>
+                </li>
+              );
+            }
+            if (module.id === 'mock_test') {
+              return (
+                <li key={module.id}>
+                  <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-mock" onClick={() => onSelect(module.id)}>{content}</button>
+                </li>
+              );
+            }
+            return (
+              <li key={module.id}>
+                <button type="button" className="omni-module-chooser__item" data-ux-flow="app.navigation" data-ux-control="shell.chooser.module-review" onClick={() => onSelect(module.id)}>{content}</button>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>

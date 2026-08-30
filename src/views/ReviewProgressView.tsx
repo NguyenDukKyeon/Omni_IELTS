@@ -33,7 +33,7 @@ export function ReviewProgressView() {
   };
 
   return (
-    <div id="review-progress-view" className="omni-review-progress">
+    <div id="review-progress-view" className="omni-review-progress" data-ux-scope="app-shell-v2">
       <header className="omni-review-progress__header">
         <p className="omni-review-progress__eyebrow">Review & Progress</p>
         <h1>Ôn lỗi đến hạn</h1>

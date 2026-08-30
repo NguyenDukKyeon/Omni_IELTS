@@ -27,6 +27,46 @@ function controlForItem(item: EvidenceDockItem):
   return null;
 }
 
+type EvidenceDockControl = Exclude<ReturnType<typeof controlForItem>, null>;
+
+function EvidenceDockButton({
+  item,
+  control,
+  onOpen,
+}: {
+  item: EvidenceDockItem;
+  control: EvidenceDockControl;
+  onOpen: (destination?: ModuleId) => void;
+}) {
+  const content = (
+    <>
+      <strong>{item.label}</strong>
+      <span>{item.detail}</span>
+    </>
+  );
+  const props = {
+    type: 'button' as const,
+    className: 'omni-evidence-dock__item',
+  };
+
+  if (control === 'shell.evidence.open-due-review') {
+    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-due-review" onClick={() => onOpen(item.destination)}>{content}</button>;
+  }
+  if (control === 'shell.evidence.open-due-vocab') {
+    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-due-vocab" onClick={() => onOpen(item.destination)}>{content}</button>;
+  }
+  if (control === 'shell.evidence.resume-latest') {
+    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.resume-latest" onClick={() => onOpen(item.destination)}>{content}</button>;
+  }
+  if (control === 'shell.evidence.open-practice') {
+    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-practice" onClick={() => onOpen(item.destination)}>{content}</button>;
+  }
+  if (control === 'shell.evidence.open-mock') {
+    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-mock" onClick={() => onOpen(item.destination)}>{content}</button>;
+  }
+  return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-context" onClick={() => onOpen(item.destination)}>{content}</button>;
+}
+
 export function EvidenceDock() {
   const {
     activeModule,
@@ -103,7 +143,7 @@ export function EvidenceDock() {
 
   if (evidenceDock === 'collapsed') {
     return (
-      <aside ref={dockRef} className="omni-evidence-dock is-collapsed" aria-label="Bằng chứng và việc đến hạn">
+      <aside ref={dockRef} className="omni-evidence-dock is-collapsed" aria-label="Bằng chứng và việc đến hạn" data-ux-scope="app-shell-v2">
         <button
           ref={expandRef}
           type="button"
@@ -120,7 +160,7 @@ export function EvidenceDock() {
   }
 
   return (
-    <aside ref={dockRef} className="omni-evidence-dock" aria-label="Bằng chứng và việc đến hạn">
+    <aside ref={dockRef} className="omni-evidence-dock" aria-label="Bằng chứng và việc đến hạn" data-ux-scope="app-shell-v2">
       <header className="omni-evidence-dock__header">
         <div>
           <p className="omni-evidence-dock__eyebrow">Bằng chứng học tập</p>
@@ -151,29 +191,8 @@ export function EvidenceDock() {
                 const clickable = Boolean(item.destination && control);
                 return (
                   <li key={item.id} data-status={item.status}>
-                    {clickable ? (
-                      <button
-                        type="button"
-                        className="omni-evidence-dock__item"
-                        data-ux-flow="app.navigation"
-                        data-ux-control={
-                          control === 'shell.evidence.open-due-review'
-                            ? 'shell.evidence.open-due-review'
-                            : control === 'shell.evidence.open-due-vocab'
-                              ? 'shell.evidence.open-due-vocab'
-                              : control === 'shell.evidence.open-practice'
-                                ? 'shell.evidence.open-practice'
-                                : control === 'shell.evidence.open-mock'
-                                  ? 'shell.evidence.open-mock'
-                                  : control === 'shell.evidence.resume-latest'
-                                    ? 'shell.evidence.resume-latest'
-                                    : 'shell.evidence.open-context'
-                        }
-                        onClick={() => openDestination(item.destination)}
-                      >
-                        <strong>{item.label}</strong>
-                        <span>{item.detail}</span>
-                      </button>
+                    {clickable && control ? (
+                      <EvidenceDockButton item={item} control={control} onOpen={openDestination} />
                     ) : (
                       <div className="omni-evidence-dock__item is-static">
                         <CircleAlert aria-hidden="true" />

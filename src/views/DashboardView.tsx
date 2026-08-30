@@ -24,7 +24,7 @@ export function DashboardView() {
   const mockEvidence = latestMock && isExplicitMockEvidence(latestMock) ? latestMock : null;
 
   return (
-    <div id="dashboard-view" className="omni-dashboard">
+    <div id="dashboard-view" className="omni-dashboard" data-ux-scope="app-shell-v2">
       <header className="omni-dashboard__header">
         <p className="omni-dashboard__eyebrow">Dashboard</p>
         <h1>Hôm nay của {profile.name}</h1>

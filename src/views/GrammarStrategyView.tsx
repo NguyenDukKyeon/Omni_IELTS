@@ -37,14 +37,14 @@ export function GrammarStrategyView() {
   };
 
   return (
-    <div className="omni-grammar-strategy">
+    <div className="omni-grammar-strategy" data-ux-scope="app-shell-v2">
       <div
         className="omni-grammar-strategy__tabs"
         role="tablist"
         aria-label="Grammar and Strategy"
         onKeyDown={onTabListKeyDown}
       >
-        {TABS.map((tab, index) => (
+        {TABS.map((tab, index) => tab.id === 'grammar' ? (
           <button
             key={tab.id}
             ref={(node) => {
@@ -52,13 +52,32 @@ export function GrammarStrategyView() {
             }}
             type="button"
             role="tab"
-            id={`grammar-strategy-tab-${tab.id}`}
+            id="grammar-strategy-tab-grammar"
             aria-selected={activeTab === tab.id}
-            aria-controls={`grammar-strategy-panel-${tab.id}`}
+            aria-controls="grammar-strategy-panel-grammar"
             tabIndex={activeTab === tab.id ? 0 : -1}
             className={`omni-grammar-strategy__tab ${activeTab === tab.id ? 'is-active' : ''}`}
             data-ux-flow="grammar.learning"
-            data-ux-control={tab.id === 'grammar' ? 'shell.grammar.tab-grammar' : 'shell.grammar.tab-strategy'}
+            data-ux-control="shell.grammar.tab-grammar"
+            onClick={() => activate(index)}
+          >
+            {tab.label}
+          </button>
+        ) : (
+          <button
+            key={tab.id}
+            ref={(node) => {
+              tabRefs.current[index] = node;
+            }}
+            type="button"
+            role="tab"
+            id="grammar-strategy-tab-strategy"
+            aria-selected={activeTab === tab.id}
+            aria-controls="grammar-strategy-panel-strategy"
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            className={`omni-grammar-strategy__tab ${activeTab === tab.id ? 'is-active' : ''}`}
+            data-ux-flow="grammar.learning"
+            data-ux-control="shell.grammar.tab-strategy"
             onClick={() => activate(index)}
           >
             {tab.label}

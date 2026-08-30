@@ -1,9 +1,263 @@
-import { expect, test } from './fixtures';
+import { expect, test, type Page } from './fixtures';
 import { navigateToModule } from './helpers/navigation';
 
 function isMobileProject(projectName: string): boolean {
   return projectName.includes('mobile');
 }
+
+// Every UX_CONTROL_CONTRACTS entry is exercised by the desktop/mobile activation tables below.
+const SHELL_CONTROL_IDS = [
+  'shell.header.home',
+  'shell.header.open-tutor',
+  'shell.theme.open',
+  'shell.theme.system',
+  'shell.theme.light',
+  'shell.theme.dark',
+  'shell.theme.high-contrast',
+  'shell.header.open-profile',
+  'shell.nav.dashboard',
+  'shell.nav.sources',
+  'shell.nav.vocabulary',
+  'shell.nav.grammar',
+  'shell.nav.media',
+  'shell.nav.practice',
+  'shell.nav.mock',
+  'shell.nav.review',
+  'shell.nav.collapse',
+  'shell.nav.expand',
+  'dashboard.coach.primary',
+  'dashboard.coach.alternative-1',
+  'dashboard.coach.alternative-2',
+  'dashboard.coach.open-evidence',
+  'dashboard.open-latest-practice',
+  'dashboard.open-latest-mock',
+  'shell.chooser.close',
+  'shell.chooser.module-sources',
+  'shell.chooser.module-vocabulary',
+  'shell.chooser.module-grammar',
+  'shell.chooser.module-media',
+  'shell.chooser.module-practice',
+  'shell.chooser.module-mock',
+  'shell.chooser.module-review',
+  'shell.evidence.collapse',
+  'shell.evidence.expand',
+  'shell.evidence.open-due-review',
+  'shell.evidence.open-due-vocab',
+  'shell.evidence.open-context',
+  'shell.evidence.resume-latest',
+  'shell.evidence.open-practice',
+  'shell.evidence.open-mock',
+  'shell.grammar.tab-grammar',
+  'shell.grammar.tab-strategy',
+  'review.open-due-workout',
+  'review.open-practice-history',
+  'review.open-mock-history',
+  'shell.mobile.home',
+  'shell.mobile.learn',
+  'shell.mobile.practice',
+  'shell.mobile.review',
+  'shell.mobile.more',
+  'shell.mobile.learn.sheet-close',
+  'shell.mobile.learn-sources',
+  'shell.mobile.learn-vocabulary',
+  'shell.mobile.learn-grammar',
+  'shell.mobile.learn-media',
+  'shell.mobile.practice.sheet-close',
+  'shell.mobile.practice-practice',
+  'shell.mobile.practice-mock',
+  'shell.mobile.more.sheet-close',
+  'shell.mobile.more-tutor',
+  'shell.mobile.more-profile',
+  'shell.mobile.theme-system',
+  'shell.mobile.theme-light',
+  'shell.mobile.theme-dark',
+  'shell.mobile.theme-high-contrast',
+] as const;
+
+async function seedValidShellEvidence(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('omni_ielts_practice_v1', JSON.stringify([{
+      id: 'e2e-independent-practice',
+      skill: 'writing',
+      taskType: 'Writing Task 2',
+      evidenceClass: 'independent',
+      status: 'completed',
+      scoreBand: 6.5,
+      timestamp: '2026-08-29T10:00:00.000Z',
+      durationMinutes: 40,
+    }]));
+    localStorage.setItem('omni_ielts_mocks_v1', JSON.stringify([{
+      id: 'e2e-independent-mock',
+      testTitle: 'E2E IELTS-style Mock',
+      evidenceClass: 'mock',
+      status: 'completed',
+      overallBand: 6,
+      listeningBand: 6,
+      readingBand: 6,
+      writingBand: 6,
+      speakingBand: 6,
+      completedDate: '2026-08-29T11:00:00.000Z',
+    }]));
+  });
+}
+
+async function activate(page: Page, controlId: string) {
+  const control = page.locator(`[data-ux-control="${controlId}"]`);
+  await expect(control, `${controlId} should be rendered before activation`).toBeVisible();
+  await control.click();
+}
+
+test('desktop shell controls activate real navigation, disclosure, theme, and recovery transitions', async ({ page }, testInfo) => {
+  test.skip(isMobileProject(testInfo.project.name), 'Desktop shell activation table');
+  expect(new Set(SHELL_CONTROL_IDS).size).toBe(SHELL_CONTROL_IDS.length);
+  await page.goto('/');
+  const navigation = page.getByRole('navigation', { name: 'Điều hướng học tập' });
+
+  await activate(page, 'shell.header.home');
+  await activate(page, 'shell.header.open-tutor');
+  await expect(page.locator('#ai-tutor-drawer')).toBeVisible();
+  await page.locator('#ai-tutor-close-btn').click();
+
+  await activate(page, 'shell.theme.open');
+  await expect(page.getByRole('menu', { name: 'Chọn giao diện' })).toBeVisible();
+  for (const themeControl of [
+    'shell.theme.system',
+    'shell.theme.light',
+    'shell.theme.dark',
+    'shell.theme.high-contrast',
+  ]) {
+    await activate(page, themeControl);
+    await expect(page.getByRole('button', { name: 'Giao diện' })).toBeFocused();
+    if (themeControl !== 'shell.theme.high-contrast') await activate(page, 'shell.theme.open');
+  }
+
+  await activate(page, 'shell.header.open-profile');
+  await expect(page.getByRole('heading', { name: 'Nguyễn Minh Anh', exact: true }).first()).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+
+  const navigationControls = [
+    ['shell.nav.dashboard', 'dashboard'],
+    ['shell.nav.sources', 'sources'],
+    ['shell.nav.vocabulary', 'vocabulary'],
+    ['shell.nav.grammar', 'grammar'],
+    ['shell.nav.media', 'media'],
+    ['shell.nav.practice', 'practice'],
+    ['shell.nav.mock', 'mock_test'],
+    ['shell.nav.review', 'review_progress'],
+  ] as const;
+  for (const [controlId, moduleId] of navigationControls) {
+    await activate(page, controlId);
+    await expect(navigation.locator(`[data-ux-control="${controlId}"]`)).toHaveAttribute('aria-current', 'page');
+    if (moduleId !== 'dashboard') await activate(page, 'shell.nav.dashboard');
+  }
+
+  await activate(page, 'shell.nav.collapse');
+  await expect(navigation.locator('[data-ux-control="shell.nav.expand"]')).toBeVisible();
+  await activate(page, 'shell.nav.expand');
+  await expect(navigation.locator('[data-ux-control="shell.nav.collapse"]')).toBeVisible();
+
+  await activate(page, 'dashboard.coach.primary');
+  await expect(page.locator('#review-progress-view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'dashboard.coach.alternative-1');
+  await expect(page.getByRole('heading', { name: /Kho Từ Vựng/ }).first()).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'dashboard.coach.alternative-2');
+  await expect(page.getByRole('dialog', { name: 'Chọn module học tập' })).toBeVisible();
+  await activate(page, 'shell.chooser.close');
+
+  for (const [controlId, moduleId] of [
+    ['shell.chooser.module-sources', 'sources'],
+    ['shell.chooser.module-vocabulary', 'vocabulary'],
+    ['shell.chooser.module-grammar', 'grammar'],
+    ['shell.chooser.module-media', 'media'],
+    ['shell.chooser.module-practice', 'practice'],
+    ['shell.chooser.module-mock', 'mock_test'],
+    ['shell.chooser.module-review', 'review_progress'],
+  ] as const) {
+    await activate(page, 'dashboard.coach.alternative-2');
+    await activate(page, controlId);
+    await expect(navigation.locator(`[data-ux-control="shell.nav.${moduleId === 'mock_test' ? 'mock' : moduleId === 'review_progress' ? 'review' : moduleId}"]`)).toHaveAttribute('aria-current', 'page');
+    await activate(page, 'shell.nav.dashboard');
+  }
+
+  await activate(page, 'dashboard.coach.open-evidence');
+  await expect(page.locator('.omni-daily-coach__evidence')).toBeVisible();
+  await activate(page, 'shell.evidence.open-due-review');
+  await expect(page.locator('#review-progress-view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'shell.evidence.open-due-vocab');
+  await expect(page.getByRole('heading', { name: /Kho Từ Vựng/ }).first()).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'shell.evidence.open-context');
+  await expect(page.locator('#ielts_practice_view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'shell.evidence.collapse');
+  await expect(page.locator('[data-ux-control="shell.evidence.expand"]')).toBeVisible();
+  await activate(page, 'shell.evidence.expand');
+  await expect(page.locator('[data-ux-control="shell.evidence.collapse"]')).toBeVisible();
+
+  await activate(page, 'shell.nav.grammar');
+  await activate(page, 'shell.grammar.tab-strategy');
+  await expect(page.getByRole('tab', { name: 'IELTS Strategy' })).toHaveAttribute('aria-selected', 'true');
+  await activate(page, 'shell.grammar.tab-grammar');
+  await expect(page.getByRole('tab', { name: 'Grammar' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('desktop shell controls activate valid evidence and review destinations', async ({ page }, testInfo) => {
+  test.skip(isMobileProject(testInfo.project.name), 'Desktop evidence activation table');
+  await seedValidShellEvidence(page);
+  await page.goto('/');
+  const navigation = page.getByRole('navigation', { name: 'Điều hướng học tập' });
+
+  await activate(page, 'dashboard.open-latest-practice');
+  await expect(page.locator('#ielts_practice_view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'dashboard.open-latest-mock');
+  await expect(page.getByRole('heading', { name: /Phòng Thi Thử IELTS-style/ })).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+
+  await activate(page, 'shell.evidence.open-practice');
+  await expect(page.locator('#ielts_practice_view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+
+  await activate(page, 'shell.nav.review');
+  await activate(page, 'review.open-due-workout');
+  await expect(page.locator('#unified-mistake-notebook-modal')).toBeVisible();
+  await page.locator('#close-mistake-modal-btn').click();
+  await activate(page, 'shell.nav.dashboard');
+
+  await activate(page, 'shell.nav.review');
+  await activate(page, 'review.open-practice-history');
+  await expect(page.locator('#ielts_practice_view')).toBeVisible();
+  await activate(page, 'shell.nav.review');
+  await activate(page, 'review.open-mock-history');
+  await expect(page.getByRole('heading', { name: /Phòng Thi Thử IELTS-style/ })).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+
+  await page.addInitScript(() => {
+    localStorage.setItem('omni_ielts_practice_v1', JSON.stringify([{
+      id: 'e2e-unfinished-practice',
+      skill: 'reading',
+      taskType: 'Reading Passage 1',
+      status: 'in_progress',
+      evidenceClass: 'assisted',
+      timestamp: '2026-08-29T12:00:00.000Z',
+    }]));
+  });
+  await page.reload();
+  await activate(page, 'shell.evidence.resume-latest');
+  await expect(page.locator('#ielts_practice_view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+
+  await page.addInitScript(() => {
+    localStorage.setItem('omni_ielts_practice_v1', JSON.stringify([]));
+  });
+  await page.reload();
+  await activate(page, 'shell.evidence.open-mock');
+  await expect(page.getByRole('heading', { name: /Phòng Thi Thử IELTS-style/ })).toBeVisible();
+  await expect(navigation).toBeVisible();
+});
 
 test('Focus Dock exposes Dashboard and seven canonical modules without legacy gamification', async ({ page }, testInfo) => {
   test.skip(isMobileProject(testInfo.project.name), 'Desktop rail is deferred on mobile until Task 7');
@@ -98,6 +352,86 @@ test('mobile navigation groups seven modules into five destinations', async ({ p
   await expect(page.getByRole('dialog').getByRole('button', { name: 'AI Tutor' })).toBeVisible();
   await expect(page.getByRole('dialog').getByRole('button', { name: 'Hồ sơ' })).toBeVisible();
   await expect(page.getByRole('dialog').getByRole('radio', { name: 'Sáng' })).toBeVisible();
+});
+
+test('mobile shell controls activate all five destinations, grouped sheets, themes, and recovery', async ({ page }, testInfo) => {
+  test.skip(!isMobileProject(testInfo.project.name), 'Mobile shell activation table');
+  await page.goto('/');
+  const nav = page.getByRole('navigation', { name: 'Điều hướng di động' });
+
+  await activate(page, 'shell.mobile.home');
+  await expect(page.locator('#dashboard-view')).toBeVisible();
+
+  await activate(page, 'shell.mobile.learn');
+  await expect(page.getByRole('dialog', { name: 'Learn' })).toBeVisible();
+  await activate(page, 'shell.mobile.learn.sheet-close');
+  await expect(page.getByRole('dialog', { name: 'Learn' })).toHaveCount(0);
+  await expect(nav.locator('[data-ux-control="shell.mobile.learn"]')).toBeFocused();
+
+  for (const [controlId, heading] of [
+    ['shell.mobile.learn-sources', 'Nguồn Học Liệu (Tạo Bài Học 4 Kỹ Năng)'],
+    ['shell.mobile.learn-vocabulary', 'Kho Từ Vựng & Thuật Toán SRS FSRS-6'],
+    ['shell.mobile.learn-grammar', 'Ngữ Pháp Trọng Điểm IELTS (Grammar for Band 7.0 - 8.5+)'],
+    ['shell.mobile.learn-media', 'Media Lab: Shadowing & Nghe Chép Chính Tả (Dictation)'],
+  ] as const) {
+    await activate(page, 'shell.mobile.home');
+    await activate(page, 'shell.mobile.learn');
+    await activate(page, controlId);
+    await expect(page.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible();
+  }
+
+  await activate(page, 'shell.mobile.home');
+  await activate(page, 'shell.mobile.learn');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Learn' })).toHaveCount(0);
+  await expect(nav.locator('[data-ux-control="shell.mobile.learn"]')).toBeFocused();
+
+  await activate(page, 'shell.mobile.practice');
+  await expect(page.getByRole('dialog', { name: 'Practice' })).toBeVisible();
+  await activate(page, 'shell.mobile.practice.sheet-close');
+  await activate(page, 'shell.mobile.practice');
+  await activate(page, 'shell.mobile.practice-practice');
+  await expect(page.getByRole('heading', { name: /Luyện Tập IELTS/ }).first()).toBeVisible();
+  await activate(page, 'shell.mobile.home');
+  await activate(page, 'shell.mobile.practice');
+  await activate(page, 'shell.mobile.practice-mock');
+  await expect(page.getByRole('heading', { name: /Phòng Thi Thử IELTS-style/ }).first()).toBeVisible();
+  await activate(page, 'shell.mobile.home');
+  await activate(page, 'shell.mobile.practice');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Practice' })).toHaveCount(0);
+  await expect(nav.locator('[data-ux-control="shell.mobile.practice"]')).toBeFocused();
+
+  await activate(page, 'shell.mobile.review');
+  await expect(page.locator('#review-progress-view')).toBeVisible();
+  await activate(page, 'shell.mobile.home');
+
+  await activate(page, 'shell.mobile.more');
+  await expect(page.getByRole('dialog', { name: 'More' })).toBeVisible();
+  await activate(page, 'shell.mobile.more.sheet-close');
+  await activate(page, 'shell.mobile.more');
+  await activate(page, 'shell.mobile.more-tutor');
+  await expect(page.locator('#ai-tutor-drawer')).toBeVisible();
+  await page.locator('#ai-tutor-close-btn').click();
+  await activate(page, 'shell.mobile.more');
+  await activate(page, 'shell.mobile.more-profile');
+  await expect(page.getByRole('heading', { name: 'Nguyễn Minh Anh', exact: true }).first()).toBeVisible();
+  await activate(page, 'shell.mobile.home');
+
+  await activate(page, 'shell.mobile.more');
+  for (const themeControl of [
+    'shell.mobile.theme-system',
+    'shell.mobile.theme-light',
+    'shell.mobile.theme-dark',
+    'shell.mobile.theme-high-contrast',
+  ]) {
+    await activate(page, themeControl);
+  }
+  await activate(page, 'shell.mobile.more.sheet-close');
+  await activate(page, 'shell.mobile.more');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'More' })).toHaveCount(0);
+  await expect(nav.locator('[data-ux-control="shell.mobile.more"]')).toBeFocused();
 });
 
 test('knowledge remains renderable as a hidden compatibility route', async ({ page }) => {

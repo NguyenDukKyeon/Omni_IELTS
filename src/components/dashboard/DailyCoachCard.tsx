@@ -43,7 +43,7 @@ export function DailyCoachCard() {
   const [firstAlternative, secondAlternative] = model.alternatives;
 
   return (
-    <section className="omni-daily-coach" aria-label="Daily Coach">
+    <section className="omni-daily-coach" aria-label="Daily Coach" data-ux-scope="app-shell-v2">
       <p className="omni-daily-coach__eyebrow">Daily Coach</p>
       <div className="omni-daily-coach__primary">
         <div>

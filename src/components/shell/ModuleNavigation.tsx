@@ -49,6 +49,7 @@ export function ModuleNavigation() {
       id="desktop-sidebar"
       className={`omni-module-nav ${navCollapsed ? 'is-collapsed' : ''}`}
       aria-label="Điều hướng học tập"
+      data-ux-scope="app-shell-v2"
     >
       <div className="omni-module-nav__list">
         <button
@@ -188,23 +189,31 @@ export function ModuleNavigation() {
           />
         </button>
       </div>
-      <button
-        type="button"
-        className="omni-module-nav__collapse"
-        data-ux-flow="app.navigation"
-        data-ux-control="shell.nav.collapse"
-        aria-pressed={navCollapsed}
-        onClick={() => setNavCollapsed(!navCollapsed)}
-      >
-        {navCollapsed ? (
+      {navCollapsed ? (
+        <button
+          type="button"
+          className="omni-module-nav__collapse"
+          data-ux-flow="app.navigation"
+          data-ux-control="shell.nav.expand"
+          aria-pressed="false"
+          onClick={() => setNavCollapsed(false)}
+        >
           <PanelLeftOpen aria-hidden="true" className="omni-module-nav__icon" />
-        ) : (
+          <span className="omni-module-nav__collapse-label">Mở rộng điều hướng</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="omni-module-nav__collapse"
+          data-ux-flow="app.navigation"
+          data-ux-control="shell.nav.collapse"
+          aria-pressed="true"
+          onClick={() => setNavCollapsed(true)}
+        >
           <PanelLeftClose aria-hidden="true" className="omni-module-nav__icon" />
-        )}
-        <span className="omni-module-nav__collapse-label">
-          {navCollapsed ? 'Mở rộng điều hướng' : 'Thu gọn điều hướng'}
-        </span>
-      </button>
+          <span className="omni-module-nav__collapse-label">Thu gọn điều hướng</span>
+        </button>
+      )}
     </nav>
   );
 }
