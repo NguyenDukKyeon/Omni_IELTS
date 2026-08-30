@@ -1183,8 +1183,8 @@
   --omni-shell-frame-gap: clamp(1rem, 2vw, 2rem);
   --omni-shell-nav-width: 11rem;
   --omni-shell-dock-width: 14.75rem;
-  --omni-shell-muted: #5c5751;
-  --omni-shell-border: #e6e1d9;
+  --omni-shell-muted: #5d6b7b;
+  --omni-shell-border: #dce3ea;
   min-height: 100svh;
   padding: var(--omni-shell-frame-gap);
   background: var(--omni-ground);
@@ -1334,9 +1334,64 @@
   stroke-width: 1.8;
 }
 
+.omni-shell-header__notification,
+.omni-shell-header__profile {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.45rem;
+  border: 1px solid var(--omni-shell-border);
+  border-radius: 0.65rem;
+  background: var(--omni-surface);
+  color: var(--omni-text);
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.omni-shell-header__notification:hover,
+.omni-shell-header__profile:hover,
+.omni-shell-header__profile.is-active {
+  border-color: color-mix(in srgb, var(--omni-action-primary) 50%, var(--omni-shell-border));
+  background: color-mix(in srgb, var(--omni-action-primary) 4%, var(--omni-surface));
+}
+
+.omni-shell-header__notification {
+  position: relative;
+  justify-content: center;
+  width: 2.45rem;
+  padding: 0;
+}
+
+.omni-shell-header__notification svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  stroke-width: 1.8;
+}
+
+.omni-shell-header__notification-count {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding-inline: 0.18rem;
+  border: 2px solid var(--omni-surface);
+  border-radius: 999px;
+  background: var(--omni-action-primary);
+  color: var(--omni-action-primary-text);
+  font-size: 0.58rem;
+  font-weight: 750;
+}
+
+.omni-shell-header__account {
+  position: relative;
+}
+
 .omni-shell-header__profile {
   gap: 0.45rem;
-  padding-inline: 0.45rem 0.55rem;
+  padding: 0.32rem 0.55rem 0.32rem 0.4rem;
 }
 
 .omni-shell-header__avatar {
@@ -1364,6 +1419,56 @@
   width: 0.85rem;
   height: 0.85rem;
   color: var(--omni-shell-muted);
+}
+
+.omni-shell-header__account-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  min-width: 13.25rem;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.35rem;
+  border: 1px solid var(--omni-shell-border);
+  border-radius: 0.8rem;
+  background: var(--omni-surface-raised);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+}
+
+.omni-shell-header__menu-item,
+.omni-shell-header__account-menu .omni-theme-menu .omni-shell-header__action {
+  display: flex;
+  width: 100%;
+  min-height: 2.55rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--omni-text);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.omni-shell-header__menu-item:hover,
+.omni-shell-header__account-menu .omni-theme-menu .omni-shell-header__action:hover {
+  background: color-mix(in srgb, var(--omni-action-primary) 6%, var(--omni-surface));
+}
+
+.omni-shell-header__menu-item svg,
+.omni-shell-header__account-menu .omni-theme-menu .omni-shell-header__action svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 1.8;
+}
+
+.omni-shell-header__account-menu .omni-theme-menu {
+  width: 100%;
 }
 
 .omni-connectivity {
@@ -2041,9 +2146,10 @@
 }
 
 .omni-evidence-dock__section {
-  padding: 0;
-  border: 0;
-  background: transparent;
+  padding: 0.65rem;
+  border: 1px solid var(--omni-shell-border);
+  border-radius: 0.7rem;
+  background: var(--omni-surface);
 }
 
 .omni-evidence-dock__section-title {
@@ -2053,6 +2159,15 @@
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: none;
+}
+
+.omni-evidence-dock__due-total {
+  margin: 0.1rem 0 0.55rem;
+  color: var(--omni-action-primary);
+  font-size: 2rem;
+  font-weight: 780;
+  letter-spacing: -0.045em;
+  line-height: 1;
 }
 
 .omni-evidence-dock__empty-card {
@@ -2080,7 +2195,7 @@
   padding: 0.62rem 0.65rem;
   border: 1px solid var(--omni-shell-border);
   border-radius: 0.6rem;
-  background: var(--omni-surface);
+  background: color-mix(in srgb, var(--omni-ground) 58%, var(--omni-surface));
   text-align: left;
   transition: border-color 180ms ease, background-color 180ms ease;
 }
@@ -2125,6 +2240,14 @@
 
 .omni-evidence-dock__item.is-static {
   display: flex;
+}
+
+.omni-evidence-dock__continue {
+  margin-top: 0.05rem;
+}
+
+.omni-evidence-dock__continue .omni-evidence-dock__item {
+  min-height: 4.1rem;
 }
 
 .omni-evidence-dock li[data-status="due"] .omni-evidence-dock__item {
@@ -2394,9 +2517,40 @@
     letter-spacing: 0.18em;
   }
 
-  /* Sole owner of Tutor, Theme, Profile on Mobile is More sheet */
   .omni-shell-header__actions {
-    display: none !important;
+    display: flex !important;
+    gap: 0.35rem;
+  }
+
+  .omni-shell-header__notification,
+  .omni-shell-header__profile {
+    min-height: 2.2rem;
+  }
+
+  .omni-shell-header__notification {
+    width: 2.2rem;
+  }
+
+  .omni-shell-header__profile {
+    width: 2.2rem;
+    justify-content: center;
+    padding: 0.2rem;
+  }
+
+  .omni-shell-header__profile-name,
+  .omni-shell-header__profile-chevron {
+    display: none;
+  }
+
+  .omni-shell-header__avatar {
+    width: 1.55rem;
+    height: 1.55rem;
+    font-size: 0.56rem;
+  }
+
+  .omni-shell-header__account-menu {
+    right: 0;
+    min-width: min(13.25rem, calc(100vw - 1.5rem));
   }
 
   .omni-dashboard {
@@ -2574,8 +2728,8 @@
 }
 
 .dark .omni-focus-dock {
-  --omni-shell-muted: #c8c1b8;
-  --omni-shell-border: #34312e;
+  --omni-shell-muted: #c7d0da;
+  --omni-shell-border: #323b46;
 }
 
 .high-contrast .omni-focus-dock {

@@ -241,6 +241,7 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('dashboard.coach.alternative-1', 'dashboard.daily', 'DailyCoachCard', 'Open the first alternative', 'dashboard with alternatives', 'first alternative destination', ['Navigate to the selected alternative']),
   shellControl('dashboard.coach.alternative-2', 'dashboard.daily', 'DailyCoachCard', 'Open the second alternative', 'dashboard with alternatives', 'second alternative destination or chooser', ['Navigate to the selected alternative']),
   shellControl('dashboard.coach.plan-manual-module', 'dashboard.daily', 'DailyCoachCard', 'Open module chooser from the daily plan', 'dashboard daily plan visible', 'module chooser open', ['Open the manual module chooser']),
+  shellControl('dashboard.coach.plan-source', 'dashboard.daily', 'DailyCoachCard', 'Open Sources from the daily plan', 'dashboard daily plan visible', 'sources', ['Navigate to Sources & Library']),
   shellControl('dashboard.coach.open-evidence', 'dashboard.daily', 'DailyCoachCard', 'Show or hide recommendation evidence', 'evidence disclosure closed or open', 'evidence disclosure toggled', ['Persist no learner evidence; update presentation state'], ['storage_unavailable'], ['Toggle the disclosure again']),
   shellControl('dashboard.open-latest-practice', 'dashboard.daily', 'DashboardView', 'Open latest valid independent Practice evidence', 'valid Practice evidence visible', 'practice route', ['Navigate to IELTS Practice']),
   shellControl('dashboard.open-latest-mock', 'dashboard.daily', 'DashboardView', 'Open latest valid Mock evidence', 'valid Mock evidence visible', 'mock route', ['Navigate to IELTS Mock']),
@@ -260,6 +261,7 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('shell.evidence.open-context', 'app.navigation', 'EvidenceDock', 'Open the current context action', 'context action visible', 'context destination'),
   shellControl('shell.evidence.open-practice', 'app.navigation', 'EvidenceDock', 'Open recent Practice destination', 'recent Practice evidence visible', 'practice'),
   shellControl('shell.evidence.open-mock', 'app.navigation', 'EvidenceDock', 'Open recent Mock destination', 'recent Mock evidence visible', 'mock_test'),
+  shellControl('shell.evidence.open-media', 'app.navigation', 'EvidenceDock', 'Open saved Media lesson', 'saved Media lesson visible', 'media'),
 
   shellControl('shell.grammar.tab-grammar', 'grammar.learning', 'GrammarStrategyView', 'Select Grammar curriculum tab', 'strategy tab active', 'grammar tab active', ['Update active curriculum tab']),
   shellControl('shell.grammar.tab-strategy', 'grammar.learning', 'GrammarStrategyView', 'Select IELTS Strategy tab', 'grammar tab active', 'strategy tab active', ['Update active curriculum tab']),

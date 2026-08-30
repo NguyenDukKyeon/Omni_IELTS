@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, BookOpen, CalendarDays, ChevronDown, ChevronRight, Clock, Compass, Layers, Target } from 'lucide-react';
+import { ArrowRight, BookOpen, CalendarDays, ChevronDown, ChevronRight, Clock, Compass, FilePlus2, Layers, Target } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { buildDailyCoachModel, type DailyCoachAction } from '../../lib/dailyCoach';
 import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
@@ -46,6 +46,37 @@ export function DailyCoachCard() {
   };
 
   const [firstAlternative, secondAlternative] = model.alternatives;
+  const sourceAction: DailyCoachAction = {
+    id: 'daily-source-import',
+    kind: 'collect_source',
+    title: 'Tạo bài từ nguồn học',
+    reason: 'Dùng một nguồn bạn chọn để tạo bài luyện.',
+    destination: 'sources',
+    command: 'open_module',
+    evidenceRefs: [],
+    estimatedMinutes: 12,
+    confidence: 'medium',
+  };
+  const planRows = [
+    {
+      action: firstAlternative,
+      control: 'dashboard.coach.alternative-1',
+      icon: BookOpen,
+      fallbackMeta: 'Nhiệm vụ',
+    },
+    {
+      action: sourceAction,
+      control: 'dashboard.coach.plan-source',
+      icon: FilePlus2,
+      fallbackMeta: 'Tạo mới',
+    },
+    {
+      action: secondAlternative,
+      control: 'dashboard.coach.plan-manual-module',
+      icon: Layers,
+      fallbackMeta: 'Tự chọn',
+    },
+  ] as const;
 
   // Truthful FocusSignal calculation
   const isDueReviewState = dueMistakes.length > 0;
@@ -198,53 +229,34 @@ export function DailyCoachCard() {
       <div className="omni-daily-coach__plan">
         <h3 className="omni-daily-coach__plan-title">Kế hoạch hôm nay</h3>
         <div className="omni-daily-coach__plan-list">
-          <button
-            type="button"
-            className="omni-daily-coach__plan-row"
-            data-ux-flow="dashboard.daily"
-            data-ux-control="dashboard.coach.alternative-1"
-            onClick={() => runAction(firstAlternative)}
-          >
-            <div className="omni-daily-coach__plan-row-main">
-              <div className="omni-daily-coach__plan-row-icon">
-                <BookOpen aria-hidden="true" />
+          {planRows.map(({ action, control, icon: Icon, fallbackMeta }) => (
+            <button
+              key={action.id}
+              type="button"
+              className="omni-daily-coach__plan-row"
+              data-ux-flow="dashboard.daily"
+              data-ux-control={control}
+              onClick={() => runAction(action)}
+            >
+              <div className="omni-daily-coach__plan-row-main">
+                <div className="omni-daily-coach__plan-row-icon">
+                  <Icon aria-hidden="true" />
+                </div>
+                <div className="omni-daily-coach__plan-row-text">
+                  <strong>{action.title}</strong>
+                  <span>{action.reason}</span>
+                </div>
               </div>
-              <div className="omni-daily-coach__plan-row-text">
-                <strong>{firstAlternative.title}</strong>
-                <span>{firstAlternative.reason}</span>
+              <div className="omni-daily-coach__plan-row-meta">
+                <span>
+                  {typeof action.estimatedMinutes === 'number'
+                    ? `${action.estimatedMinutes} phút`
+                    : fallbackMeta}
+                </span>
+                <ChevronRight aria-hidden="true" />
               </div>
-            </div>
-            <div className="omni-daily-coach__plan-row-meta">
-              <span>
-                {typeof firstAlternative.estimatedMinutes === 'number'
-                  ? `${firstAlternative.estimatedMinutes} phút`
-                  : 'Nhiệm vụ'}
-              </span>
-              <ChevronRight aria-hidden="true" />
-            </div>
-          </button>
-
-          <button
-            type="button"
-            className="omni-daily-coach__plan-row"
-            data-ux-flow="dashboard.daily"
-            data-ux-control="dashboard.coach.plan-manual-module"
-            onClick={() => runAction(secondAlternative)}
-          >
-            <div className="omni-daily-coach__plan-row-main">
-              <div className="omni-daily-coach__plan-row-icon">
-                <Layers aria-hidden="true" />
-              </div>
-              <div className="omni-daily-coach__plan-row-text">
-                <strong>{secondAlternative.title}</strong>
-                <span>{secondAlternative.reason}</span>
-              </div>
-            </div>
-            <div className="omni-daily-coach__plan-row-meta">
-              <span>Tự chọn</span>
-              <ChevronRight aria-hidden="true" />
-            </div>
-          </button>
+            </button>
+          ))}
         </div>
       </div>
 

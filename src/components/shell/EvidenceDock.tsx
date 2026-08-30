@@ -16,12 +16,14 @@ function controlForItem(item: EvidenceDockItem):
   | 'shell.evidence.open-context'
   | 'shell.evidence.open-practice'
   | 'shell.evidence.open-mock'
+  | 'shell.evidence.open-media'
   | null {
   if (item.action === 'none' || !item.destination) return null;
   if (item.id === 'due-mistakes') return 'shell.evidence.open-due-review';
   if (item.id === 'due-vocab') return 'shell.evidence.open-due-vocab';
   if (item.action === 'open_module' && item.destination === 'practice') return 'shell.evidence.open-practice';
   if (item.action === 'open_module' && item.destination === 'mock_test') return 'shell.evidence.open-mock';
+  if (item.action === 'open_module' && item.destination === 'media') return 'shell.evidence.open-media';
   if (item.action === 'collect' || item.id === 'current-media' || item.action === 'open_module') {
     return 'shell.evidence.open-context';
   }
@@ -66,6 +68,9 @@ function EvidenceDockButton({
   if (control === 'shell.evidence.open-mock') {
     return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-mock" onClick={() => onOpen(item.destination)}>{content}</button>;
   }
+  if (control === 'shell.evidence.open-media') {
+    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-media" onClick={() => onOpen(item.destination)}>{content}</button>;
+  }
   return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-context" onClick={() => onOpen(item.destination)}>{content}</button>;
 }
 
@@ -88,6 +93,7 @@ export function EvidenceDock() {
 
   const dueMistakes = getDueMistakes(mistakes);
   const dueVocab = getDueVocabCards(vocabCards);
+  const totalDue = dueMistakes.length + dueVocab.length;
   const currentMedia = mediaSessions.find((session) => !session.completed);
   const latestAttempt = [...practiceAttempts]
     .filter(isExplicitIndependentEvidence)
@@ -188,6 +194,9 @@ export function EvidenceDock() {
         {model.sections.map((section) => (
           <section key={section.id} id={section.id} className="omni-evidence-dock__section">
             <h3 className="omni-evidence-dock__section-title">{section.title}</h3>
+            {section.id === 'system-due' && totalDue > 0 && (
+              <p className="omni-evidence-dock__due-total">{totalDue}</p>
+            )}
             {section.items.length === 0 ? (
               <div className="omni-evidence-dock__empty-card">
                 <CircleAlert aria-hidden="true" className="w-4 h-4 text-stone-400" />
@@ -222,6 +231,24 @@ export function EvidenceDock() {
             )}
           </section>
         ))}
+        {currentMedia && (
+          <section id="continue-learning" className="omni-evidence-dock__section omni-evidence-dock__continue">
+            <h3 className="omni-evidence-dock__section-title">Tiếp tục học</h3>
+            <button
+              type="button"
+              className="omni-evidence-dock__item"
+              data-ux-flow="app.navigation"
+              data-ux-control="shell.evidence.open-media"
+              onClick={() => openDestination('media')}
+            >
+              <BookOpenCheck aria-hidden="true" className="omni-evidence-dock__item-icon" />
+              <span className="omni-evidence-dock__item-text">
+                <strong>{currentMedia.title}</strong>
+                <span>Mở Media Lab từ bài đã lưu</span>
+              </span>
+            </button>
+          </section>
+        )}
       </div>
     </aside>
   );

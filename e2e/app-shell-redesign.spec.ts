@@ -8,6 +8,8 @@ function isMobileProject(projectName: string): boolean {
 // Every UX_CONTROL_CONTRACTS entry is exercised by the desktop/mobile activation tables below.
 const SHELL_CONTROL_IDS = [
   'shell.header.home',
+  'shell.header.open-review',
+  'shell.header.open-account-menu',
   'shell.header.open-tutor',
   'shell.theme.open',
   'shell.theme.system',
@@ -29,6 +31,7 @@ const SHELL_CONTROL_IDS = [
   'dashboard.coach.alternative-1',
   'dashboard.coach.alternative-2',
   'dashboard.coach.plan-manual-module',
+  'dashboard.coach.plan-source',
   'dashboard.coach.open-evidence',
   'dashboard.open-latest-practice',
   'dashboard.open-latest-mock',
@@ -47,6 +50,7 @@ const SHELL_CONTROL_IDS = [
   'shell.evidence.open-context',
   'shell.evidence.open-practice',
   'shell.evidence.open-mock',
+  'shell.evidence.open-media',
   'shell.grammar.tab-grammar',
   'shell.grammar.tab-strategy',
   'review.open-due-workout',
@@ -114,9 +118,15 @@ test('desktop shell controls activate real navigation, disclosure, theme, and re
   const navigation = page.getByRole('navigation', { name: 'Điều hướng học tập' });
 
   await activate(page, 'shell.header.home');
+  await activate(page, 'shell.header.open-review');
+  await expect(page.locator('#review-progress-view')).toBeVisible();
+  await activate(page, 'shell.header.home');
+  await activate(page, 'shell.header.open-account-menu');
+  await expect(page.getByRole('menu', { name: 'Tài khoản và công cụ' })).toBeVisible();
   await activate(page, 'shell.header.open-tutor');
   await expect(page.locator('#ai-tutor-drawer')).toBeVisible();
   await page.locator('#ai-tutor-close-btn').click();
+  await activate(page, 'shell.header.open-account-menu');
 
   await activate(page, 'shell.theme.open');
   await expect(page.getByRole('menu', { name: 'Chọn giao diện' })).toBeVisible();
@@ -168,6 +178,9 @@ test('desktop shell controls activate real navigation, disclosure, theme, and re
   await activate(page, 'dashboard.coach.plan-manual-module');
   await expect(page.getByRole('dialog', { name: 'Chọn module học tập' })).toBeVisible();
   await activate(page, 'shell.chooser.close');
+  await activate(page, 'dashboard.coach.plan-source');
+  await expect(page.getByRole('heading', { name: /Nguồn Học Liệu/ }).first()).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
 
   for (const [controlId, moduleId] of [
     ['shell.chooser.module-sources', 'sources'],
@@ -222,6 +235,9 @@ test('desktop shell controls activate valid evidence and review destinations', a
 
   await activate(page, 'shell.evidence.open-practice');
   await expect(page.locator('#ielts_practice_view')).toBeVisible();
+  await activate(page, 'shell.nav.dashboard');
+  await activate(page, 'shell.evidence.open-media');
+  await expect(page.getByRole('heading', { name: /Media Lab/ }).first()).toBeVisible();
   await activate(page, 'shell.nav.dashboard');
 
   await activate(page, 'shell.nav.review');
@@ -472,7 +488,7 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
     expect(mobileLayout.documentWidth).toBeLessThanOrEqual(mobileLayout.viewportWidth + 1);
     expect(mobileLayout.headerHeight).toBeLessThanOrEqual(72);
     expect(mobileLayout.headerHeight).toBeGreaterThanOrEqual(56);
-    expect(mobileLayout.actionsVisible).toBe(false);
+     expect(mobileLayout.actionsVisible).toBe(true);
     expect(mobileLayout.ctaVisibleInViewport).toBe(true);
     expect(mobileLayout.bottomNavVisible).toBe(true);
     expect(mobileLayout.mainWidth).toBeGreaterThan(mobileLayout.viewportWidth * 0.8);
@@ -526,7 +542,7 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
          focusMainShare: focusZoneWidth ? (focusMainRect?.width ?? 0) / focusZoneWidth : 0,
          focusSignalShare: focusZoneWidth ? (focusSignalRect?.width ?? 0) / focusZoneWidth : 0,
          planRowHeight,
-         planRowsAreButtons: planRows.length === 2 && planRows.every((row) => row.tagName === 'BUTTON'),
+         planRowsAreButtons: planRows.length === 3 && planRows.every((row) => row.tagName === 'BUTTON'),
          emptyCardCount: emptyCards.length,
       };
     });

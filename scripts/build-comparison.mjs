@@ -22,15 +22,15 @@ async function run() {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: #f7f4ee;
+    background: #f5f7fa;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #1c1917;
+    color: #111827;
     padding: 32px;
     width: 3280px;
   }
   .header { margin-bottom: 24px; }
-  .header h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #1c1917; }
-  .header p { font-size: 14px; color: #78716c; margin-top: 4px; }
+  .header h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #111827; }
+  .header p { font-size: 14px; color: #526071; margin-top: 4px; }
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -39,7 +39,7 @@ async function run() {
   }
   .card {
     background: #ffffff;
-    border: 1px solid #e7e5e4;
+    border: 1px solid #dce3ea;
     border-radius: 12px;
     padding: 20px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.04);
@@ -49,12 +49,12 @@ async function run() {
     font-weight: 750;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #1c1917;
+    color: #111827;
     margin-bottom: 2px;
   }
   .card-sub {
     font-size: 12px;
-    color: #78716c;
+    color: #526071;
     margin-bottom: 14px;
   }
   .desktop-stage {
@@ -63,7 +63,7 @@ async function run() {
     display: flex;
     align-items: flex-start;
     justify-content: flex-start;
-    background: #f7f4ee;
+    background: #f5f7fa;
     border-radius: 8px;
   }
   .desktop-stage img {
@@ -72,12 +72,12 @@ async function run() {
     width: auto;
     max-width: none;
     border-radius: 8px;
-    border: 1px solid #e7e5e4;
+    border: 1px solid #dce3ea;
   }
   .mobile-stage {
     display: flex;
     justify-content: center;
-    background: #f7f4ee;
+    background: #f5f7fa;
     border-radius: 8px;
     padding: 12px;
   }

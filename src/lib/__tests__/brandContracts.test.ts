@@ -19,6 +19,16 @@ describe('OMNI brand contracts', () => {
     expect(contrastRatio('#EE1D23', '#FFFFFF')).toBeLessThan(4.5);
   });
 
+  it('uses cool neutral application surfaces instead of a beige app ground', () => {
+    const tokens = readFileSync(resolve(process.cwd(), 'src/styles/tokens.css'), 'utf8');
+    const shell = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+
+    expect(tokens).toContain('--omni-ground: #f5f7fa;');
+    expect(tokens).toContain('--omni-border: #dce3ea;');
+    expect(tokens).not.toContain('--omni-ground: #faf7f2;');
+    expect(shell).not.toContain('--omni-shell-border: #e6e1d9;');
+  });
+
   it('ships a path-only wordmark and no embedded raster', () => {
     const svg = readFileSync(
       resolve(process.cwd(), 'src/assets/brand/omni-wordmark.svg'),

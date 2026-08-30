@@ -102,7 +102,11 @@ export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockMo
 
   const sections: EvidenceDockSection[] = [
     { id: 'system-due', title: 'Đến hạn', items: dueItems },
-    { id: contextId, title: 'Trong module này', items: contextItems },
+    {
+      id: contextId,
+      title: input.activeModule === 'dashboard' ? 'Bằng chứng gần đây' : 'Trong module này',
+      items: contextItems,
+    },
   ];
 
   if (input.recentEvidence.length > 0) {
