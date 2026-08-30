@@ -1,17 +1,24 @@
 import { useState } from 'react';
-import { ArrowRight, BookOpen, ChevronDown, ChevronRight, Clock, Compass, Layers, Target } from 'lucide-react';
+import { ArrowRight, BookOpen, CalendarDays, ChevronDown, ChevronRight, Clock, Compass, Layers, Target } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { buildDailyCoachModel, type DailyCoachAction } from '../../lib/dailyCoach';
-import { isUnfinishedPracticeAttempt } from '../../lib/learningEvidence';
 import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
 import { ModuleChooser } from '../shell/ModuleChooser';
+
+function daysUntilExam(examDate: string): number | null {
+  const target = new Date(`${examDate}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.ceil((target.getTime() - today.getTime()) / 86_400_000));
+}
 
 export function DailyCoachCard() {
   const {
     profile,
     mistakes,
     vocabCards,
-    practiceAttempts,
     setActiveModule,
     setIsDiagnosticOpen,
   } = useApp();
@@ -20,12 +27,10 @@ export function DailyCoachCard() {
 
   const dueMistakes = getDueMistakes(mistakes);
   const dueVocab = getDueVocabCards(vocabCards);
-  const unfinished = practiceAttempts.find(isUnfinishedPracticeAttempt);
   const model = buildDailyCoachModel({
     diagnosticComplete: profile.completedDiagnostic,
     dueMistakeIds: dueMistakes.map((item) => item.id),
     dueVocabIds: dueVocab.map((item) => item.id),
-    unfinishedPracticeId: unfinished?.id,
   });
 
   const runAction = (action: DailyCoachAction) => {
@@ -46,6 +51,8 @@ export function DailyCoachCard() {
   const isDueReviewState = dueMistakes.length > 0;
   const isDueVocabState = !isDueReviewState && dueVocab.length > 0;
   const isDiagnosticState = model.primary.kind === 'diagnostic';
+  const totalDueCount = dueMistakes.length + dueVocab.length;
+  const examDays = daysUntilExam(profile.examDate);
 
   const signalCount = isDueReviewState
     ? dueMistakes.length
@@ -63,12 +70,16 @@ export function DailyCoachCard() {
         ? 'chẩn đoán'
         : 'sẵn sàng';
 
-  // SVG Ring calculation: r = 38, circumference = 2 * PI * 38 ≈ 238.76
-  const strokeDashoffset = isDueReviewState || isDueVocabState
-    ? 238.76 * (1 - Math.min(1, (isDueReviewState ? dueMistakes.length : dueVocab.length) / 10))
-    : isDiagnosticState
-      ? 238.76 * 0.75
-      : 0;
+  // The ring represents the selected share of actual due work, never a skill score.
+  const selectedDueCount = isDueReviewState ? dueMistakes.length : dueVocab.length;
+  const ringFraction = totalDueCount > 0 ? selectedDueCount / totalDueCount : 0;
+  const strokeDashoffset = 238.76 * (1 - ringFraction);
+  const signalAriaLabel = totalDueCount > 0
+    ? `${selectedDueCount} ${signalLabel} trong tổng số ${totalDueCount} việc đến hạn`
+    : `${signalLabel}: ${signalCount}`;
+  const signalDetail = totalDueCount > 0
+    ? `${selectedDueCount} trong ${totalDueCount} việc cần ôn hôm nay`
+    : 'Chưa có việc đến hạn';
 
   return (
     <section className="omni-daily-coach" aria-label="Daily Coach" data-ux-scope="app-shell-v2">
@@ -148,8 +159,9 @@ export function DailyCoachCard() {
           </div>
         </div>
 
-        <div className="omni-daily-coach__focus-signal" aria-label="Focus Signal">
+        <div className="omni-daily-coach__focus-signal" aria-label={signalAriaLabel}>
           <div className="omni-focus-signal">
+            <span className="omni-focus-signal__eyebrow">Việc cần ưu tiên</span>
             <div className="omni-focus-signal__ring-container">
               <svg className="omni-focus-signal__ring" viewBox="0 0 96 96" aria-hidden="true">
                 <circle
@@ -178,6 +190,7 @@ export function DailyCoachCard() {
                 <span className="omni-focus-signal__label">{signalLabel}</span>
               </div>
             </div>
+            <span className="omni-focus-signal__detail">{signalDetail}</span>
           </div>
         </div>
       </div>
@@ -211,7 +224,13 @@ export function DailyCoachCard() {
             </div>
           </button>
 
-          <div className="omni-daily-coach__plan-row">
+          <button
+            type="button"
+            className="omni-daily-coach__plan-row"
+            data-ux-flow="dashboard.daily"
+            data-ux-control="dashboard.coach.plan-manual-module"
+            onClick={() => runAction(secondAlternative)}
+          >
             <div className="omni-daily-coach__plan-row-main">
               <div className="omni-daily-coach__plan-row-icon">
                 <Layers aria-hidden="true" />
@@ -225,9 +244,16 @@ export function DailyCoachCard() {
               <span>Tự chọn</span>
               <ChevronRight aria-hidden="true" />
             </div>
-          </div>
+          </button>
         </div>
       </div>
+
+      {examDays !== null && (
+        <footer className="omni-daily-coach__deadline">
+          <CalendarDays aria-hidden="true" />
+          <span>Còn {examDays} ngày thi</span>
+        </footer>
+      )}
 
       <ModuleChooser
         open={chooserOpen}
@@ -240,4 +266,3 @@ export function DailyCoachCard() {
     </section>
   );
 }
-

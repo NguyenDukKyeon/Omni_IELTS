@@ -10,11 +10,10 @@ export interface EvidenceDockInput {
     id: string;
     label: string;
     destination?: ModuleId;
-    canResume?: boolean;
   }>;
 }
 
-export type EvidenceDockAction = 'collect' | 'open_module' | 'resume' | 'none';
+export type EvidenceDockAction = 'collect' | 'open_module' | 'none';
 
 export interface EvidenceDockItem {
   id: string;
@@ -101,25 +100,25 @@ export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockMo
           action: 'collect',
         }];
 
-  return {
-    visibility: 'open',
-    sections: [
-      { id: 'system-due', title: 'Đến hạn', items: dueItems },
-      { id: contextId, title: 'Trong module này', items: contextItems },
-      {
-        id: 'recent-evidence',
-        title: 'Bằng chứng gần đây',
-        items: input.recentEvidence.map((item) => ({
-          id: item.id,
-          label: item.label,
-          destination: item.destination,
-          status: 'recent' as const,
-          action: item.canResume ? 'resume' : 'open_module',
-          detail: item.canResume
-            ? 'Tiếp tục bài đang làm'
-            : openModuleCopy(item.destination),
-        })),
-      },
-    ],
-  };
+  const sections: EvidenceDockSection[] = [
+    { id: 'system-due', title: 'Đến hạn', items: dueItems },
+    { id: contextId, title: 'Trong module này', items: contextItems },
+  ];
+
+  if (input.recentEvidence.length > 0) {
+    sections.push({
+      id: 'recent-evidence',
+      title: 'Bằng chứng gần đây',
+      items: input.recentEvidence.map((item) => ({
+        id: item.id,
+        label: item.label,
+        destination: item.destination,
+        status: 'recent' as const,
+        action: 'open_module',
+        detail: openModuleCopy(item.destination),
+      })),
+    });
+  }
+
+  return { visibility: 'open', sections };
 }

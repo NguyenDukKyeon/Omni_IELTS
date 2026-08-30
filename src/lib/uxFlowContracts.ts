@@ -240,6 +240,7 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('dashboard.coach.primary', 'dashboard.daily', 'DailyCoachCard', 'Start the recommended primary action', 'dashboard with recommendation', 'recommended destination or diagnostic open', ['Navigate to the recommendation owner or open diagnostic']),
   shellControl('dashboard.coach.alternative-1', 'dashboard.daily', 'DailyCoachCard', 'Open the first alternative', 'dashboard with alternatives', 'first alternative destination', ['Navigate to the selected alternative']),
   shellControl('dashboard.coach.alternative-2', 'dashboard.daily', 'DailyCoachCard', 'Open the second alternative', 'dashboard with alternatives', 'second alternative destination or chooser', ['Navigate to the selected alternative']),
+  shellControl('dashboard.coach.plan-manual-module', 'dashboard.daily', 'DailyCoachCard', 'Open module chooser from the daily plan', 'dashboard daily plan visible', 'module chooser open', ['Open the manual module chooser']),
   shellControl('dashboard.coach.open-evidence', 'dashboard.daily', 'DailyCoachCard', 'Show or hide recommendation evidence', 'evidence disclosure closed or open', 'evidence disclosure toggled', ['Persist no learner evidence; update presentation state'], ['storage_unavailable'], ['Toggle the disclosure again']),
   shellControl('dashboard.open-latest-practice', 'dashboard.daily', 'DashboardView', 'Open latest valid independent Practice evidence', 'valid Practice evidence visible', 'practice route', ['Navigate to IELTS Practice']),
   shellControl('dashboard.open-latest-mock', 'dashboard.daily', 'DashboardView', 'Open latest valid Mock evidence', 'valid Mock evidence visible', 'mock route', ['Navigate to IELTS Mock']),
@@ -257,7 +258,6 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('shell.evidence.open-due-review', 'app.navigation', 'EvidenceDock', 'Open due mistake review', 'due mistake item visible', 'review_progress'),
   shellControl('shell.evidence.open-due-vocab', 'app.navigation', 'EvidenceDock', 'Open due vocabulary review', 'due vocabulary item visible', 'vocabulary'),
   shellControl('shell.evidence.open-context', 'app.navigation', 'EvidenceDock', 'Open the current context action', 'context action visible', 'context destination'),
-  shellControl('shell.evidence.resume-latest', 'app.navigation', 'EvidenceDock', 'Resume the latest unfinished destination', 'unfinished evidence visible', 'unfinished destination', ['Navigate to the unfinished attempt']),
   shellControl('shell.evidence.open-practice', 'app.navigation', 'EvidenceDock', 'Open recent Practice destination', 'recent Practice evidence visible', 'practice'),
   shellControl('shell.evidence.open-mock', 'app.navigation', 'EvidenceDock', 'Open recent Mock destination', 'recent Mock evidence visible', 'mock_test'),
 

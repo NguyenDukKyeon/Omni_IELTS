@@ -67,7 +67,6 @@ describe('Evidence Dock', () => {
         id: 'att_1',
         label: 'Writing Task 2',
         destination: 'practice',
-        canResume: false,
       }],
     });
     const recent = model.sections.find(({ id }) => id === 'recent-evidence')?.items[0];
@@ -76,19 +75,17 @@ describe('Evidence Dock', () => {
     expect(recent?.detail).toMatch(/Mở IELTS Practice/);
   });
 
-  it('uses resume only when the stored attempt is in progress', () => {
+  it('omits empty recent and continuation regions instead of rendering repeated empty states', () => {
     const model = buildEvidenceDockModel({
       activeModule: 'dashboard',
-      dueMistakeCount: 0,
+      dueMistakeCount: 2,
       dueVocabCount: 0,
-      recentEvidence: [{
-        id: 'att-open',
-        label: 'Writing Task 2',
-        destination: 'practice',
-        canResume: true,
-      }],
+      recentEvidence: [],
     });
-    const recent = model.sections.find(({ id }) => id === 'recent-evidence')?.items[0];
-    expect(recent?.action).toBe('resume');
+
+    expect(model.sections.map(({ id }) => id)).toEqual([
+      'system-due',
+      'dashboard-context',
+    ]);
   });
 });

@@ -1334,6 +1334,38 @@
   stroke-width: 1.8;
 }
 
+.omni-shell-header__profile {
+  gap: 0.45rem;
+  padding-inline: 0.45rem 0.55rem;
+}
+
+.omni-shell-header__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: var(--omni-text);
+  color: var(--omni-surface);
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.omni-shell-header__profile-name {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.omni-shell-header__profile-chevron {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--omni-shell-muted);
+}
+
 .omni-connectivity {
   max-width: 8rem;
   padding: 0.3rem 0.5rem;
@@ -1421,12 +1453,12 @@
 }
 
 .omni-module-nav__label {
-  font-size: 0.78rem;
+  display: block;
+  overflow: visible;
+  font-size: 0.7rem;
   font-weight: 620;
   line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
 }
 
 .omni-module-nav__description {
@@ -1452,12 +1484,12 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 66rem;
+  max-width: 62rem;
   gap: 1.15rem;
 }
 
 .omni-dashboard__header {
-  max-width: 48rem;
+  max-width: 42rem;
   padding-inline: 0.1rem;
 }
 
@@ -1491,18 +1523,19 @@
 
 .omni-daily-coach {
   width: 100%;
-  padding: clamp(1.2rem, 1.8vw, 1.5rem);
+  padding: clamp(1.2rem, 1.8vw, 1.45rem);
   border: 1px solid var(--omni-shell-border);
   border-radius: 1rem;
   background: var(--omni-surface);
-  box-shadow: 0 8px 24px rgba(18, 20, 24, 0.045);
+  box-shadow: 0 10px 28px rgba(18, 20, 24, 0.05);
 }
 
 .omni-daily-coach__focus-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: clamp(1.25rem, 2.5vw, 2.5rem);
+  grid-template-columns: minmax(0, 65fr) minmax(0, 35fr);
+  align-items: stretch;
+  gap: 0;
+  min-height: 10.5rem;
 }
 
 .omni-daily-coach__focus-main {
@@ -1510,6 +1543,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  padding: 0.15rem clamp(1rem, 2vw, 1.75rem) 0.15rem 0;
 }
 
 .omni-daily-coach__tag {
@@ -1545,11 +1579,11 @@
 
 .omni-daily-coach__action-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.6rem;
   margin-top: 0.85rem;
-  flex-wrap: wrap;
 }
 
 .omni-daily-coach__buttons {
@@ -1603,7 +1637,7 @@
 .omni-daily-coach__meta {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
   font-size: 0.75rem;
   color: var(--omni-shell-muted);
   font-weight: 600;
@@ -1674,8 +1708,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.25rem 0.75rem;
-  flex-shrink: 0;
+  min-width: 0;
+  padding: 1rem clamp(0.75rem, 1.5vw, 1.35rem);
+  border-left: 1px solid var(--omni-shell-border);
+  background: transparent;
 }
 
 .omni-focus-signal {
@@ -1685,10 +1721,27 @@
   justify-content: center;
 }
 
+.omni-focus-signal__eyebrow {
+  margin-bottom: 0.55rem;
+  color: var(--omni-shell-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.omni-focus-signal__detail {
+  max-width: 16ch;
+  margin-top: 0.55rem;
+  color: var(--omni-shell-muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
 .omni-focus-signal__ring-container {
   position: relative;
-  width: 6.5rem;
-  height: 6.5rem;
+  width: clamp(7.5rem, 10vw, 8.75rem);
+  height: clamp(7.5rem, 10vw, 8.75rem);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1721,7 +1774,7 @@
 }
 
 .omni-focus-signal__value {
-  font-size: 1.85rem;
+  font-size: clamp(2rem, 3vw, 2.5rem);
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.03em;
@@ -1729,12 +1782,12 @@
 }
 
 .omni-focus-signal__label {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 650;
   line-height: 1.15;
   color: var(--omni-shell-muted);
   margin-top: 0.2rem;
-  max-width: 6.5ch;
+  max-width: 8ch;
   text-align: center;
 }
 
@@ -1743,8 +1796,8 @@
 /* -------------------------------------------------------------------------- */
 
 .omni-daily-coach__plan {
-  margin-top: 0.95rem;
-  padding-top: 0.85rem;
+  margin-top: 1.05rem;
+  padding-top: 0.95rem;
   border-top: 1px solid var(--omni-shell-border);
 }
 
@@ -1766,7 +1819,7 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 3.15rem;
+  min-height: 3.35rem;
   padding: 0.55rem 0.8rem;
   border-radius: 0.65rem;
   border: 1px solid var(--omni-shell-border);
@@ -1813,14 +1866,14 @@
 }
 
 .omni-daily-coach__plan-row-text strong {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 650;
   color: var(--omni-text);
   line-height: 1.2;
 }
 
 .omni-daily-coach__plan-row-text span {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: var(--omni-shell-muted);
   line-height: 1.25;
 }
@@ -1841,13 +1894,31 @@
   color: var(--omni-shell-muted);
 }
 
+.omni-daily-coach__deadline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--omni-shell-border);
+  color: var(--omni-shell-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.omni-daily-coach__deadline svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--omni-action-primary);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Dashboard Snapshot Lower Summary Cards                                     */
 /* -------------------------------------------------------------------------- */
 
 .omni-dashboard__snapshot {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: 0.75rem;
 }
 
@@ -1855,7 +1926,7 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 5.5rem;
+  min-height: 4.85rem;
   padding: 0.85rem 1rem;
   border: 1px solid var(--omni-shell-border);
   border-radius: 0.75rem;
@@ -1966,18 +2037,17 @@
 .omni-evidence-dock__sections {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.8rem;
 }
 
 .omni-evidence-dock__section {
-  padding: 0.75rem;
-  border: 1px solid var(--omni-shell-border);
-  border-radius: 0.75rem;
-  background: var(--omni-ground);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .omni-evidence-dock__section-title {
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.4rem;
   color: var(--omni-shell-muted);
   font-size: 0.7rem;
   font-weight: 700;
@@ -1989,7 +2059,7 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.4rem 0.2rem;
+  padding: 0.5rem 0.1rem;
 }
 
 .omni-evidence-dock__list {
@@ -2006,8 +2076,8 @@
   align-items: flex-start;
   gap: 0.45rem;
   width: 100%;
-  min-height: 2.75rem;
-  padding: 0.55rem 0.6rem;
+  min-height: 3.1rem;
+  padding: 0.62rem 0.65rem;
   border: 1px solid var(--omni-shell-border);
   border-radius: 0.6rem;
   background: var(--omni-surface);
@@ -2039,7 +2109,7 @@
 
 .omni-evidence-dock__item strong {
   min-width: 0;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   font-weight: 650;
   line-height: 1.25;
   color: var(--omni-text);
@@ -2049,7 +2119,7 @@
 .omni-evidence-dock__empty {
   min-width: 0;
   color: var(--omni-shell-muted);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   line-height: 1.35;
 }
 
@@ -2302,8 +2372,8 @@
 
   .omni-shell-header .omni-logo--horizontal .omni-logo__mark,
   .omni-shell-header .omni-logo--horizontal .omni-mark {
-    width: 2.25rem;
-    height: 2.25rem;
+    width: 2rem;
+    height: 2rem;
   }
 
   .omni-shell-header .omni-logo__type {
@@ -2316,7 +2386,7 @@
   }
 
   .omni-shell-header .omni-logo__wordmark {
-    width: 5.25rem;
+    width: 4.7rem;
   }
 
   .omni-shell-header .omni-logo__descriptor {
@@ -2355,13 +2425,45 @@
   }
 
   .omni-daily-coach__focus-grid {
-    grid-template-columns: 1fr;
-    gap: 0.65rem;
+    grid-template-columns: minmax(0, 1fr) 4.6rem;
+    gap: 0.6rem;
+    align-items: start;
   }
 
   .omni-daily-coach__focus-signal {
+    display: flex;
+    min-height: 0;
+    padding: 0.2rem 0 0.2rem 0.55rem;
+    border-top: 0;
+    border-left: 1px solid var(--omni-shell-border);
+    background: transparent;
+    align-self: start;
+  }
+
+  .omni-focus-signal {
+    width: 100%;
+    gap: 0.35rem;
+  }
+
+  .omni-focus-signal__eyebrow,
+  .omni-focus-signal__detail {
     display: none;
   }
+
+  .omni-focus-signal__ring-container {
+    width: 3.4rem;
+    height: 3.4rem;
+  }
+
+  .omni-focus-signal__value {
+    font-size: 1.15rem;
+  }
+
+  .omni-focus-signal__label {
+    max-width: 7ch;
+    font-size: 0.58rem;
+  }
+
 
   .omni-daily-coach h2 {
     font-size: 1.25rem;
@@ -2404,8 +2506,20 @@
   }
 
   .omni-daily-coach__plan-row {
-    min-height: 2.85rem;
-    padding: 0.45rem 0.65rem;
+    min-height: 3.35rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .omni-daily-coach__plan-row-text span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+
+  .omni-daily-coach__deadline {
+    margin-top: 0.75rem;
+    padding-top: 0.65rem;
   }
 
   .omni-dashboard__snapshot {

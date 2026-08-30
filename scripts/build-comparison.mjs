@@ -26,7 +26,7 @@ async function run() {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #1c1917;
     padding: 32px;
-    width: 2400px;
+    width: 3280px;
   }
   .header { margin-bottom: 24px; }
   .header h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #1c1917; }
@@ -57,15 +57,33 @@ async function run() {
     color: #78716c;
     margin-bottom: 14px;
   }
-  .card img {
+  .desktop-stage {
+    height: 900px;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    background: #f7f4ee;
+    border-radius: 8px;
+  }
+  .desktop-stage img {
     display: block;
-    width: 100%;
-    height: auto;
+    height: 900px;
+    width: auto;
+    max-width: none;
     border-radius: 8px;
     border: 1px solid #e7e5e4;
   }
+  .mobile-stage {
+    display: flex;
+    justify-content: center;
+    background: #f7f4ee;
+    border-radius: 8px;
+    padding: 12px;
+  }
   .mobile-card img {
-    max-width: 440px;
+    width: 412px;
+    height: auto;
     margin: 0 auto;
   }
 </style>
@@ -73,31 +91,31 @@ async function run() {
 <body>
   <div class="header">
     <h1>OMNI Focus Dock · Visual review comparison (Pass 3)</h1>
-    <p>Approved reference against deterministic build captures. High visual fidelity review artifact.</p>
+    <p>Approved reference against deterministic build captures. Composition review only; not a pixel baseline.</p>
   </div>
   <div class="grid">
     <div style="display: flex; flex-direction: column; gap: 28px;">
       <div class="card">
         <div class="card-title">APPROVED REFERENCE</div>
         <div class="card-sub">Focus Dock App Shell · Product Owner spatial authority</div>
-        <img src="${mockData}" alt="Approved Reference" />
+        <div class="desktop-stage"><img src="${mockData}" alt="Approved Reference" /></div>
       </div>
       <div class="card">
         <div class="card-title">BUILD · DESKTOP 1920 × 1080</div>
         <div class="card-sub">Centered bounded frame · document top</div>
-        <img src="${d1920Data}" alt="Desktop 1920 Build" />
+        <div class="desktop-stage"><img src="${d1920Data}" alt="Desktop 1920 Build" /></div>
       </div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 28px;">
       <div class="card">
         <div class="card-title">BUILD · DESKTOP 1440 × 900</div>
         <div class="card-sub">Reduced motion · document top</div>
-        <img src="${d1440Data}" alt="Desktop 1440 Build" />
+        <div class="desktop-stage"><img src="${d1440Data}" alt="Desktop 1440 Build" /></div>
       </div>
       <div class="card mobile-card">
         <div class="card-title">BUILD · PIXEL 7 MOBILE</div>
         <div class="card-sub">Reduced motion · 5 destinations · document top</div>
-        <img src="${mobileData}" alt="Pixel 7 Mobile Build" />
+        <div class="mobile-stage"><img src="${mobileData}" alt="Pixel 7 Mobile Build" /></div>
       </div>
     </div>
   </div>

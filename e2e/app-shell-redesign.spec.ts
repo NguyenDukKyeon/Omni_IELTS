@@ -28,6 +28,7 @@ const SHELL_CONTROL_IDS = [
   'dashboard.coach.primary',
   'dashboard.coach.alternative-1',
   'dashboard.coach.alternative-2',
+  'dashboard.coach.plan-manual-module',
   'dashboard.coach.open-evidence',
   'dashboard.open-latest-practice',
   'dashboard.open-latest-mock',
@@ -44,7 +45,6 @@ const SHELL_CONTROL_IDS = [
   'shell.evidence.open-due-review',
   'shell.evidence.open-due-vocab',
   'shell.evidence.open-context',
-  'shell.evidence.resume-latest',
   'shell.evidence.open-practice',
   'shell.evidence.open-mock',
   'shell.grammar.tab-grammar',
@@ -165,6 +165,9 @@ test('desktop shell controls activate real navigation, disclosure, theme, and re
   await activate(page, 'dashboard.coach.alternative-2');
   await expect(page.getByRole('dialog', { name: 'Chọn module học tập' })).toBeVisible();
   await activate(page, 'shell.chooser.close');
+  await activate(page, 'dashboard.coach.plan-manual-module');
+  await expect(page.getByRole('dialog', { name: 'Chọn module học tập' })).toBeVisible();
+  await activate(page, 'shell.chooser.close');
 
   for (const [controlId, moduleId] of [
     ['shell.chooser.module-sources', 'sources'],
@@ -246,9 +249,7 @@ test('desktop shell controls activate valid evidence and review destinations', a
     }]));
   });
   await page.reload();
-  await activate(page, 'shell.evidence.resume-latest');
-  await expect(page.locator('#ielts_practice_view')).toBeVisible();
-  await activate(page, 'shell.nav.dashboard');
+  await expect(page.locator('[data-ux-control="shell.evidence.resume-latest"]')).toHaveCount(0);
 
   await page.addInitScript(() => {
     localStorage.setItem('omni_ielts_practice_v1', JSON.stringify([]));
@@ -496,19 +497,23 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
       const primaryCta = document.querySelector('[data-ux-control="dashboard.coach.primary"]');
       const ctaRect = primaryCta?.getBoundingClientRect();
       const focusGrid = document.querySelector('.omni-daily-coach__focus-grid');
-      const focusSignal = document.querySelector('.omni-focus-signal');
-      const signalValue = document.querySelector('.omni-focus-signal__value')?.textContent || '';
-      const planRow = document.querySelector('.omni-daily-coach__plan-row');
-      const planRowHeight = planRow?.getBoundingClientRect().height ?? 0;
-      const emptyCards = document.querySelectorAll('.omni-evidence-dock__empty-card');
+       const focusMain = document.querySelector('.omni-daily-coach__focus-main');
+       const focusSignal = document.querySelector('.omni-daily-coach__focus-signal');
+       const signalValue = document.querySelector('.omni-focus-signal__value')?.textContent || '';
+       const focusMainRect = focusMain?.getBoundingClientRect();
+       const focusSignalRect = focusSignal?.getBoundingClientRect();
+       const planRows = Array.from(document.querySelectorAll('.omni-daily-coach__plan-row'));
+       const planRowHeight = planRows[0]?.getBoundingClientRect().height ?? 0;
+       const emptyCards = document.querySelectorAll('.omni-evidence-dock__empty-card');
 
       const leftMargin = frameRect?.left ?? 0;
       const rightMargin = window.innerWidth - (frameRect?.right ?? window.innerWidth);
       const isCentered = Math.abs(leftMargin - rightMargin) <= 6;
-      const titleToCtaDistance = ctaRect && titleRect ? ctaRect.top - titleRect.bottom : 999;
-      const hasTwoZoneGrid = Boolean(focusGrid && focusSignal);
+       const titleToCtaDistance = ctaRect && titleRect ? ctaRect.top - titleRect.bottom : 999;
+       const hasTwoZoneGrid = Boolean(focusGrid && focusSignal);
+       const focusZoneWidth = (focusMainRect?.width ?? 0) + (focusSignalRect?.width ?? 0);
 
-      return {
+       return {
         viewportWidth: window.innerWidth,
         documentWidth: document.documentElement.scrollWidth,
         isCentered,
@@ -516,10 +521,13 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
         dockWidth: dockRect?.width ?? 0,
         mainWidth: mainRect?.width ?? 0,
         titleToCtaDistance,
-        hasTwoZoneGrid,
-        signalValue,
-        planRowHeight,
-        emptyCardCount: emptyCards.length,
+         hasTwoZoneGrid,
+         signalValue,
+         focusMainShare: focusZoneWidth ? (focusMainRect?.width ?? 0) / focusZoneWidth : 0,
+         focusSignalShare: focusZoneWidth ? (focusSignalRect?.width ?? 0) / focusZoneWidth : 0,
+         planRowHeight,
+         planRowsAreButtons: planRows.length === 2 && planRows.every((row) => row.tagName === 'BUTTON'),
+         emptyCardCount: emptyCards.length,
       };
     });
 
@@ -530,12 +538,17 @@ test('Focus Dock deterministic layout assertions verify approved desktop and mob
     expect(desktopLayout.dockWidth).toBeGreaterThanOrEqual(220);
     expect(desktopLayout.dockWidth).toBeLessThanOrEqual(250);
     expect(desktopLayout.mainWidth).toBeGreaterThanOrEqual(620);
-    expect(desktopLayout.titleToCtaDistance).toBeLessThan(120);
-    expect(desktopLayout.hasTwoZoneGrid).toBe(true);
-    expect(desktopLayout.signalValue.length).toBeGreaterThan(0);
-    expect(desktopLayout.planRowHeight).toBeLessThanOrEqual(68);
-    expect(desktopLayout.planRowHeight).toBeGreaterThanOrEqual(48);
-    expect(desktopLayout.emptyCardCount).toBeLessThanOrEqual(1);
+     expect(desktopLayout.titleToCtaDistance).toBeLessThan(120);
+     expect(desktopLayout.hasTwoZoneGrid).toBe(true);
+     expect(desktopLayout.signalValue.length).toBeGreaterThan(0);
+     expect(desktopLayout.focusMainShare).toBeGreaterThanOrEqual(0.58);
+     expect(desktopLayout.focusMainShare).toBeLessThanOrEqual(0.70);
+     expect(desktopLayout.focusSignalShare).toBeGreaterThanOrEqual(0.30);
+     expect(desktopLayout.focusSignalShare).toBeLessThanOrEqual(0.42);
+     expect(desktopLayout.planRowHeight).toBeLessThanOrEqual(68);
+     expect(desktopLayout.planRowHeight).toBeGreaterThanOrEqual(48);
+     expect(desktopLayout.planRowsAreButtons).toBe(true);
+     expect(desktopLayout.emptyCardCount).toBeLessThanOrEqual(1);
   }
 });
 

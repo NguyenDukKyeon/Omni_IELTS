@@ -1,12 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { BookOpenCheck, ChevronLeft, ChevronRight, CircleAlert, Clock3, History } from 'lucide-react';
+import { BookOpenCheck, ChevronLeft, ChevronRight, CircleAlert, Clock3 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAppShell } from '../../context/AppShellContext';
 import { buildEvidenceDockModel, type EvidenceDockItem } from '../../lib/evidenceDock';
 import {
   isExplicitIndependentEvidence,
   isExplicitMockEvidence,
-  isUnfinishedPracticeAttempt,
 } from '../../lib/learningEvidence';
 import { getDueMistakes, getDueVocabCards } from '../../services/srsScheduler';
 import type { ModuleId } from '../../types';
@@ -15,14 +14,12 @@ function controlForItem(item: EvidenceDockItem):
   | 'shell.evidence.open-due-review'
   | 'shell.evidence.open-due-vocab'
   | 'shell.evidence.open-context'
-  | 'shell.evidence.resume-latest'
   | 'shell.evidence.open-practice'
   | 'shell.evidence.open-mock'
   | null {
   if (item.action === 'none' || !item.destination) return null;
   if (item.id === 'due-mistakes') return 'shell.evidence.open-due-review';
   if (item.id === 'due-vocab') return 'shell.evidence.open-due-vocab';
-  if (item.action === 'resume') return 'shell.evidence.resume-latest';
   if (item.action === 'open_module' && item.destination === 'practice') return 'shell.evidence.open-practice';
   if (item.action === 'open_module' && item.destination === 'mock_test') return 'shell.evidence.open-mock';
   if (item.action === 'collect' || item.id === 'current-media' || item.action === 'open_module') {
@@ -44,9 +41,7 @@ function EvidenceDockButton({
 }) {
   const StatusIcon = item.status === 'due'
     ? Clock3
-    : item.status === 'unfinished'
-      ? History
-      : BookOpenCheck;
+    : BookOpenCheck;
   const content = (
     <>
       <StatusIcon aria-hidden="true" className="omni-evidence-dock__item-icon" />
@@ -64,9 +59,6 @@ function EvidenceDockButton({
   }
   if (control === 'shell.evidence.open-due-vocab') {
     return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-due-vocab" onClick={() => onOpen(item.destination)}>{content}</button>;
-  }
-  if (control === 'shell.evidence.resume-latest') {
-    return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.resume-latest" onClick={() => onOpen(item.destination)}>{content}</button>;
   }
   if (control === 'shell.evidence.open-practice') {
     return <button {...props} data-ux-scope="app-shell-v2" data-ux-flow="app.navigation" data-ux-control="shell.evidence.open-practice" onClick={() => onOpen(item.destination)}>{content}</button>;
@@ -97,16 +89,17 @@ export function EvidenceDock() {
   const dueMistakes = getDueMistakes(mistakes);
   const dueVocab = getDueVocabCards(vocabCards);
   const currentMedia = mediaSessions.find((session) => !session.completed);
-  const unfinished = practiceAttempts.find(isUnfinishedPracticeAttempt);
-  const latestAttempt = practiceAttempts.find(isExplicitIndependentEvidence);
-  const latestMock = mockResults.find(isExplicitMockEvidence);
-  const recentEvidence = unfinished
-    ? [{ id: unfinished.id, label: unfinished.taskType, destination: 'practice' as ModuleId, canResume: true }]
-    : latestAttempt
-      ? [{ id: latestAttempt.id, label: latestAttempt.taskType, destination: 'practice' as ModuleId, canResume: false }]
-      : latestMock
-        ? [{ id: latestMock.id, label: latestMock.testTitle, destination: 'mock_test' as ModuleId, canResume: false }]
-        : [];
+  const latestAttempt = [...practiceAttempts]
+    .filter(isExplicitIndependentEvidence)
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
+  const latestMock = [...mockResults]
+    .filter(isExplicitMockEvidence)
+    .sort((a, b) => Date.parse(b.completedDate) - Date.parse(a.completedDate))[0];
+  const recentEvidence = latestAttempt
+    ? [{ id: latestAttempt.id, label: latestAttempt.taskType, destination: 'practice' as ModuleId }]
+    : latestMock
+      ? [{ id: latestMock.id, label: latestMock.testTitle, destination: 'mock_test' as ModuleId }]
+      : [];
 
   const model = buildEvidenceDockModel({
     activeModule,
