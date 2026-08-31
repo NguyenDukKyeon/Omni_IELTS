@@ -58,6 +58,12 @@ import {
 } from "./src/lib/sources/groundedChat";
 import { handleSourceImportRequest } from "./src/lib/sources/importTransport.server";
 import {
+  createJsonParserExcludingSourceImport,
+  createSourceImportAdmissionGate,
+  createSourceImportJsonParser,
+  createSourceImportParserErrorHandler,
+} from "./src/lib/sources/importRouteGate.server";
+import {
   handleArtifactJobRequest,
   handleArtifactJobStatusRequest,
 } from "./src/lib/sources/artifactTransport.server";
@@ -207,7 +213,8 @@ function percentile(values: number[], ratio: number) {
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
 }
 
-app.use(express.json({ limit: "15mb" }));
+const genericJsonParser = express.json({ limit: "15mb" });
+app.use(createJsonParserExcludingSourceImport(genericJsonParser));
 
 // Initialize GoogleGenAI client lazily or safely with User-Agent telemetry
 function getGeminiClient(request?: express.Request): GoogleGenAI | null {
@@ -8593,27 +8600,44 @@ app.get('/api/sources/versions/:versionId', async (req, res) => {
   return writeSourcesTransportResult(res, result);
 });
 
-app.post('/api/sources/import', async (req, res) => {
-  const cloud = sourcesCloudConfig();
-  const result = await handleSourceImportRequest({
-    featureEnabled: parseSourcesLibraryV2Env(process.env),
-    authorizationHeader: req.header('authorization'),
-    body: req.body,
-    cloudConfigured: cloud.configured,
-    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
-      accessToken,
-      supabaseUrl: cloud.supabaseUrl,
-      supabaseAnonKey: cloud.supabaseAnonKey,
-    }),
-    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
-      accessToken,
-      supabaseUrl: cloud.supabaseUrl,
-      supabaseAnonKey: cloud.supabaseAnonKey,
-    }),
-    consumeQuota: sourcesQuotaConsumer,
-  });
-  return writeSourcesTransportResult(res, result);
-});
+app.post('/api/sources/import',
+  (req, res, next) => {
+    const cloud = sourcesCloudConfig();
+    return createSourceImportAdmissionGate({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      cloudConfigured: cloud.configured,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+    })(req, res, next);
+  },
+  createSourceImportJsonParser(),
+  createSourceImportParserErrorHandler(),
+  async (req, res) => {
+    const cloud = sourcesCloudConfig();
+    const result = await handleSourceImportRequest({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      authorizationHeader: req.header('authorization'),
+      body: req.body,
+      cloudConfigured: cloud.configured,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+      repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+      consumeQuota: sourcesQuotaConsumer,
+      verifiedLearner: res.locals.sourcesVerifiedLearner,
+    });
+    return writeSourcesTransportResult(res, result);
+  },
+);
 
 app.post('/api/sources/artifact-jobs', async (req, res) => {
   const cloud = sourcesCloudConfig();

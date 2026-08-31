@@ -21,6 +21,7 @@ import {
   type SourcesTransportResult,
   unavailableResult,
   verifyOrReject,
+  type VerifiedLearner,
 } from './transportShared.server';
 
 export const SOURCE_IMPORT_MAX_TEXT_CHARS = 1_000_000;
@@ -140,6 +141,7 @@ export type SourceImportRequestHandlerInput = {
   repositoryForToken: (accessToken: string) => SourceImportRepository;
   consumeQuota?: ConsumeSourcesQuota;
   extractDocument?: SourceImportExtractor;
+  verifiedLearner?: VerifiedLearner;
 };
 
 type PreparedImport = {
@@ -147,6 +149,10 @@ type PreparedImport = {
   extractionContent: string | Uint8Array;
   contentHash: string;
 };
+
+type ValidatedExtraction =
+  | { kind: 'version'; version: SourceVersion }
+  | { kind: 'handoff'; error: NonNullable<ExtractionResult['error']>; normalized: NormalizedSourceError };
 
 function isTransportResult(value: PreparedImport | SourcesTransportResult): value is SourcesTransportResult {
   return 'body' in value && typeof value.status === 'number';
@@ -300,7 +306,9 @@ export async function handleSourceImportRequest(
   if (!accessToken) return authRequiredResult();
   if (!input.cloudConfigured) return unavailableResult();
 
-  const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
+  const auth = input.verifiedLearner
+    ? { ok: true as const, learner: input.verifiedLearner }
+    : await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
 
   // Decode, hash, and extract only after the learner identity is verified.
@@ -308,11 +316,35 @@ export async function handleSourceImportRequest(
   const prepared = prepareImport(parsed.data);
   if (isTransportResult(prepared)) return prepared;
 
+  const provenance = provenanceFor(prepared);
+  let extracted: ExtractionResult;
+  try {
+    extracted = await (input.extractDocument ?? extractDocument)({
+      type: prepared.request.type,
+      content: prepared.extractionContent,
+      title: prepared.request.title,
+    });
+  } catch (error) {
+    return sourceFailureResult(normalizeSourceError(error));
+  }
+
+  let validatedExtraction: ValidatedExtraction;
+  if (extracted.success) {
+    if (!extracted.version) return sourceFailureResult(normalizeSourceError({ code: 'EXTRACTION_FAILED' }));
+    validatedExtraction = { kind: 'version', version: extracted.version };
+  } else {
+    const normalized = normalizeSourceError(extracted.error ?? { code: 'EXTRACTION_FAILED' });
+    if (normalized.code !== 'HANDOFF_REQUIRED' || !extracted.error) {
+      return sourceFailureResult(normalized);
+    }
+    validatedExtraction = { kind: 'handoff', error: extracted.error, normalized };
+  }
+
+  // Spend product quota only after authentication and semantic source validation.
   const quotaRejection = applyVerifiedQuota(input.consumeQuota, 'source-import', auth.learner.userId);
   if (quotaRejection) return quotaRejection;
 
   const repository = input.repositoryForToken(auth.learner.accessToken);
-  const provenance = provenanceFor(prepared);
   let record = createSourceRecord({
     userId: auth.learner.userId,
     title: prepared.request.title,
@@ -327,56 +359,29 @@ export async function handleSourceImportRequest(
     return unavailableResult();
   }
 
-  let extracted: ExtractionResult;
-  try {
-    extracted = await (input.extractDocument ?? extractDocument)({
-      type: prepared.request.type,
-      content: prepared.extractionContent,
-      title: prepared.request.title,
-    });
-  } catch (error) {
-    const normalized = normalizeSourceError(error);
-    const failedRecord = withRecordState(record, 'failed');
-    await repository.updateRecord(failedRecord).catch(() => undefined);
-    return sourceFailureResult(normalized);
-  }
-
-  if (!extracted.success) {
-    const normalized = normalizeSourceError(extracted.error ?? { code: 'EXTRACTION_FAILED' });
-    if (normalized.code === 'HANDOFF_REQUIRED' || extracted.error?.code === 'HANDOFF_REQUIRED') {
-      const handoffProvenance: SourceProvenance = {
-        ...provenance,
-        owningModule: extracted.error?.owningModule ?? owningModuleFor(prepared.request.type),
-        handoffReasonVi: normalized.userMessageVi,
+  if (validatedExtraction.kind === 'handoff') {
+    const handoffProvenance: SourceProvenance = {
+      ...provenance,
+      owningModule: validatedExtraction.error.owningModule ?? owningModuleFor(prepared.request.type),
+      handoffReasonVi: validatedExtraction.normalized.userMessageVi,
+    };
+    const handoffRecord = withRecordState(record, 'handoff_required', undefined, handoffProvenance);
+    try {
+      const saved = await repository.updateRecord(handoffRecord);
+      return {
+        status: 200,
+        body: {
+          status: 'handoff_required',
+          sourceRecord: saved,
+          owningModule: handoffRecord.provenance.owningModule,
+        },
       };
-      const handoffRecord = withRecordState(record, 'handoff_required', undefined, handoffProvenance);
-      try {
-        const saved = await repository.updateRecord(handoffRecord);
-        return {
-          status: 200,
-          body: {
-            status: 'handoff_required',
-            sourceRecord: saved,
-            owningModule: handoffRecord.provenance.owningModule,
-          },
-        };
-      } catch {
-        return unavailableResult();
-      }
+    } catch {
+      return unavailableResult();
     }
-
-    const failedRecord = withRecordState(record, 'failed');
-    await repository.updateRecord(failedRecord).catch(() => undefined);
-    return sourceFailureResult(normalized);
   }
 
-  if (!extracted.version) {
-    const normalized = normalizeSourceError({ code: 'EXTRACTION_FAILED' });
-    await repository.updateRecord(withRecordState(record, 'failed')).catch(() => undefined);
-    return sourceFailureResult(normalized);
-  }
-
-  const version: SourceVersion = { ...extracted.version, sourceId: record.id };
+  const version: SourceVersion = { ...validatedExtraction.version, sourceId: record.id };
   try {
     await repository.saveVersion(version, auth.learner.userId);
     const readyRecord = withRecordState(record, 'ready', version);
