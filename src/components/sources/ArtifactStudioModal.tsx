@@ -133,9 +133,9 @@ export function ArtifactStudioModal({
       return;
     }
     if (event.key !== 'Tab' || !dialogRef.current) return;
-    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+    const focusable = Array.from(dialogRef.current.querySelectorAll(
       'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-    ));
+    )) as HTMLElement[];
     if (focusable.length === 0) {
       event.preventDefault();
       dialogRef.current.focus();
@@ -256,7 +256,7 @@ export function ArtifactStudioModal({
             onCreateAnother={createAnother}
           />
         ) : (
-          <form className="omni-artifact-studio__form" onSubmit={submit}>
+          <form className="omni-artifact-studio__form" onSubmit={submit} data-ux-control="sources.artifact.form" data-ux-flow="sources.artifact.generate">
             {state === 'loading' ? (
               <div className="omni-artifact-studio__progress" role="status" aria-live="polite">
                 <LoaderCircle aria-hidden="true" />

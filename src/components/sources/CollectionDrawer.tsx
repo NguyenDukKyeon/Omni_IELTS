@@ -1,5 +1,5 @@
 import { FolderPlus, Layers, Plus, X } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import type { SourceCollection } from '../../types/sources';
 import { sourceControlId } from './SourceCard';
 
@@ -21,7 +21,7 @@ export function CollectionDrawer({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {

@@ -147,6 +147,10 @@ type PreparedImport = {
   contentHash: string;
 };
 
+function isTransportResult(value: PreparedImport | SourcesTransportResult): value is SourcesTransportResult {
+  return 'body' in value && typeof value.status === 'number';
+}
+
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -291,7 +295,7 @@ export async function handleSourceImportRequest(
   const parsed = SourceImportRequestSchema.safeParse(input.body);
   if (!parsed.success) return invalidRequestResult();
   const prepared = prepareImport(parsed.data);
-  if ('status' in prepared && typeof prepared.status === 'number') return prepared;
+  if (isTransportResult(prepared)) return prepared;
 
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();

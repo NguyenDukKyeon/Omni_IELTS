@@ -1,5 +1,5 @@
 import { Globe2, MessageCircle, RefreshCw, Send } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import {
   executeGroundedChat,
   requestWebResearch,
@@ -126,7 +126,7 @@ export function SourceGroundedChat({
     if (researchState !== 'idle' && researchState !== 'ready' && lastQuestion) void sendResearch();
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void sendQuestion(question);
   };

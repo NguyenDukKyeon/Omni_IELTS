@@ -67,7 +67,8 @@ export function SourceReader({
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
-    const selectedBlockIds = Array.from(blocksRef.current.querySelectorAll<HTMLElement>('[data-source-block-id]'))
+    const elements = Array.from(blocksRef.current.querySelectorAll('[data-source-block-id]')) as HTMLElement[];
+    const selectedBlockIds = elements
       .filter((element) => {
         try {
           return range.intersectsNode(element);
@@ -168,4 +169,3 @@ export function SourceReader({
     </section>
   );
 }
-
