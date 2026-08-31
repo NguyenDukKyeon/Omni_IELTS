@@ -15,6 +15,7 @@ import { SourceGroundedChat } from '../components/sources/SourceGroundedChat';
 import { SourceImportPanel } from '../components/sources/SourceImportPanel';
 import { SourceReader, type SourceReaderState } from '../components/sources/SourceReader';
 import { SourcesLibraryExplorer, type SourcesLibraryExplorerState } from '../components/sources/SourcesLibraryExplorer';
+import type { DestinationHandoffResult } from '../lib/sources/destinationHandoff';
 
 type SourcesViewTab = 'library' | 'reader' | 'create';
 
@@ -177,9 +178,14 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
     if (activeSource) openArtifact(activeSource);
   };
 
-  const openDestination = (moduleId: ModuleId) => {
+  const openDestination = (handoff: DestinationHandoffResult & { navigable: true }) => {
     setIsArtifactOpen(false);
-    onNavigate?.(moduleId);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('omni:sources-artifact-handoff', {
+        detail: handoff.draftRef,
+      }));
+    }
+    onNavigate?.(handoff.targetModule);
   };
 
   const contextLabel = selectedVersionIds.length === 0
@@ -303,7 +309,7 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
           selectedSpan={artifactSource.id === activeSourceId ? selectedSpan : undefined}
           onClose={() => setIsArtifactOpen(false)}
           onOpenArtifact={(handoff) => {
-            if (handoff.navigable) openDestination(handoff.targetModule);
+            if (handoff.navigable) openDestination(handoff);
           }}
           onCreateAnother={() => setActiveTab('create')}
         />
