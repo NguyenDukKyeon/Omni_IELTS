@@ -89,6 +89,15 @@ We select **Option B**.
 
 ---
 
+## 4.1 Batch C correction delta
+
+The Batch C correction supersedes the earlier implementation notes where they conflict:
+
+1. The destination handoff is a typed, in-memory `PendingArtifactHandoff` held at the app navigation boundary. It is created only by the learner's explicit `Open artifact` action, consumed by the matching destination owner, and is not persisted or resumed after reload. Sources never writes destination rows.
+2. `OMNI_SOURCES_LIBRARY_V2` is the single deploy-level flag. Express injects the server-parsed boolean into the browser shell as `window.__OMNI_FLAGS__.sourcesLibraryV2`; there is no manually synchronised `VITE_OMNI_SOURCES_LIBRARY_V2` flag. OFF selects the legacy view and rejects every Sources cloud route before work; ON selects SourcesView and its routes.
+3. Source import authenticates the verified learner before binary decoding, hashing, extraction, or quota consumption. Cheap schema and length checks remain before authentication. Semantically invalid or oversized requests consume no quota, and raw source bytes/text never enter logs or error bodies.
+4. Source import and artifact generation use distinct documented in-process quota configurations and defaults. Artifact target bands are validated at 3.0 through 9.0 in 0.5 increments by the request schema, job factory, and UI.
+
 ## 5. Consequences & Trade-offs
 
 ### Positive
@@ -103,7 +112,7 @@ We select **Option B**.
 ### Negative / Mitigations
 
 - **Trade-off**: Learner must click through to destination module to save draft.
-  - *Mitigation*: Smooth deep-linking via "Open artifact" CTA with auto-recovery of pending draft in destination module.
+  - *Mitigation*: A typed in-memory handoff opens the matching destination only after the learner clicks; reload does not persist or resume the draft.
 - **Trade-off**: Multi-step batch import requires robust client-side job polling/state machine.
   - *Mitigation*: Implemented via deterministic `ImportJobMachine` with clear UI progress for each item.
 - **Trade-off**: A YouTube URL entered in Sources does not yield captions in this epic.

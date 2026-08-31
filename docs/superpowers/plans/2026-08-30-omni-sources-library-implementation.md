@@ -14,6 +14,10 @@
 
 **Coding epic gate:** Do not start Tasks 1–12 until P02 is merged into `origin/main` and Product Owner approves this corrected plan.
 
+### Batch C correction delta (applies to Tasks 8–11)
+
+The implementation correction keeps the existing task sequence and does not start Task 12. The flag is one server-owned `OMNI_SOURCES_LIBRARY_V2` value injected into the browser shell; OFF selects the legacy facade and rejects all Sources routes before work. The `Open artifact` action carries a typed, in-memory pending handoff through the existing app context to the matching destination consumer, with no reload persistence and no Sources-owned destination rows. Import authenticates before decode/hash/extraction, invalid or oversized requests consume no quota, source import and artifact generation use separate quota configuration/defaults, and all artifact target bands are 3.0–9.0 in 0.5 steps. Sources learner copy is Vietnamese, guest empty state uses `Đăng nhập để thêm nguồn`, and Sources Evidence Dock shows only truthful source context.
+
 ## Global Constraints
 
 - Library-first UX is the default landing view when `sources_library_v2` is ON; no automatic multi-artifact generation on import.

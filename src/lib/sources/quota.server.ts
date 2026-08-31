@@ -15,6 +15,8 @@ export type SourcesQuotaBucketConfig = {
 export type SourcesQuotaConfig = {
   groundedChat: SourcesQuotaBucketConfig;
   webResearch: SourcesQuotaBucketConfig;
+  sourceImport: SourcesQuotaBucketConfig;
+  artifactGeneration: SourcesQuotaBucketConfig;
 };
 
 export type ConsumeSourcesQuota = (input: {
@@ -24,6 +26,8 @@ export type ConsumeSourcesQuota = (input: {
 
 const DEFAULT_CHAT_LIMIT = 20;
 const DEFAULT_WEB_LIMIT = 10;
+const DEFAULT_SOURCE_IMPORT_LIMIT = 30;
+const DEFAULT_ARTIFACT_GENERATION_LIMIT = 10;
 const DEFAULT_WINDOW_MS = 3_600_000;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 100;
@@ -72,6 +76,34 @@ export function parseSourcesQuotaEnv(env: Record<string, string | undefined>): S
         MAX_WINDOW_MS,
       ),
     },
+    sourceImport: {
+      limit: parseBoundedInt(
+        env.OMNI_SOURCES_IMPORT_QUOTA_LIMIT,
+        DEFAULT_SOURCE_IMPORT_LIMIT,
+        MIN_LIMIT,
+        MAX_LIMIT,
+      ),
+      windowMs: parseBoundedInt(
+        env.OMNI_SOURCES_IMPORT_QUOTA_WINDOW_MS,
+        DEFAULT_WINDOW_MS,
+        MIN_WINDOW_MS,
+        MAX_WINDOW_MS,
+      ),
+    },
+    artifactGeneration: {
+      limit: parseBoundedInt(
+        env.OMNI_SOURCES_ARTIFACT_GENERATION_QUOTA_LIMIT,
+        DEFAULT_ARTIFACT_GENERATION_LIMIT,
+        MIN_LIMIT,
+        MAX_LIMIT,
+      ),
+      windowMs: parseBoundedInt(
+        env.OMNI_SOURCES_ARTIFACT_GENERATION_QUOTA_WINDOW_MS,
+        DEFAULT_WINDOW_MS,
+        MIN_WINDOW_MS,
+        MAX_WINDOW_MS,
+      ),
+    },
   };
 }
 
@@ -100,11 +132,11 @@ export function createSourcesQuotaConsumer(
           : artifactWindows;
     const bucketConfig = bucket === 'grounded-chat'
       ? config.groundedChat
-      : bucket === 'web-research'
-        ? config.webResearch
-        : bucket === 'source-import'
-          ? config.groundedChat
-          : config.webResearch;
+        : bucket === 'web-research'
+          ? config.webResearch
+          : bucket === 'source-import'
+          ? config.sourceImport
+          : config.artifactGeneration;
     return consumeFixedWindowQuota(windows, userId, now(), bucketConfig.limit, bucketConfig.windowMs);
   };
 }

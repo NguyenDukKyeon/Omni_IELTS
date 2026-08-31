@@ -13,6 +13,7 @@ import type {
   ValidatedArtifactDraft,
   ValidatedArtifactDraftPayload,
 } from '../../types/sources';
+import { isValidSourceArtifactTargetBand } from './targetBand';
 
 const DestinationSchema = z.enum(['practice', 'mock_section', 'vocabulary_deck', 'note', 'idea_bank']);
 
@@ -137,7 +138,7 @@ const CreateArtifactJobInputSchema = z.object({
   userId: z.string().min(1),
   sourceVersionId: z.string().min(1),
   destination: DestinationSchema,
-  targetBand: z.number(),
+  targetBand: z.number().refine(isValidSourceArtifactTargetBand, { message: 'target_band_out_of_range' }),
   selection: SourceSpanSchema.optional(),
   customInstruction: z.string().optional(),
 }).strict();

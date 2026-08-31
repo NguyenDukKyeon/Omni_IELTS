@@ -65,7 +65,7 @@ import {
   handleSourceVersionRequest,
   handleSourcesLibraryRequest,
 } from "./src/lib/sources/libraryTransport.server";
-import { parseSourcesLibraryV2Env } from "./src/lib/sources/featureFlags.server";
+import { injectSourcesRuntimeFlag, parseSourcesLibraryV2Env } from "./src/lib/sources/featureFlags.server";
 import { createSourcesQuotaConsumer, parseSourcesQuotaEnv } from "./src/lib/sources/quota.server";
 import {
   createLearnerJwtSourcesRepository,
@@ -9150,6 +9150,7 @@ Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] 
 
 // Vite middleware setup
 async function startServer() {
+  const sourcesLibraryV2Enabled = parseSourcesLibraryV2Env(process.env);
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -9160,12 +9161,29 @@ async function startServer() {
       },
       appType: "spa",
     });
+    app.use(async (req, res, next) => {
+      const acceptsHtml = req.headers.accept?.includes('text/html');
+      const isShellRequest = req.method === 'GET' && acceptsHtml && (req.path === '/' || req.path === '/index.html');
+      if (!isShellRequest) return next();
+      try {
+        const template = await readFile(path.join(process.cwd(), 'index.html'), 'utf8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+        return res.status(200).type('html').send(injectSourcesRuntimeFlag(transformed, sourcesLibraryV2Enabled));
+      } catch (error) {
+        return next(error);
+      }
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.use(express.static(distPath, { index: false }));
+    app.get("*", async (_req, res, next) => {
+      try {
+        const template = await readFile(path.join(distPath, 'index.html'), 'utf8');
+        return res.status(200).type('html').send(injectSourcesRuntimeFlag(template, sourcesLibraryV2Enabled));
+      } catch (error) {
+        return next(error);
+      }
     });
   }
 

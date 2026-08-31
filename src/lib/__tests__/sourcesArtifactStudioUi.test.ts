@@ -82,6 +82,7 @@ describe('Artifact Studio UI', () => {
     expect(html).toContain('role="dialog"');
     expect(html).toContain('data-ux-control="sources.artifact.generate"');
     expect(html).toMatch(/disabled=""[^>]*data-ux-control="sources\.artifact\.generate"/);
+    expect(html).toMatch(/type="number"[^>]*min="3"[^>]*max="9"[^>]*step="0.5"/);
   });
 
   it('renders handoff actions without auto-navigation or a fake draft', () => {

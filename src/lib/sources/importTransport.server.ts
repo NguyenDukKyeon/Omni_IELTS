@@ -11,6 +11,7 @@ import type {
 } from '../../types/sources';
 import type { LearnerAuthResult } from './groundedChat';
 import type { ConsumeSourcesQuota } from './quota.server';
+import { SOURCE_IMPORT_MAX_BINARY_BYTES } from './importLimits';
 import {
   applyVerifiedQuota,
   authRequiredResult,
@@ -23,7 +24,7 @@ import {
 } from './transportShared.server';
 
 export const SOURCE_IMPORT_MAX_TEXT_CHARS = 1_000_000;
-export const SOURCE_IMPORT_MAX_BINARY_BYTES = 8 * 1024 * 1024;
+export { SOURCE_IMPORT_MAX_BINARY_BYTES } from './importLimits';
 export const SOURCE_IMPORT_MAX_BASE64_CHARS = Math.ceil(SOURCE_IMPORT_MAX_BINARY_BYTES / 3) * 4;
 export const SOURCE_IMPORT_MAX_TITLE_CHARS = 240;
 
@@ -294,8 +295,6 @@ export async function handleSourceImportRequest(
 
   const parsed = SourceImportRequestSchema.safeParse(input.body);
   if (!parsed.success) return invalidRequestResult();
-  const prepared = prepareImport(parsed.data);
-  if (isTransportResult(prepared)) return prepared;
 
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();
@@ -303,6 +302,11 @@ export async function handleSourceImportRequest(
 
   const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
+
+  // Decode, hash, and extract only after the learner identity is verified.
+  // Semantic validation also stays ahead of quota so rejected binary envelopes do not spend a request.
+  const prepared = prepareImport(parsed.data);
+  if (isTransportResult(prepared)) return prepared;
 
   const quotaRejection = applyVerifiedQuota(input.consumeQuota, 'source-import', auth.learner.userId);
   if (quotaRejection) return quotaRejection;

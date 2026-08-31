@@ -4,8 +4,7 @@
  * Task 11 client-safe flag transport:
  * 1. Server reads `OMNI_SOURCES_LIBRARY_V2` through `parseSourcesLibraryV2Env`
  *    in `featureFlags.server.ts` (never from this module).
- * 2. The app shell injects the boolean as `window.__OMNI_FLAGS__.sourcesLibraryV2`
- *    or an equivalent Vite-bootstrapped `VITE_OMNI_SOURCES_LIBRARY_V2` payload.
+ * 2. The app shell injects the boolean as `window.__OMNI_FLAGS__.sourcesLibraryV2`.
  * 3. Browser code calls `isSourcesLibraryV2Enabled(explicitValue)` / `resolveSourcesViewName`.
  * 4. This file must never read the Node process environment. Default remains OFF.
  */
@@ -28,7 +27,7 @@ export function getClientSourcesLibraryV2Flag(): boolean {
     }).__OMNI_FLAGS__?.sourcesLibraryV2;
     if (typeof injected === 'boolean') return injected;
   }
-  return import.meta.env.VITE_OMNI_SOURCES_LIBRARY_V2 === 'true';
+  return false;
 }
 
 export function resolveSourcesViewName(flag?: SourcesLibraryFlagInput):

@@ -3,6 +3,7 @@ import { executeArtifactJob, createArtifactJob, type ArtifactRouterExecute } fro
 import type { LearnerAuthResult, SourceHydrationResult } from './groundedChat';
 import type { ConsumeSourcesQuota } from './quota.server';
 import type { SourceArtifactJob, SourceSpan } from '../../types/sources';
+import { isValidSourceArtifactTargetBand } from './targetBand';
 import {
   applyVerifiedQuota,
   authRequiredResult,
@@ -38,9 +39,7 @@ export const SourceSpanRequestSchema = z.object({
 ), { message: 'source_span_time_order' });
 
 const TargetBandSchema = z.number()
-  .refine(Number.isFinite, { message: 'target_band_finite' })
-  .min(0)
-  .max(9);
+  .refine(isValidSourceArtifactTargetBand, { message: 'target_band_out_of_range' });
 
 export const CreateArtifactJobRequestSchema = z.object({
   sourceVersionId: z.string().min(1).max(128),

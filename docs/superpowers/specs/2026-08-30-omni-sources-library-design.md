@@ -14,6 +14,15 @@
 
 **Coding epic gate:** P03 implementation remains blocked until P02 is merged into `origin/main` and this corrected plan receives Product Owner approval.
 
+### Batch C correction delta
+
+For the existing Batch C implementation, the approved transport and handoff correction is:
+
+- `OMNI_SOURCES_LIBRARY_V2` is the only deploy-level flag. Express injects its parsed boolean into `window.__OMNI_FLAGS__.sourcesLibraryV2`; the browser does not read a parallel Vite flag. OFF keeps `SourceIngestionView` and rejects all Sources cloud routes before work.
+- `Open artifact` creates a typed, in-memory `PendingArtifactHandoff` at the app navigation boundary. The matching Practice, Mock, Vocabulary, or Sources Note/Idea Bank surface consumes and reviews it. No destination rows are written by Sources, and reload does not resume the handoff.
+- Verified learner authentication precedes binary decode, hashing, extraction, and quota work. Invalid or oversized requests do not consume quota. Source import and artifact generation have separate documented quota settings, and artifact bands are 3.0–9.0 in 0.5 steps.
+- New learner-facing Sources copy is Vietnamese, and guest empty state exposes the single primary action `Đăng nhập để thêm nguồn`.
+
 ---
 
 ## 1. Executive Summary & Problem Framing

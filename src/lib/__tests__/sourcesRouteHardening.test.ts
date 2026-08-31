@@ -472,15 +472,23 @@ describe('Sources quota env parser', () => {
     expect(parseSourcesQuotaEnv({})).toEqual({
       groundedChat: { limit: 20, windowMs: 3_600_000 },
       webResearch: { limit: 10, windowMs: 3_600_000 },
+      sourceImport: { limit: 30, windowMs: 3_600_000 },
+      artifactGeneration: { limit: 10, windowMs: 3_600_000 },
     });
     expect(parseSourcesQuotaEnv({
       OMNI_SOURCES_GROUNDED_CHAT_QUOTA_LIMIT: '999999',
       OMNI_SOURCES_GROUNDED_CHAT_QUOTA_WINDOW_MS: '10',
       OMNI_SOURCES_WEB_RESEARCH_QUOTA_LIMIT: '0',
       OMNI_SOURCES_WEB_RESEARCH_QUOTA_WINDOW_MS: '999999999',
+      OMNI_SOURCES_IMPORT_QUOTA_LIMIT: '999999',
+      OMNI_SOURCES_IMPORT_QUOTA_WINDOW_MS: '10',
+      OMNI_SOURCES_ARTIFACT_GENERATION_QUOTA_LIMIT: '0',
+      OMNI_SOURCES_ARTIFACT_GENERATION_QUOTA_WINDOW_MS: '999999999',
     })).toEqual({
       groundedChat: { limit: 100, windowMs: 60_000 },
       webResearch: { limit: 1, windowMs: 86_400_000 },
+      sourceImport: { limit: 100, windowMs: 60_000 },
+      artifactGeneration: { limit: 1, windowMs: 86_400_000 },
     });
     expect(parseSourcesQuotaEnv({
       OMNI_SOURCES_GROUNDED_CHAT_QUOTA_LIMIT: 'not-a-number',
@@ -499,7 +507,7 @@ describe('Sources route wiring', () => {
     return serverSource.slice(start, end);
   }
 
-  it('gates both Sources routes on parseSourcesLibraryV2Env(process.env) before handlers run', () => {
+  it('gates every Sources cloud route on the same server flag before handlers run', () => {
     const chat = routeBody(
       "app.post('/api/sources/grounded-chat'",
       "app.post('/api/sources/web-research'",
@@ -516,5 +524,19 @@ describe('Sources route wiring', () => {
     expect(web).toMatch(/consumeQuota/);
     expect(chat).toMatch(/Retry-After/);
     expect(web).toMatch(/Retry-After/);
+    for (const route of [
+      "app.get('/api/sources/library'",
+      "app.get('/api/sources/versions/:versionId'",
+      "app.post('/api/sources/import'",
+      "app.post('/api/sources/artifact-jobs'",
+      "app.get('/api/sources/artifact-jobs/:jobId'",
+    ]) {
+      const start = serverSource.indexOf(route);
+      expect(start).toBeGreaterThan(-1);
+      const next = serverSource.indexOf('\napp.', start + route.length);
+      const body = serverSource.slice(start, next === -1 ? undefined : next);
+      expect(body).toMatch(/parseSourcesLibraryV2Env\s*\(\s*process\.env\s*\)/);
+      expect(body).toMatch(/featureEnabled/);
+    }
   });
 });
