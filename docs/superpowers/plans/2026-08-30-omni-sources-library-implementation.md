@@ -49,6 +49,8 @@ src/
 ├── lib/
 │   └── sources/
 │       ├── featureFlags.ts                # sources_library_v2 kill switch
+│       ├── featureFlags.server.ts         # parseSourcesLibraryV2Env (server only)
+│       ├── quota.server.ts                # in-process verified-user quota (server only)
 │       ├── extractors/
 │       │   ├── textExtractor.ts           # Direct plain-text & Markdown normalizer
 │       │   ├── urlExtractor.ts            # Readability + DOMPurify web extractor
@@ -86,6 +88,7 @@ src/
     ├── sourcesImportMachine.test.ts
     ├── sourcesLibraryStore.test.ts
     ├── sourcesGroundedChat.test.ts
+    ├── sourcesRouteHardening.test.ts
     ├── sourcesArtifactJob.test.ts
     ├── sourcesDestinationHandoff.test.ts
     └── sourcesUxContracts.test.ts
@@ -698,14 +701,16 @@ The approved Task 5 request body contains only `selectedVersionIds`. Current Sou
 
 Server boundary that Task 5 must implement:
 
+- Both `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` call existing server-only `parseSourcesLibraryV2Env(process.env)` first. When false (default), return one typed `feature_disabled` HTTP 403 (`FEATURE_DISABLED`) before JWT verification, repository hydration, quota, Brave, or the AI router. Do not mention the flag name, env var, source IDs, or secrets in the body.
 - `POST /api/sources/grounded-chat` authenticates the learner’s Supabase Bearer JWT.
+- After verified identity only, consume existing `consumeFixedWindowQuota` in separate buckets (`grounded-chat` vs `web-research`) keyed by verified `userId`. Never key by unverified Bearer text or IP. Env-configurable clamped defaults: 20 chat / 10 web-research per 3,600,000 ms (limit 1–100, window 60s–24h). In-process only; not a paid plan; not durable across instances. HTTP 429 `quota_exceeded` with `Retry-After` and zero repository/router/Brave calls. Forged JWTs never consume quota.
 - A request-scoped `SourcesRepository` retrieves requested `SourceVersion`s and parent `SourceRecord`s through Supabase using the learner JWT and existing RLS.
 - Use Supabase URL + anon key only; never service-role credentials.
 - The server must hydrate exactly the selected IDs. Missing, foreign, or unselected IDs must not reveal whether a source exists and must not invoke AI (`selection_unavailable`).
-- Missing/invalid auth: typed `auth_required` response, no provider call.
+- Missing/invalid auth: typed `auth_required` response, no provider call, no quota consumption.
 - Supabase unavailable: truthful typed `unavailable` response, no fake context.
 - Do not log or persist raw `SourceVersion` plain text, bearer token, or keys.
-- `POST /api/sources/web-research` remains the only explicit search path and also requires authenticated cloud access. If no existing approved search adapter is configured, return typed `unavailable`; do not add crawling/search packages.
+- `POST /api/sources/web-research` remains the only explicit search path and also requires authenticated cloud access. The question uses the same 8,000 Unicode-code-point bound; oversized questions never reach Brave. If no existing approved search adapter is configured, return typed `unavailable`; do not add crawling/search packages.
 - Guests retain offline/sample behaviour; cloud Source Chat is not silently available to guests.
 
 ---

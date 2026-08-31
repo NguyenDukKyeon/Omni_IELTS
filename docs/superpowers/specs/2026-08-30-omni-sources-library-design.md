@@ -284,16 +284,18 @@ Current Source rows live in browser IndexedDB / client-Supabase storage. `server
 
 `POST /api/sources/grounded-chat` must:
 
+0. Call server-only `parseSourcesLibraryV2Env(process.env)` first. When the flag is not exactly `true` (default OFF), return one typed `feature_disabled` response at **HTTP 403** with `NormalizedSourceError` code `FEATURE_DISABLED` before JWT verification, repository hydration, quota, Brave/search, or the AI router. Learner copy does not mention the flag key, env var, source IDs, or secrets.
 1. Authenticate the learner from the `Authorization: Bearer <Supabase JWT>` header. Guests keep offline/sample library behaviour on the client; cloud Source Chat is not silently available without a learner JWT.
-2. Construct a **request-scoped** `SourcesRepository` that queries `source_versions` and parent `source_records` through Supabase using that learner JWT and the existing RLS policies.
-3. Use the Supabase URL and **anon key only**. Never a service-role key, never a shared server session, never a parallel provider SDK.
-4. Hydrate **exactly** the `selectedVersionIds`. Do not accept client-supplied raw source text, and do not read Source rows from process memory.
-5. If any selected ID is missing, belongs to another learner, or is not RLS-visible, return one typed `selection_unavailable` response that does not disclose whether a row exists, and **do not** invoke the AI router.
-6. Missing or invalid auth: typed `auth_required` (`NormalizedSourceError` code `AUTH_REQUIRED`). No provider call.
-7. Supabase or the cloud source store unavailable: typed `unavailable`. No fake context and no provider call.
-8. Do not log or persist raw `SourceVersion` plain text, bearer tokens, or API keys.
+2. After a verified learner `userId` (and not before), consume an in-process fixed-window quota via existing `consumeFixedWindowQuota`. Grounded chat and web research use **separate buckets**, keyed only by that verified `userId` — never by unverified Bearer text or IP. Safe beta defaults are 20 grounded-chat and 10 web-research requests per 3,600,000 ms, configurable with `OMNI_SOURCES_GROUNDED_CHAT_QUOTA_LIMIT` / `_WINDOW_MS` and `OMNI_SOURCES_WEB_RESEARCH_QUOTA_LIMIT` / `_WINDOW_MS`, clamped to limit 1–100 and window 60s–24h. This is per-process memory, not a paid plan and not durable across instances. Limit exceeded: typed `quota_exceeded` (`QUOTA_EXCEEDED`) at **HTTP 429** with `Retry-After`, `retryAfterSeconds`, and safe Vietnamese recovery copy; zero repository, router, or Brave calls.
+3. Construct a **request-scoped** `SourcesRepository` that queries `source_versions` and parent `source_records` through Supabase using that learner JWT and the existing RLS policies.
+4. Use the Supabase URL and **anon key only**. Never a service-role key, never a shared server session, never a parallel provider SDK.
+5. Hydrate **exactly** the `selectedVersionIds`. Do not accept client-supplied raw source text, and do not read Source rows from process memory.
+6. If any selected ID is missing, belongs to another learner, or is not RLS-visible, return one typed `selection_unavailable` response that does not disclose whether a row exists, and **do not** invoke the AI router.
+7. Missing or invalid auth: typed `auth_required` (`NormalizedSourceError` code `AUTH_REQUIRED`). No provider call and no quota consumption.
+8. Supabase or the cloud source store unavailable: typed `unavailable`. No fake context and no provider call.
+9. Do not log or persist raw `SourceVersion` plain text, bearer tokens, or API keys.
 
-`POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It also requires authenticated cloud access: the handler verifies the learner Supabase access token server-side with Supabase Auth using the project URL and **anon key only** (never a service-role key) before any Brave/search, repository, AI, or quota call. Missing, malformed, expired, invalid, or unverifiable JWTs return typed `auth_required` (HTTP 401). Supabase transport or configuration failure returns typed `unavailable` (HTTP 503). A syntactically valid Bearer string is not sufficient. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
+`POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It is gated by the same `parseSourcesLibraryV2Env` kill switch (HTTP 403 `feature_disabled` before any other work) and the same verified-JWT rule: the handler verifies the learner Supabase access token server-side with Supabase Auth using the project URL and **anon key only** (never a service-role key) before any Brave/search, repository, AI, or quota call. Missing, malformed, expired, invalid, or unverifiable JWTs return typed `auth_required` (HTTP 401) and do not consume quota. The web-research question uses the same 8,000 Unicode-code-point bound as grounded chat; oversized questions return typed `select_smaller_source` and never reach Brave. After verified identity, the separate web-research quota bucket is consumed before Brave. Supabase transport or configuration failure returns typed `unavailable` (HTTP 503). A syntactically valid Bearer string is not sufficient. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
 
 
 ### 4.2 Selection & Context Formation
@@ -612,7 +614,7 @@ Routing `sources` to the new workspace is forbidden until this flag is specified
 | Server env | `OMNI_SOURCES_LIBRARY_V2` (`true` / `false`) |
 | Default | **OFF**. `src/App.tsx` `case 'sources'` continues to render legacy `SourceIngestionView`. |
 | ON | `case 'sources'` renders `SourcesView` inside `data-ux-scope="sources-library-v2"`. |
-| Kill switch | Set `OMNI_SOURCES_LIBRARY_V2=false` and redeploy. No schema down-migration. New tables remain dormant. |
+| Kill switch | Set `OMNI_SOURCES_LIBRARY_V2=false` and redeploy. No schema down-migration. New tables remain dormant. Both `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` call `parseSourcesLibraryV2Env(process.env)` first; when false they return typed `feature_disabled` at HTTP 403 before JWT, quota, repository, Brave, or the AI router. |
 | One-release facade | Keep `src/views/SourceIngestionView.tsx` imported and constructible. Do not delete it in the P03 coding epic. A hidden compatibility export remains for one release after flag ON. |
 | Rollback | Flag OFF restores the legacy route in one deploy. Learners see `SourceIngestionView`. No XP/mastery repair is required because the new path never wrote those records. |
 | Import side effects | The new workspace never calls `awardXP`, never inserts vocabulary cards, never emits `SkillEvidence` / `MistakeEvidence` / `MasteryUpdate`, and never opens `SourceToLearningPackageModal` as an automatic four-skill generator. |
