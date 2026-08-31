@@ -25,6 +25,18 @@ const version: SourceVersion = {
   createdAt: '2026-08-30T00:00:00Z',
 };
 
+const validPracticePayload = {
+  skill: 'reading' as const,
+  targetBand: 7.0,
+  activityTitle: 'Reading Exercise on Renewable Energy',
+  sourceSpanRef: { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_001'] },
+  questionPayload: {
+    type: 'true_false_not_given',
+    questions: [{ id: 'q1', statement: 'Subsidies are expensive.', correctAnswer: 'TRUE' }],
+  },
+  provenance,
+};
+
 describe('Artifact Job Machine', () => {
   it('enforces single-destination contract and rejects multi-destination payloads', () => {
     const job = createArtifactJob({
@@ -40,25 +52,7 @@ describe('Artifact Job Machine', () => {
   });
 
   it('validates Practice draft payload against required question schema', () => {
-    const validPayload = {
-      skill: 'reading',
-      targetBand: 7.0,
-      activityTitle: 'Reading Exercise on Renewable Energy',
-      sourceSpanRef: { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_001'] },
-      questionPayload: {
-        type: 'true_false_not_given',
-        questions: [{ id: 'q1', statement: 'Subsidies are expensive.', correctAnswer: 'TRUE' }],
-      },
-      provenance: {
-        originType: 'user_upload',
-        retrievalDate: '2026-08-30T00:00:00Z',
-        rightsState: 'owned_by_learner',
-        rawContentHash: 'hash',
-        canonicalCitation: 'Doc 1',
-      },
-    };
-
-    const validation = validateDraftPayload('practice', validPayload);
+    const validation = validateDraftPayload('practice', validPracticePayload);
     expect(validation.isValid).toBe(true);
   });
 
@@ -158,17 +152,7 @@ describe('Artifact destination validators and execution', () => {
     const webSearch = vi.fn();
     const persistDestination = vi.fn();
     const routerExecute = vi.fn(async () => ({
-      value: {
-        skill: 'reading',
-        targetBand: 7,
-        activityTitle: 'Reading Exercise on Renewable Energy',
-        sourceSpanRef: sourceSpan,
-        questionPayload: {
-          type: 'true_false_not_given',
-          questions: [{ id: 'q1', statement: 'Subsidies are expensive.', correctAnswer: 'TRUE' }],
-        },
-        provenance,
-      },
+      value: validPracticePayload,
     }));
 
     const job = await executeArtifactJob(createArtifactJob({
@@ -196,5 +180,277 @@ describe('Artifact destination validators and execution', () => {
       tools: [],
     }));
     expect(AI_TASK_PROFILES.grounded.tools).toContain('googleSearch');
+  });
+});
+
+describe('Artifact job fail-closed validation', () => {
+  it('does not produce a job for unknown or multi-destination input', () => {
+    expect(() => createArtifactJob({
+      id: 'job_multi',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: ['practice', 'note'] as never,
+      targetBand: 7,
+    })).toThrow();
+
+    expect(() => createArtifactJob({
+      id: 'job_unknown',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'flashcards' as never,
+      targetBand: 7,
+    })).toThrow();
+  });
+
+  it('rejects empty or malformed Practice question payloads', () => {
+    const emptyQuestions = validateDraftPayload('practice', {
+      ...validPracticePayload,
+      questionPayload: {},
+    });
+    const missingQuestions = validateDraftPayload('practice', {
+      ...validPracticePayload,
+      questionPayload: { type: 'true_false_not_given', questions: [] },
+    });
+    const missingAnswers = validateDraftPayload('practice', {
+      ...validPracticePayload,
+      questionPayload: { type: 'true_false_not_given', questions: [{ id: 'q1', statement: 'Subsidies are expensive.' }] },
+    });
+    expect(emptyQuestions.isValid).toBe(false);
+    expect(missingQuestions.isValid).toBe(false);
+    expect(missingAnswers.isValid).toBe(false);
+  });
+
+  it('rejects Mock, Note, vocabulary, and Idea Bank payloads that omit source references', () => {
+    expect(validateDraftPayload('mock_section', {
+      sectionType: 'reading_passage',
+      targetBand: 7,
+      packagePayload: { passage: 'text' },
+      provenance,
+    }).isValid).toBe(false);
+
+    expect(validateDraftPayload('note', {
+      title: 'Macro note',
+      summaryVi: 'Trợ cấp.',
+      keyTakeaways: ['a'],
+      annotatedCitations: [{ claim: 'a', blockId: 'b_001' }],
+      provenance,
+    }).isValid).toBe(false);
+
+    expect(validateDraftPayload('vocabulary_deck', {
+      deckTitle: 'Energy',
+      targetBand: 7,
+      cards: [{
+        word: 'subsidy',
+        pos: 'noun',
+        contextSentence: 'x',
+        definitionVi: 'x',
+        definitionEn: 'x',
+        phonetic: 'x',
+        collocations: [],
+        cefrLevel: 'B2',
+      }],
+      provenance,
+    }, version).isValid).toBe(false);
+
+    expect(validateDraftPayload('idea_bank', {
+      topic: 'Energy',
+      ideas: [{
+        perspective: 'fiscal',
+        argumentEn: 'x',
+        explanationVi: 'x',
+        exampleOrData: 'x',
+      }],
+      provenance,
+    }, version).isValid).toBe(false);
+  });
+
+  it('rejects unsupported block IDs against the supplied version', () => {
+    const badSpan = { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_missing'] };
+    expect(validateDraftPayload('practice', { ...validPracticePayload, sourceSpanRef: badSpan }, version).isValid).toBe(false);
+    expect(validateDraftPayload('mock_section', {
+      sectionType: 'reading_passage',
+      targetBand: 7,
+      packagePayload: { passage: 'text' },
+      provenance,
+      sourceSpanRef: badSpan,
+    }, version).isValid).toBe(false);
+    expect(validateDraftPayload('note', {
+      title: 'Note',
+      summaryVi: 'x',
+      keyTakeaways: ['a'],
+      annotatedCitations: [{ claim: 'a', blockId: 'b_missing' }],
+      provenance,
+      sourceSpanRef: sourceSpan,
+    }, version).isValid).toBe(false);
+  });
+
+  it('does not call the router when the job version or selection does not match the supplied version', async () => {
+    const routerExecute = vi.fn();
+    const mismatchedVersion = await executeArtifactJob(createArtifactJob({
+      id: 'job_mismatch_version',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+    }), {
+      version: { ...version, id: 'v2' },
+      provenance,
+      routerExecute,
+    });
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(['failed', 'needs_review']).toContain(mismatchedVersion.state);
+    expect(mismatchedVersion.state).not.toBe('ready');
+
+    const mismatchedSelection = await executeArtifactJob(createArtifactJob({
+      id: 'job_mismatch_span',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_missing'] },
+    }), {
+      version,
+      provenance,
+      routerExecute,
+    });
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(['failed', 'needs_review']).toContain(mismatchedSelection.state);
+    expect(mismatchedSelection.state).not.toBe('ready');
+  });
+
+  it('overwrites model-invented provenance with the input source provenance on ready drafts', async () => {
+    const routerExecute = vi.fn(async () => ({
+      value: {
+        ...validPracticePayload,
+        provenance: {
+          ...provenance,
+          rawContentHash: 'model-forged-hash',
+          canonicalCitation: 'Model invented citation',
+        },
+      },
+    }));
+    const job = await executeArtifactJob(createArtifactJob({
+      id: 'job_prov',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: sourceSpan,
+    }), {
+      version,
+      provenance,
+      routerExecute,
+    });
+    expect(job.state).toBe('ready');
+    expect(job.artifactDraft?.payload).toMatchObject({ provenance });
+    expect(JSON.stringify(job.artifactDraft?.payload)).not.toContain('model-forged-hash');
+    expect(JSON.stringify(job.artifactDraft?.payload)).not.toContain('Model invented citation');
+  });
+
+  it('retains a source-version/span reference on ready Mock and Note drafts', async () => {
+    const mockJob = await executeArtifactJob(createArtifactJob({
+      id: 'job_mock_ref',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'mock_section',
+      targetBand: 7,
+      selection: sourceSpan,
+    }), {
+      version,
+      provenance,
+      routerExecute: async () => ({
+        value: {
+          sectionType: 'reading_passage',
+          targetBand: 7,
+          packagePayload: { passage: 'Solar subsidies reduce macroeconomic risk.' },
+          provenance,
+          sourceSpanRef: sourceSpan,
+        },
+      }),
+    });
+    expect(mockJob.state).toBe('ready');
+    expect(mockJob.artifactDraft?.payload).toMatchObject({ sourceSpanRef: sourceSpan, provenance });
+
+    const noteJob = await executeArtifactJob(createArtifactJob({
+      id: 'job_note_ref',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'note',
+      targetBand: 7,
+      selection: sourceSpan,
+    }), {
+      version,
+      provenance,
+      routerExecute: async () => ({
+        value: {
+          title: 'Note',
+          summaryVi: 'Tóm tắt',
+          keyTakeaways: ['a'],
+          annotatedCitations: [{ claim: 'a', blockId: 'b_001' }],
+          provenance,
+          sourceSpanRef: sourceSpan,
+        },
+      }),
+    });
+    expect(noteJob.state).toBe('ready');
+    expect(noteJob.artifactDraft?.payload).toMatchObject({ sourceSpanRef: sourceSpan, provenance });
+  });
+
+  it('never marks Listening audio, transcripts, scores, mastery, or XP as a ready P03 draft', async () => {
+    const persistDestination = vi.fn();
+    const listening = await executeArtifactJob(createArtifactJob({
+      id: 'job_listening',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: sourceSpan,
+    }), {
+      version,
+      provenance,
+      persistDestination,
+      routerExecute: async () => ({
+        value: {
+          skill: 'listening',
+          targetBand: 7,
+          activityTitle: 'Listening from text source',
+          sourceSpanRef: sourceSpan,
+          questionPayload: {
+            type: 'form_completion',
+            questions: [{ id: 'q1', statement: 'Subsidies are expensive.', correctAnswer: 'TRUE' }],
+            audioUrl: 'https://cdn.example/fake-audio.mp3',
+            audioTranscript: 'fabricated transcript',
+            score: 8.5,
+          },
+          provenance,
+        },
+      }),
+    });
+    expect(listening.state).not.toBe('ready');
+    expect(['needs_review', 'failed']).toContain(listening.state);
+    expect(persistDestination).not.toHaveBeenCalled();
+    expect(listening).not.toHaveProperty('xpDelta');
+    expect(listening).not.toHaveProperty('masteryUpdate');
+
+    const scored = await executeArtifactJob(createArtifactJob({
+      id: 'job_score',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: sourceSpan,
+    }), {
+      version,
+      provenance,
+      routerExecute: async () => ({
+        value: {
+          ...validPracticePayload,
+          score: 9,
+          xp: 50,
+          mastery: true,
+        },
+      }),
+    });
+    expect(scored.state).not.toBe('ready');
   });
 });

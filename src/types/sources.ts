@@ -136,6 +136,7 @@ export interface ValidatedMockDraft {
   blueprintId?: string;
   targetBand: number;
   packagePayload: Record<string, unknown>;
+  sourceSpanRef: SourceSpan;
   provenance: SourceProvenance;
 }
 
@@ -161,6 +162,7 @@ export interface ValidatedNoteDraft {
   summaryVi: string;
   keyTakeaways: string[];
   annotatedCitations: Array<{ claim: string; blockId: string }>;
+  sourceSpanRef: SourceSpan;
   provenance: SourceProvenance;
 }
 

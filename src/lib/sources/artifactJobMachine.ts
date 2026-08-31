@@ -10,6 +10,8 @@ import type {
   ValidatedArtifactDraftPayload,
 } from '../../types/sources';
 
+const DestinationSchema = z.enum(['practice', 'mock_section', 'vocabulary_deck', 'note', 'idea_bank']);
+
 const ProvenanceSchema = z.object({
   originType: z.enum(['user_upload', 'pasted_text', 'web_fetch', 'youtube_import', 'live_hub', 'curated_benchmark']),
   originalUrl: z.string().optional(),
@@ -42,22 +44,40 @@ const SourceSpanSchema = z.object({
   exactTextSnippet: z.string().optional(),
 });
 
+const PracticeQuestionSchema = z.object({
+  id: z.string().min(1),
+  statement: z.string().min(1).optional(),
+  prompt: z.string().min(1).optional(),
+  question: z.string().min(1).optional(),
+  correctAnswer: z.string().min(1),
+}).refine((question) => Boolean(
+  question.statement?.trim() || question.prompt?.trim() || question.question?.trim(),
+), { message: 'question_text_required' });
+
+const PracticeQuestionPayloadSchema = z.object({
+  type: z.string().min(1),
+  questions: z.array(PracticeQuestionSchema).min(1),
+}).strict();
+
 const PracticeDraftSchema = z.object({
   skill: z.enum(['reading', 'listening', 'writing', 'speaking']),
   targetBand: z.number(),
   activityTitle: z.string().min(1),
   sourceSpanRef: SourceSpanSchema,
-  questionPayload: z.record(z.string(), z.unknown()),
+  questionPayload: PracticeQuestionPayloadSchema,
   provenance: ProvenanceSchema,
-});
+}).strict();
 
 const MockDraftSchema = z.object({
   sectionType: z.enum(['reading_passage', 'listening_section', 'writing_task1', 'writing_task2', 'speaking_part']),
   blueprintId: z.string().optional(),
   targetBand: z.number(),
-  packagePayload: z.record(z.string(), z.unknown()),
+  packagePayload: z.record(z.string(), z.unknown()).refine((value) => Object.keys(value).length > 0, {
+    message: 'package_payload_required',
+  }),
+  sourceSpanRef: SourceSpanSchema,
   provenance: ProvenanceSchema,
-});
+}).strict();
 
 const VocabularyDraftSchema = z.object({
   deckTitle: z.string().min(1),
@@ -72,9 +92,9 @@ const VocabularyDraftSchema = z.object({
     collocations: z.array(z.string()),
     cefrLevel: z.enum(['B1', 'B2', 'C1', 'C2']),
     sourceSpan: SourceSpanSchema,
-  })).min(1),
+  }).strict()).min(1),
   provenance: ProvenanceSchema,
-});
+}).strict();
 
 const NoteDraftSchema = z.object({
   title: z.string().min(1),
@@ -83,9 +103,10 @@ const NoteDraftSchema = z.object({
   annotatedCitations: z.array(z.object({
     claim: z.string().min(1),
     blockId: z.string().min(1),
-  })).min(1),
+  }).strict()).min(1),
+  sourceSpanRef: SourceSpanSchema,
   provenance: ProvenanceSchema,
-});
+}).strict();
 
 const IdeaBankDraftSchema = z.object({
   topic: z.string().min(1),
@@ -95,9 +116,9 @@ const IdeaBankDraftSchema = z.object({
     explanationVi: z.string().min(1),
     exampleOrData: z.string().min(1),
     sourceSpan: SourceSpanSchema,
-  })).min(1),
+  }).strict()).min(1),
   provenance: ProvenanceSchema,
-});
+}).strict();
 
 const DESTINATION_SCHEMAS = {
   practice: PracticeDraftSchema,
@@ -106,6 +127,16 @@ const DESTINATION_SCHEMAS = {
   note: NoteDraftSchema,
   idea_bank: IdeaBankDraftSchema,
 } as const;
+
+const CreateArtifactJobInputSchema = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+  sourceVersionId: z.string().min(1),
+  destination: DestinationSchema,
+  targetBand: z.number(),
+  selection: SourceSpanSchema.optional(),
+  customInstruction: z.string().optional(),
+}).strict();
 
 export type DraftValidationResult = {
   isValid: boolean;
@@ -149,10 +180,98 @@ function collectSpan(payload: unknown): SourceSpan[] {
 }
 
 function spanSupportedByVersion(span: SourceSpan, version: SourceVersion): boolean {
+  if (span.sourceId !== version.sourceId) return false;
   if (span.sourceVersionId !== version.id) return false;
   if (!span.blockIds?.length) return true;
   const blockIds = new Set(version.blocks.map((block) => block.id));
   return span.blockIds.every((blockId) => blockIds.has(blockId));
+}
+
+function forbiddenGenerationErrors(payload: unknown, destination: DestinationType, version?: SourceVersion): string[] {
+  const errors: string[] = [];
+  if (!payload || typeof payload !== 'object') return ['invalid_payload'];
+  const value = payload as Record<string, unknown>;
+  if ('score' in value || 'xp' in value || 'mastery' in value || 'xpDelta' in value || 'masteryUpdate' in value) {
+    errors.push('forbidden_score_or_mastery');
+  }
+  if (destination === 'practice' && value.skill === 'listening') {
+    errors.push('listening_audio_unsupported');
+  }
+  if (destination === 'mock_section' && value.sectionType === 'listening_section') {
+    errors.push('listening_audio_unsupported');
+  }
+  const questionPayload = value.questionPayload && typeof value.questionPayload === 'object'
+    ? value.questionPayload as Record<string, unknown>
+    : undefined;
+  const packagePayload = value.packagePayload && typeof value.packagePayload === 'object'
+    ? value.packagePayload as Record<string, unknown>
+    : undefined;
+  const bags = [value, questionPayload, packagePayload].filter(Boolean) as Record<string, unknown>[];
+  for (const bag of bags) {
+    if (bag.audioUrl || bag.audioBase64 || bag.audioArtifact || bag.mediaUrl) {
+      const claimed = typeof bag.audioUrl === 'string' ? bag.audioUrl
+        : typeof bag.mediaUrl === 'string' ? bag.mediaUrl
+          : undefined;
+      if (!version?.mediaUrl || claimed !== version.mediaUrl) {
+        errors.push('fabricated_audio');
+      }
+    }
+    if (typeof bag.audioTranscript === 'string' && bag.audioTranscript.trim()) {
+      errors.push('fabricated_transcript');
+    }
+    if ('answerKey' in bag || 'answerKeys' in bag) {
+      errors.push('fabricated_answer_key');
+    }
+  }
+  return [...new Set(errors)];
+}
+
+function controlledSpan(version: SourceVersion, selection?: SourceSpan): SourceSpan {
+  if (selection && spanSupportedByVersion(selection, version)) return selection;
+  return {
+    sourceId: version.sourceId,
+    sourceVersionId: version.id,
+    blockIds: version.blocks.map((block) => block.id),
+  };
+}
+
+function applyControlledProvenance(
+  destination: DestinationType,
+  payload: ValidatedArtifactDraftPayload,
+  provenance: SourceProvenance,
+  span: SourceSpan,
+): ValidatedArtifactDraftPayload {
+  if (destination === 'practice' && 'questionPayload' in payload) {
+    return { ...payload, provenance, sourceSpanRef: span };
+  }
+  if (destination === 'mock_section' && 'packagePayload' in payload) {
+    return { ...payload, provenance, sourceSpanRef: span };
+  }
+  if (destination === 'note' && 'annotatedCitations' in payload) {
+    return { ...payload, provenance, sourceSpanRef: span };
+  }
+  if (destination === 'vocabulary_deck' && 'cards' in payload) {
+    return {
+      ...payload,
+      provenance,
+      cards: payload.cards.map((card) => ({ ...card, sourceSpan: span })),
+    };
+  }
+  if (destination === 'idea_bank' && 'ideas' in payload) {
+    return {
+      ...payload,
+      provenance,
+      ideas: payload.ideas.map((idea) => ({ ...idea, sourceSpan: span })),
+    };
+  }
+  return payload;
+}
+
+export class ArtifactJobInputError extends Error {
+  constructor() {
+    super('invalid_artifact_job_input');
+    this.name = 'ArtifactJobInputError';
+  }
 }
 
 export function createArtifactJob(input: {
@@ -164,15 +283,17 @@ export function createArtifactJob(input: {
   selection?: SourceSpan;
   customInstruction?: string;
 }): SourceArtifactJob {
+  const parsed = CreateArtifactJobInputSchema.safeParse(input);
+  if (!parsed.success) throw new ArtifactJobInputError();
   const timestamp = nowIso();
   return {
-    id: input.id,
-    userId: input.userId,
-    sourceVersionId: input.sourceVersionId,
-    selection: input.selection,
-    destination: input.destination,
-    targetBand: input.targetBand,
-    customInstruction: input.customInstruction,
+    id: parsed.data.id,
+    userId: parsed.data.userId,
+    sourceVersionId: parsed.data.sourceVersionId,
+    selection: parsed.data.selection,
+    destination: parsed.data.destination,
+    targetBand: parsed.data.targetBand,
+    customInstruction: parsed.data.customInstruction,
     state: 'queued',
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -195,6 +316,10 @@ export function validateDraftPayload(
       errors: parsed.error.issues.map((issue) => issue.path.join('.') || issue.message),
     };
   }
+  const forbidden = forbiddenGenerationErrors(parsed.data, destination, version);
+  if (forbidden.length) {
+    return { isValid: false, errors: forbidden };
+  }
   if (version) {
     for (const span of collectSpan(parsed.data)) {
       if (!spanSupportedByVersion(span, version)) {
@@ -212,6 +337,20 @@ export function validateDraftPayload(
   return { isValid: true, errors: [], payload: parsed.data as ValidatedArtifactDraftPayload };
 }
 
+function failedJob(job: SourceArtifactJob, code: string, messageVi: string): SourceArtifactJob {
+  return {
+    ...job,
+    state: 'failed',
+    updatedAt: nowIso(),
+    error: {
+      code,
+      messageVi,
+      retryable: false,
+      diagnosticId: globalThis.crypto.randomUUID(),
+    },
+  };
+}
+
 export async function executeArtifactJob(
   job: SourceArtifactJob,
   input: {
@@ -222,6 +361,13 @@ export async function executeArtifactJob(
     persistDestination?: (...args: unknown[]) => unknown;
   },
 ): Promise<SourceArtifactJob> {
+  if (job.sourceVersionId !== input.version.id) {
+    return failedJob(job, 'VALIDATION_FAILED', 'Phiên bản nguồn không khớp với yêu cầu tạo bản nháp.');
+  }
+  if (job.selection && !spanSupportedByVersion(job.selection, input.version)) {
+    return failedJob(job, 'VALIDATION_FAILED', 'Đoạn nguồn đã chọn không thuộc phiên bản này.');
+  }
+
   const processing: SourceArtifactJob = {
     ...job,
     state: 'processing',
@@ -250,10 +396,17 @@ export async function executeArtifactJob(
       };
     }
 
+    const span = controlledSpan(input.version, job.selection);
+    const payload = applyControlledProvenance(
+      job.destination,
+      validation.payload,
+      input.provenance,
+      span,
+    );
     const draft: ValidatedArtifactDraft = {
       id: `draft_${job.id}`,
       destination: job.destination,
-      payload: validation.payload,
+      payload,
     };
     return {
       ...processing,
