@@ -223,7 +223,7 @@ export const ReadingQuestionModule: React.FC = () => {
         // Tự động ghi lỗi vào MistakeEntry với phân loại bẫy thông minh
         addMistake({
           id: `mistake_read_${Date.now()}_${q.id}`,
-          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.statementOrQuestion}"`,
+          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.questionText}"`,
           correctedText: `Đáp án chuẩn: "${q.correctAnswer}" (Bạn đã chọn: "${userAnswers[q.id] || 'Bỏ trống'}")`,
           explanation: `${q.explanationVi} (${q.paragraphReference || ''})`,
           trapCategory: trapCat,

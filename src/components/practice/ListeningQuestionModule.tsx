@@ -201,7 +201,8 @@ export const ListeningQuestionModule: React.FC = () => {
         correctCount++;
       } else {
         const isSpellingOrPlural =
-          exercise.type === 'form_note_table_completion' ||
+          exercise.type === 'form_completion' ||
+          exercise.type === 'note_table_flowchart' ||
           (q.spellingOrGrammarTrap && q.spellingOrGrammarTrap.toLowerCase().includes('plural'));
         const trapCat: TrapCategory = isSpellingOrPlural
           ? 'trap_listening_plural_spelling'
@@ -210,7 +211,7 @@ export const ListeningQuestionModule: React.FC = () => {
         // Tự động ghi lỗi vào MistakeEntry với phân loại bẫy
         addMistake({
           id: `mistake_listen_${Date.now()}_${q.id}`,
-          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.prompt}"`,
+          errorText: `[${exercise.title} - Q${q.questionNumber}] "${q.questionText}"`,
           correctedText: `Đáp án chuẩn: "${q.correctAnswer}" (Bạn đã ghi: "${userAnswers[q.id] || 'Bỏ trống'}")`,
           explanation: `${q.explanationVi} ${q.spellingOrGrammarTrap ? `(Bẫy: ${q.spellingOrGrammarTrap})` : ''}`,
           trapCategory: trapCat,

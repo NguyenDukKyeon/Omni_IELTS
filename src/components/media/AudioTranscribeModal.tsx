@@ -300,12 +300,8 @@ export const AudioTranscribeModal: React.FC<AudioTranscribeModalProps> = ({
         completed: false,
         extractedVocab: result.detectedVocabulary.map((v) => ({
           word: v.word,
+          meaningVi: v.meaningVi,
           phonetic: '',
-          pos: 'noun',
-          definitionVi: v.meaningVi,
-          definitionEn: v.meaningVi,
-          exampleEn: v.word,
-          collocations: [],
           cefrLevel: 'C1',
         })),
         transcriptVersion: {

@@ -133,13 +133,12 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
       exampleVi: 'Xem câu nâng cấp mẫu trong bài viết.',
       collocations: [collocation],
       cefrLevel: 'C1',
-      originModule: 'writing_eval',
       srsStage: 0,
       nextReviewDate: new Date().toISOString(),
       easeFactor: 2.5,
       intervalDays: 1,
       repetitions: 0,
-      mastered: false,
+      tags: ['sentence_stylist', 'academic_collocation'],
     });
 
     setSavedCollocations((prev) => new Set(prev).add(collocation));
@@ -150,16 +149,11 @@ export const SentenceAcademicStylistModal: React.FC<SentenceAcademicStylistModal
     addMistake({
       id: `err_${Date.now()}_${idx}`,
       errorText: err.errorSubstring,
-      correctedText: result?.upgradedVersions.band65.text || 'Xem phiên bản sửa lỗi',
+      correction: result?.upgradedVersions.band65.text || 'Xem phiên bản sửa lỗi',
       explanation: err.explanationVi,
-      errorType: 'grammar',
-      skill: 'writing',
-      originModule: 'writing_eval',
+      type: (err.errorCategory.toLowerCase() as any) || 'grammar',
       srsStage: 0,
       nextReviewDate: new Date().toISOString(),
-      reviewCount: 0,
-      mastered: false,
-      createdAt: new Date().toISOString(),
       tags: ['sentence_stylist', err.errorCategory],
     });
 
