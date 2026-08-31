@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildGroundedContext,
   executeGroundedChat,
+  estimatePromptTokens,
+  GROUNDED_CHAT_PROMPT_TOKEN_BUDGET,
+  GROUNDED_CHAT_QUESTION_MAX_CHARS,
+  GroundedChatRequestSchema,
   GroundedChatResponseSchema,
   handleGroundedChatRequest,
   handleWebResearchRequest,
@@ -491,5 +495,139 @@ describe('Selected-span grounding and prompt budget', () => {
     expect(result.body.status).toBe('select_smaller_source');
     expect(String(result.body.userMessageVi || '')).toMatch(/nguồn|đoạn/i);
     expect(JSON.stringify(result.body)).not.toContain('macroeconomic macroeconomic');
+  });
+});
+
+function completeProviderPrompt(sourceContext: string, question: string): string {
+  return `${sourceContext}\n\nQuestion: ${question}\nReturn JSON only.`;
+}
+
+describe('Grounded chat complete-prompt budget and empty-context fail-closed', () => {
+  it('documents a bounded question limit on the Zod request schema', () => {
+    expect(GROUNDED_CHAT_QUESTION_MAX_CHARS).toBe(8_000);
+    expect(GroundedChatRequestSchema.safeParse({
+      selectedVersionIds: ['v_01'],
+      question: 'What do subsidies do?',
+    }).success).toBe(true);
+    expect(GroundedChatRequestSchema.safeParse({
+      selectedVersionIds: ['v_01'],
+      question: 'Q'.repeat(GROUNDED_CHAT_QUESTION_MAX_CHARS + 1),
+    }).success).toBe(false);
+  });
+
+  it('rejects a 200,000-character question as typed bounded-input without calling the router', async () => {
+    const routerExecute = vi.fn();
+    const repo = {
+      getSelectedVersions: vi.fn(async () => ({
+        status: 'ok' as const,
+        items: [{ version: selected, record }],
+      })),
+    };
+    const hugeQuestion = 'Q'.repeat(200_000);
+
+    const result = await handleGroundedChatRequest({
+      authorizationHeader: 'Bearer learner-jwt',
+      body: { selectedVersionIds: ['v_01'], question: hugeQuestion },
+      cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
+      repositoryForToken: () => repo,
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(repo.getSelectedVersions).not.toHaveBeenCalled();
+    expect(result.status).toBe(400);
+    expect(result.body.status).toBe('select_smaller_source');
+    expect(result.body.code).toBe('INVALID_INPUT');
+    expect(JSON.stringify(result.body)).not.toContain('Q'.repeat(50));
+  });
+
+  it('rejects when source context fits but the complete provider prompt exceeds the 32k budget', async () => {
+    const question = 'Q'.repeat(4_000);
+    const filler = 'm'.repeat(93_000);
+    const sizedVersion: SourceVersion = {
+      ...selected,
+      plainText: filler,
+      blocks: [{ id: 'b_001', order: 1, type: 'paragraph', text: filler }],
+      wordCount: 93_000,
+    };
+    const context = buildGroundedContext([{ version: sizedVersion, record }], ['v_01']);
+    expect(estimatePromptTokens(context)).toBeLessThanOrEqual(GROUNDED_CHAT_PROMPT_TOKEN_BUDGET);
+    expect(estimatePromptTokens(completeProviderPrompt(context, question)))
+      .toBeGreaterThan(GROUNDED_CHAT_PROMPT_TOKEN_BUDGET);
+
+    const routerExecute = vi.fn();
+    const repo = {
+      getSelectedVersions: vi.fn(async () => ({
+        status: 'ok' as const,
+        items: [{ version: sizedVersion, record }],
+      })),
+    };
+
+    const result = await handleGroundedChatRequest({
+      authorizationHeader: 'Bearer learner-jwt',
+      body: { selectedVersionIds: ['v_01'], question },
+      cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
+      repositoryForToken: () => repo,
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(result.status).toBe(400);
+    expect(result.body.status).toBe('select_smaller_source');
+    expect(JSON.stringify(result.body)).not.toContain('mmm');
+  });
+
+  it('returns unsupported_by_sources for non-empty plainText with zero usable blocks and does not call the model', async () => {
+    const emptyBlocksVersion: SourceVersion = {
+      ...selected,
+      plainText: 'Solar subsidies reduce macroeconomic risk. SECRET_PLAINTEXT_MUST_NOT_REACH_THE_MODEL',
+      blocks: [],
+      wordCount: 7,
+    };
+    const whitespaceBlocksVersion: SourceVersion = {
+      ...selected,
+      id: 'v_ws',
+      plainText: 'Still has plaintext but no usable blocks.',
+      blocks: [{ id: 'b_001', order: 1, type: 'paragraph', text: '   \n\t  ' }],
+      wordCount: 8,
+    };
+    const groundedValue = {
+      groundingStatus: 'fully_grounded' as const,
+      answer: 'leaked from instructions only',
+      citations: [{ sourceVersionId: 'v_01', sourceTitle: 'Macroeconomics', blockId: 'b_001' }],
+      webCitations: [],
+    };
+    const routerExecute = vi.fn(async () => ({ value: groundedValue }));
+    const emptyRepo = {
+      getSelectedVersions: vi.fn(async () => ({
+        status: 'ok' as const,
+        items: [{ version: emptyBlocksVersion, record }],
+      })),
+    };
+    const emptyResult = await handleGroundedChatRequest({
+      authorizationHeader: 'Bearer learner-jwt',
+      body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
+      cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
+      repositoryForToken: () => emptyRepo,
+      routerExecute,
+    });
+
+    const whitespaceResult = await executeGroundedChat({
+      selectedVersionIds: ['v_ws'],
+      question: 'What do subsidies do?',
+      versions: [whitespaceBlocksVersion],
+      records: [record],
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(emptyResult.status).toBe(200);
+    expect(emptyResult.body.groundingStatus).toBe('unsupported_by_sources');
+    expect(whitespaceResult.groundingStatus).toBe('unsupported_by_sources');
+    expect(JSON.stringify(emptyResult.body)).not.toContain('SECRET_PLAINTEXT_MUST_NOT_REACH_THE_MODEL');
+    expect(JSON.stringify(whitespaceResult)).not.toContain('Still has plaintext');
   });
 });

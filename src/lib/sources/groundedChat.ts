@@ -3,9 +3,54 @@ import { AI_TASK_PROFILES, type AiTaskProfile } from '../aiTaskProfiles';
 import { normalizeSourceError, type NormalizedSourceError } from './sourceErrors';
 import type { SourceRecord, SourceSpan, SourceVersion } from '../../types/sources';
 
+/**
+ * SPEC §4.2 prompt budget: 32,000 tokens.
+ *
+ * Conservative deterministic estimate (fail closed, never silent truncation):
+ * - count Unicode code points in the complete provider prompt
+ *   (system instructions + selected source context + question + JSON instruction)
+ * - treat 3 code points as 1 token (tighter than typical English BPE ~4 chars/token)
+ * - add 256 tokens of instruction/system overhead
+ *
+ * If the estimate exceeds 32,000, grounded chat returns `select_smaller_source`
+ * and does not call the model.
+ */
+export const GROUNDED_CHAT_PROMPT_TOKEN_BUDGET = 32_000;
+/**
+ * Hard cap on the learner question, independent of the 32k total prompt budget.
+ * 8,000 Unicode code points (~2.7k tokens at the conservative 3 code-points/token
+ * estimate). A question this large cannot be a grounded query; reject before
+ * hydration or the router, with no silent truncation.
+ */
+export const GROUNDED_CHAT_QUESTION_MAX_CHARS = 8_000;
+const PROMPT_CODE_POINTS_PER_TOKEN = 3;
+const PROMPT_INSTRUCTION_OVERHEAD_TOKENS = 256;
+const GROUNDED_CHAT_JSON_INSTRUCTION = 'Return JSON only.';
+const GROUNDED_CONTEXT_INSTRUCTIONS = [
+  'Answer only from the selected source versions below.',
+  'Cite block IDs that exist on those versions. Do not use web search.',
+] as const;
+
+export function countCodePoints(text: string): number {
+  let codePoints = 0;
+  for (const _codePoint of text) codePoints += 1;
+  return codePoints;
+}
+
+export function estimatePromptTokens(text: string): number {
+  return Math.ceil(countCodePoints(text) / PROMPT_CODE_POINTS_PER_TOKEN) + PROMPT_INSTRUCTION_OVERHEAD_TOKENS;
+}
+
+export function buildGroundedProviderPrompt(sourceContext: string, question: string): string {
+  return `${sourceContext}\n\nQuestion: ${question}\n${GROUNDED_CHAT_JSON_INSTRUCTION}`;
+}
+
 export const GroundedChatRequestSchema = z.object({
   selectedVersionIds: z.array(z.string().min(1)).min(1),
-  question: z.string().min(1),
+  question: z.string().min(1).refine(
+    (question) => countCodePoints(question) <= GROUNDED_CHAT_QUESTION_MAX_CHARS,
+    { message: 'question_exceeds_bounded_input' },
+  ),
   sourceSpan: z.object({
     sourceId: z.string().min(1),
     sourceVersionId: z.string().min(1),
@@ -79,27 +124,6 @@ export type SourcesHttpResult = {
 
 const UNSUPPORTED_ANSWER_VI = 'Nguồn tài liệu đã chọn không chứa thông tin để trả lời câu hỏi này. Bạn có thể chọn thêm nguồn khác hoặc kích hoạt \'Tra cứu dẫn chứng\' từ web.';
 
-/**
- * SPEC §4.2 prompt budget: 32,000 tokens.
- *
- * Conservative deterministic estimate (fail closed, never silent truncation):
- * - count Unicode code points in the prompt
- * - treat 3 code points as 1 token (tighter than typical English BPE ~4 chars/token)
- * - add 256 tokens of instruction/system overhead
- *
- * If the estimate exceeds 32,000, grounded chat returns `select_smaller_source`
- * and does not call the model.
- */
-export const GROUNDED_CHAT_PROMPT_TOKEN_BUDGET = 32_000;
-const PROMPT_CODE_POINTS_PER_TOKEN = 3;
-const PROMPT_INSTRUCTION_OVERHEAD_TOKENS = 256;
-
-export function estimatePromptTokens(text: string): number {
-  let codePoints = 0;
-  for (const _codePoint of text) codePoints += 1;
-  return Math.ceil(codePoints / PROMPT_CODE_POINTS_PER_TOKEN) + PROMPT_INSTRUCTION_OVERHEAD_TOKENS;
-}
-
 export class SelectSmallerSourceError extends Error {
   readonly status = 'select_smaller_source' as const;
 
@@ -120,8 +144,13 @@ function unsupportedResponse(): GroundedChatResponse {
 
 const HANDOFF_STATES = new Set(['unavailable', 'handoff_required']);
 
+function hasUsableBlockText(text: string): boolean {
+  return text.trim().length > 0;
+}
+
 function isUsableSource(item: HydratedSource): boolean {
-  return !HANDOFF_STATES.has(item.record.processingState) && item.version.plainText.trim().length > 0;
+  return !HANDOFF_STATES.has(item.record.processingState)
+    && item.version.blocks.some((block) => hasUsableBlockText(block.text));
 }
 
 export function hydrateSelectedSources(
@@ -155,13 +184,16 @@ export function isValidSelectedSpan(
 }
 
 function blocksForPrompt(item: HydratedSource, sourceSpan?: SourceSpan): SourceVersion['blocks'] {
-  if (!sourceSpan) return item.version.blocks;
-  if (item.version.id !== sourceSpan.sourceVersionId || item.record.id !== sourceSpan.sourceId) {
-    return [];
-  }
-  if (!sourceSpan.blockIds?.length) return item.version.blocks;
-  const allowed = new Set(sourceSpan.blockIds);
-  return item.version.blocks.filter((block) => allowed.has(block.id));
+  const raw = (() => {
+    if (!sourceSpan) return item.version.blocks;
+    if (item.version.id !== sourceSpan.sourceVersionId || item.record.id !== sourceSpan.sourceId) {
+      return [];
+    }
+    if (!sourceSpan.blockIds?.length) return item.version.blocks;
+    const allowed = new Set(sourceSpan.blockIds);
+    return item.version.blocks.filter((block) => allowed.has(block.id));
+  })();
+  return raw.filter((block) => hasUsableBlockText(block.text));
 }
 
 export function buildGroundedContext(
@@ -170,10 +202,7 @@ export function buildGroundedContext(
   sourceSpan?: SourceSpan,
 ): string {
   const allowed = new Set(selectedVersionIds);
-  const lines: string[] = [
-    'Answer only from the selected source versions below.',
-    'Cite block IDs that exist on those versions. Do not use web search.',
-  ];
+  const lines: string[] = [...GROUNDED_CONTEXT_INSTRUCTIONS];
 
   const scoped = sourceSpan
     ? selected.filter((item) => item.version.id === sourceSpan.sourceVersionId && item.record.id === sourceSpan.sourceId)
@@ -194,6 +223,10 @@ export function buildGroundedContext(
     }
   }
   return lines.join('\n');
+}
+
+function groundedContextHasUsableBlocks(context: string): boolean {
+  return context.split('\n').some((line) => line.startsWith('Block '));
 }
 
 export function validateGroundedCitations(
@@ -237,9 +270,14 @@ export async function executeGroundedChat(input: {
     .filter((item) => input.selectedVersionIds.includes(item.version.id) && isUsableSource(item));
   if (!selected.length) return unsupportedResponse();
   if (!isValidSelectedSpan(input.sourceSpan, selected)) return unsupportedResponse();
+  if (countCodePoints(input.question) > GROUNDED_CHAT_QUESTION_MAX_CHARS) {
+    throw new SelectSmallerSourceError();
+  }
 
   const prompt = buildGroundedContext(selected, input.selectedVersionIds, input.sourceSpan);
-  if (estimatePromptTokens(prompt) > GROUNDED_CHAT_PROMPT_TOKEN_BUDGET) {
+  if (!groundedContextHasUsableBlocks(prompt)) return unsupportedResponse();
+  const providerPrompt = buildGroundedProviderPrompt(prompt, input.question);
+  if (estimatePromptTokens(providerPrompt) > GROUNDED_CHAT_PROMPT_TOKEN_BUDGET) {
     throw new SelectSmallerSourceError();
   }
 
@@ -351,6 +389,12 @@ async function verifyOrReject(
   }
 }
 
+function questionExceedsBound(body: unknown): boolean {
+  if (!body || typeof body !== 'object' || !('question' in body)) return false;
+  const question = (body as { question?: unknown }).question;
+  return typeof question === 'string' && countCodePoints(question) > GROUNDED_CHAT_QUESTION_MAX_CHARS;
+}
+
 export async function handleGroundedChatRequest(input: {
   authorizationHeader?: string | null;
   body: unknown;
@@ -366,6 +410,8 @@ export async function handleGroundedChatRequest(input: {
 
   const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
+
+  if (questionExceedsBound(input.body)) return selectSmallerSourceResult();
 
   const parsed = GroundedChatRequestSchema.safeParse(input.body);
   if (!parsed.success) {

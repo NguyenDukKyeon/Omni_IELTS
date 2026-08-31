@@ -52,6 +52,7 @@ import { ForecastServerCache } from "./src/lib/forecastServerCache";
 import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
 import {
+  buildGroundedProviderPrompt,
   handleGroundedChatRequest,
   handleWebResearchRequest,
 } from "./src/lib/sources/groundedChat";
@@ -8551,7 +8552,7 @@ app.post('/api/sources/grounded-chat', async (req, res) => {
       }
       const routed = await executeBalancedText({
         request: req,
-        contents: `${prompt}\n\nQuestion: ${question}\nReturn JSON only.`,
+        contents: buildGroundedProviderPrompt(prompt, question),
         config: { responseMimeType: 'application/json' },
       });
       const raw = routed.value;
