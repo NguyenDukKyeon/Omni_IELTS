@@ -65,12 +65,43 @@ function provenanceOf(payload: ValidatedArtifactDraftPayload | undefined): Sourc
   return undefined;
 }
 
+function collectPayloadSpans(payload: ValidatedArtifactDraftPayload | undefined): SourceSpan[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const spans: SourceSpan[] = [];
+  if ('sourceSpanRef' in payload && payload.sourceSpanRef) {
+    spans.push(payload.sourceSpanRef);
+  }
+  if ('cards' in payload && Array.isArray(payload.cards)) {
+    for (const card of payload.cards) {
+      if (card?.sourceSpan) spans.push(card.sourceSpan);
+    }
+  }
+  if ('ideas' in payload && Array.isArray(payload.ideas)) {
+    for (const idea of payload.ideas) {
+      if (idea?.sourceSpan) spans.push(idea.sourceSpan);
+    }
+  }
+  return spans;
+}
+
 function sourceSpanOf(payload: ValidatedArtifactDraftPayload | undefined): SourceSpan | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  if ('sourceSpanRef' in payload) return payload.sourceSpanRef;
-  if ('cards' in payload) return payload.cards[0]?.sourceSpan;
-  if ('ideas' in payload) return payload.ideas[0]?.sourceSpan;
-  return undefined;
+  return collectPayloadSpans(payload)[0];
+}
+
+function spansEqual(left: SourceSpan, right: SourceSpan): boolean {
+  return JSON.stringify(normalizeSpan(left)) === JSON.stringify(normalizeSpan(right));
+}
+
+function normalizeSpan(span: SourceSpan): SourceSpan {
+  return {
+    sourceId: span.sourceId,
+    sourceVersionId: span.sourceVersionId,
+    ...(span.blockIds ? { blockIds: [...span.blockIds] } : {}),
+    ...(span.pageIndex !== undefined ? { pageIndex: span.pageIndex } : {}),
+    ...(span.startMs !== undefined ? { startMs: span.startMs } : {}),
+    ...(span.endMs !== undefined ? { endMs: span.endMs } : {}),
+    ...(span.exactTextSnippet !== undefined ? { exactTextSnippet: span.exactTextSnippet } : {}),
+  };
 }
 
 function nonNavigable(): NonNavigableHandoff {
@@ -91,7 +122,13 @@ function isGenuineReadyDraft(job: SourceArtifactJob): boolean {
   if (!draft?.id || draft.destination !== job.destination) return false;
   if (draft.validationErrors && draft.validationErrors.length > 0) return false;
   if (!draft.payload || typeof draft.payload !== 'object') return false;
-  return Boolean(provenanceOf(draft.payload));
+  if (!provenanceOf(draft.payload)) return false;
+
+  const spans = collectPayloadSpans(draft.payload);
+  if (!spans.length) return false;
+  if (spans.some((span) => span.sourceVersionId !== job.sourceVersionId)) return false;
+  if (job.selection && spans.some((span) => !spansEqual(span, job.selection as SourceSpan))) return false;
+  return true;
 }
 
 export function prepareDestinationHandoff(
@@ -116,7 +153,7 @@ export function prepareDestinationHandoff(
       draftId,
       destination,
       provenance: provenanceOf(payload),
-      sourceSpan: sourceSpanOf(payload) || job.selection,
+      sourceSpan: sourceSpanOf(payload),
       sourceVersionId: job.sourceVersionId,
       selection: job.selection,
     },

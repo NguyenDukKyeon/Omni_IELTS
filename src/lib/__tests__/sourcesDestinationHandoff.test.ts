@@ -310,3 +310,90 @@ describe('Handoff gated on genuine ready drafts', () => {
     }
   });
 });
+
+describe('Handoff runtime provenance and span gates', () => {
+  it('does not navigate a ready draft that has provenance but no source span', () => {
+    const persistDestination = vi.fn();
+    const job = {
+      ...practiceJob,
+      artifactDraft: {
+        id: 'draft_01',
+        destination: 'practice' as const,
+        payload: {
+          skill: 'reading' as const,
+          targetBand: 7,
+          activityTitle: 'Clean Energy Subsidies',
+          questionPayload: {
+            type: 'true_false_not_given',
+            questions: [{ id: 'q1', statement: 'Subsidies are expensive.', correctAnswer: 'TRUE' }],
+          },
+          provenance,
+        },
+      },
+    } as SourceArtifactJob;
+
+    const handoff = prepareDestinationHandoff(job, { persistDestination });
+    expect(handoff.navigable).toBe(false);
+    if (handoff.navigable) throw new Error('expected non-navigable');
+    expect(handoff.targetRoute).toBeUndefined();
+    expect(handoff.draftId).toBeUndefined();
+    expect(handoff.ctaPrimaryLabelVi).toBeUndefined();
+    expect(handoff.autoRedirect).toBe(false);
+    expect(persistDestination).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate when the draft span sourceVersionId does not match the job', () => {
+    const handoff = prepareDestinationHandoff({
+      ...practiceJob,
+      sourceVersionId: 'v1',
+      artifactDraft: {
+        ...practiceJob.artifactDraft!,
+        payload: {
+          ...practiceJob.artifactDraft!.payload,
+          sourceSpanRef: { sourceId: 's1', sourceVersionId: 'v_other', blockIds: ['b_001'] },
+        },
+      },
+    } as SourceArtifactJob);
+
+    expect(handoff.navigable).toBe(false);
+    if (handoff.navigable) throw new Error('expected non-navigable');
+    expect(handoff.targetRoute).toBeUndefined();
+    expect(handoff.draftId).toBeUndefined();
+    expect(handoff.ctaPrimaryLabelVi).toBeUndefined();
+  });
+
+  it('does not navigate when job.selection exists and the draft span does not match it exactly', () => {
+    const persistDestination = vi.fn();
+    const mismatched = prepareDestinationHandoff({
+      ...practiceJob,
+      selection: sourceSpan,
+      artifactDraft: {
+        ...practiceJob.artifactDraft!,
+        payload: {
+          ...practiceJob.artifactDraft!.payload,
+          sourceSpanRef: { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_other'] },
+        },
+      },
+    } as SourceArtifactJob, { persistDestination });
+
+    const missingBlocks = prepareDestinationHandoff({
+      ...practiceJob,
+      selection: sourceSpan,
+      artifactDraft: {
+        ...practiceJob.artifactDraft!,
+        payload: {
+          ...practiceJob.artifactDraft!.payload,
+          sourceSpanRef: { sourceId: 's1', sourceVersionId: 'v1' },
+        },
+      },
+    } as SourceArtifactJob);
+
+    expect(mismatched.navigable).toBe(false);
+    expect(missingBlocks.navigable).toBe(false);
+    if (mismatched.navigable) throw new Error('expected non-navigable');
+    expect(mismatched.targetRoute).toBeUndefined();
+    expect(mismatched.draftId).toBeUndefined();
+    expect(mismatched.ctaPrimaryLabelVi).toBeUndefined();
+    expect(persistDestination).not.toHaveBeenCalled();
+  });
+});
