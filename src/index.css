@@ -3217,7 +3217,7 @@
 }
 
 .omni-collection-drawer__item.is-active {
-  color: var(--omni-action-primary);
+  color: var(--omni-action-primary-hover);
 }
 
 .omni-collection-drawer__item > span:last-child {
@@ -5160,7 +5160,7 @@
 .omni-sources-view__tabs button[aria-selected="true"] {
   border-color: var(--omni-action-primary);
   background: color-mix(in srgb, var(--omni-action-primary) 9%, var(--omni-surface));
-  color: var(--omni-action-primary);
+  color: var(--omni-action-primary-hover);
 }
 
 .omni-sources-view__workspace {

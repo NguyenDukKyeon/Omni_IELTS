@@ -8,6 +8,8 @@ import {
   buildValidDocx,
 } from './fixtures/sources/buildDocuments';
 
+const REAL_BINARY_PROCESS_TEST_TIMEOUT_MS = 20_000;
+
 describe('P03 extractor fixtures', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -23,7 +25,7 @@ describe('P03 extractor fixtures', () => {
     expect(result.success).toBe(true);
     expect(result.version?.plainText).toMatch(/Urban heat islands/i);
     expect(result.version?.blocks.length).toBeGreaterThan(0);
-  });
+  }, REAL_BINARY_PROCESS_TEST_TIMEOUT_MS);
 
   it('rejects a scanned image-only PDF without fabricating text', async () => {
     const result = await extractDocument({
@@ -34,7 +36,7 @@ describe('P03 extractor fixtures', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('PDF_SCANNED_NO_TEXT');
     expect(result.error?.userMessageVi).not.toMatch(/\/tmp\/|HTTP 429/i);
-  });
+  }, REAL_BINARY_PROCESS_TEST_TIMEOUT_MS);
 
   it('extracts a valid DOCX', async () => {
     const result = await extractDocument({
@@ -48,7 +50,7 @@ describe('P03 extractor fixtures', () => {
     expect(result.success).toBe(true);
     expect(result.version?.blocks).toHaveLength(2);
     expect(result.version?.blocks[0].text).toMatch(/Urban heat islands/);
-  });
+  }, REAL_BINARY_PROCESS_TEST_TIMEOUT_MS);
 
   it('rejects a malformed DOCX', async () => {
     const result = await extractDocument({

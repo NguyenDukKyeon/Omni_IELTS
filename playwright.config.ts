@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const playwrightPort = Number(process.env.PLAYWRIGHT_PORT || 3100);
 const playwrightBaseUrl = `http://127.0.0.1:${playwrightPort}`;
+const isSourcesLibraryTask12 = process.argv.some((argument) => /(?:^|[\\/])sources-library\.spec\.ts$/.test(argument));
 
 export default defineConfig({
   testDir: './e2e',
@@ -34,8 +35,13 @@ export default defineConfig({
       PORT: String(playwrightPort),
       DISABLE_HMR: 'true',
       LIVE_HUB_RECEIPT_SECRET: process.env.LIVE_HUB_RECEIPT_SECRET || 'omni-e2e-live-hub-receipt-secret',
+      ...(isSourcesLibraryTask12 ? {
+        OMNI_SOURCES_LIBRARY_V2: 'true',
+        VITE_SUPABASE_URL: 'http://127.0.0.1:59999',
+        VITE_SUPABASE_ANON_KEY: 'task12-test-anon-key',
+      } : {}),
     },
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: isSourcesLibraryTask12 ? false : !process.env.CI,
     timeout: 60_000,
   },
 });

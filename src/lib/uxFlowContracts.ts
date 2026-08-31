@@ -267,7 +267,7 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
 ];
 
 const SHELL_E2E_EVIDENCE = ['e2e/app-shell-redesign.spec.ts'];
-const SOURCES_CONTRACT_EVIDENCE = ['src/lib/__tests__/sourcesUxContracts.test.ts'];
+const SOURCES_CONTRACT_EVIDENCE = ['e2e/sources-library.spec.ts'];
 
 function shellControl(
   id: string,
@@ -427,6 +427,11 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   sourcesControl('sources.reader.retry', 'sources.manage', 'SourceReader', 'Refresh the selected source version', 'stale or unavailable reader state', 'reader loading'),
   sourcesControl('sources.artifact.close', 'sources.artifact.open-modal', 'ArtifactStudioModal', 'Close Artifact Studio', 'Artifact Studio open', 'Artifact Studio closed', ['Restore focus to the opening control']),
   sourcesControl('sources.artifact.form', 'sources.artifact.generate', 'ArtifactStudioModal', 'Submit the artifact generation form', 'destination picker visible', 'artifact job lifecycle visible'),
+  sourcesControl('sources.artifact.destination-practice', 'sources.artifact.generate', 'DestinationPicker', 'Choose the Practice destination', 'destination picker visible', 'Practice selected; other destinations deselected'),
+  sourcesControl('sources.artifact.destination-mock', 'sources.artifact.generate', 'DestinationPicker', 'Choose the Mock destination', 'destination picker visible', 'Mock selected; other destinations deselected'),
+  sourcesControl('sources.artifact.destination-vocabulary', 'sources.artifact.generate', 'DestinationPicker', 'Choose the Vocabulary destination', 'destination picker visible', 'Vocabulary selected; other destinations deselected'),
+  sourcesControl('sources.artifact.destination-note', 'sources.artifact.generate', 'DestinationPicker', 'Choose the Sources note destination', 'destination picker visible', 'Note selected; other destinations deselected'),
+  sourcesControl('sources.artifact.destination-idea-bank', 'sources.artifact.generate', 'DestinationPicker', 'Choose the Sources idea-bank destination', 'destination picker visible', 'Idea bank selected; other destinations deselected'),
   sourcesControl('sources.artifact.generate', 'sources.artifact.generate', 'ArtifactStudioModal', 'Generate one destination draft', 'one destination and usable source selected', 'job lifecycle state visible'),
   sourcesControl('sources.artifact.retry', 'sources.artifact.generate', 'ArtifactStudioModal', 'Retry the artifact job', 'retryable artifact error visible', 'artifact job processing'),
   sourcesControl('sources.artifact.target-band', 'sources.artifact.generate', 'ArtifactStudioModal', 'Set the bounded target band', 'Artifact Studio open', 'target band edited'),

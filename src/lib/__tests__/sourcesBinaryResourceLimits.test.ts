@@ -13,6 +13,8 @@ import {
 } from '../sources/binaryExtractionWorker.server';
 import { buildValidDocx } from './fixtures/sources/buildDocuments';
 
+const REAL_BINARY_PROCESS_TEST_TIMEOUT_MS = 20_000;
+
 type ZipEntry = {
   name: string;
   compressedSize: number;
@@ -85,7 +87,7 @@ describe('P03 binary import resource limits', () => {
       expect(result.blocks).toHaveLength(2);
       expect(result.blocks[0]).toEqual({ text: 'Ordinary DOCX content stays extractable.' });
     }
-  });
+  }, REAL_BINARY_PROCESS_TEST_TIMEOUT_MS);
 
   it('rejects too many DOCX output blocks inside the isolated child', async () => {
     const result = await runBoundedBinaryExtraction('docx', buildValidDocx(
@@ -97,7 +99,7 @@ describe('P03 binary import resource limits', () => {
       kind: 'docx',
       code: 'RESOURCE_LIMIT_EXCEEDED',
     });
-  });
+  }, REAL_BINARY_PROCESS_TEST_TIMEOUT_MS);
 
   it('lets the parent consume structured blocks without reading converted HTML', async () => {
     const structuredResult = Object.assign(Object.create({
@@ -169,7 +171,7 @@ describe('P03 binary import resource limits', () => {
       kind: 'docx',
       code: 'RESOURCE_LIMIT_EXCEEDED',
     });
-  });
+  }, REAL_BINARY_PROCESS_TEST_TIMEOUT_MS);
 
   it('keeps child failure typed and safe for learner-facing DOCX extraction', async () => {
     const worker = runnerResult({ ok: false, kind: 'docx', code: 'BINARY_PARSE_FAILED' });
