@@ -61,15 +61,20 @@ describe('P03 extractor fixtures', () => {
   });
 
   it('extracts an allowed public HTML fixture without live internet', async () => {
-    const fetchImpl = vi.fn(async () => new Response(PUBLIC_ARTICLE_HTML, {
-      status: 200,
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    }));
+    const requestImpl = vi.fn(async (_url, pinnedIp) => {
+      expect(pinnedIp).toBe('93.184.216.34');
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: new TextEncoder().encode(PUBLIC_ARTICLE_HTML),
+        finalUrl: 'https://example.com/climate-policy',
+      };
+    });
     const result = await extractUrl(
       { type: 'url', content: 'https://example.com/climate-policy', title: 'Climate' },
-      { fetch: fetchImpl, lookup: async () => ['93.184.216.34'] },
+      { request: requestImpl, lookup: async () => ['93.184.216.34'] },
     );
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(requestImpl).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
     expect(result.version?.plainText).toMatch(/renewable energy/i);
   });
@@ -89,7 +94,12 @@ describe('P03 extractor fixtures', () => {
     const nonHtml = await extractUrl(
       { type: 'url', content: 'https://example.com/file.json', title: 'JSON' },
       {
-        fetch: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+        request: async () => ({
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: new TextEncoder().encode('{}'),
+          finalUrl: 'https://example.com/file.json',
+        }),
         lookup: async () => ['93.184.216.34'],
       },
     );
@@ -98,9 +108,11 @@ describe('P03 extractor fixtures', () => {
     const oversized = await extractUrl(
       { type: 'url', content: 'https://example.com/huge', title: 'Huge' },
       {
-        fetch: async () => new Response('<html></html>', {
-          status: 200,
+        request: async () => ({
+          statusCode: 200,
           headers: { 'content-type': 'text/html', 'content-length': '5000000' },
+          body: new TextEncoder().encode('<html></html>'),
+          finalUrl: 'https://example.com/huge',
         }),
         lookup: async () => ['93.184.216.34'],
       },

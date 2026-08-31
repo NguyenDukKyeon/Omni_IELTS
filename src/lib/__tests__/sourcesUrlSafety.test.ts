@@ -96,8 +96,17 @@ describe('P03 URL extraction SSRF controls', () => {
       });
 
       const result = await extractUrl(
-        { type: 'url', content: `http://rebind-test.attacker.com:${privatePort}/article`, title: 'Rebind' },
-        { lookup, timeoutMs: 300 },
+        { type: 'url', content: 'http://rebind-test.attacker.com/article', title: 'Rebind' },
+        {
+          lookup,
+          timeoutMs: 300,
+          request: async (url, pinnedIp, options) => {
+            const { requestPinnedHttp } = await import('../sources/urlSafety');
+            const targetUrl = new URL(url.href);
+            targetUrl.port = String(privatePort);
+            return requestPinnedHttp(targetUrl, pinnedIp, options);
+          },
+        },
       );
 
       // The request MUST NOT reach the private server on 127.0.0.1 because the socket was pinned to 93.184.216.34
@@ -147,13 +156,15 @@ describe('P03 URL extraction SSRF controls', () => {
     try {
       const lookup = vi.fn(async () => [PUBLIC_IPV4]);
       // Use request executor pointing to our test server on localhost by custom lookup/pinnedIp
-      const res = await fetchPublicHtml(`http://allowed-test.org:${port}/stream`, {
+      const res = await fetchPublicHtml('http://allowed-test.org/stream', {
         lookup,
         maxBytes: 64 * 1024, // 64 KiB limit
         request: async (url, _pinnedIp, options) => {
           // Point connection to test server port on 127.0.0.1 to simulate streaming
           const { requestPinnedHttp } = await import('../sources/urlSafety');
-          return requestPinnedHttp(url, '127.0.0.1', options);
+          const targetUrl = new URL(url.href);
+          targetUrl.port = String(port);
+          return requestPinnedHttp(targetUrl, '127.0.0.1', options);
         },
       });
 
@@ -185,12 +196,14 @@ describe('P03 URL extraction SSRF controls', () => {
 
     try {
       const lookup = vi.fn(async () => [PUBLIC_IPV4]);
-      const res = await fetchPublicHtml(`http://allowed-test.org:${port}/slow`, {
+      const res = await fetchPublicHtml('http://allowed-test.org/slow', {
         lookup,
         timeoutMs: 100, // 100ms timeout must abort the slow body despite fast headers
         request: async (url, _pinnedIp, options) => {
           const { requestPinnedHttp } = await import('../sources/urlSafety');
-          return requestPinnedHttp(url, '127.0.0.1', options);
+          const targetUrl = new URL(url.href);
+          targetUrl.port = String(port);
+          return requestPinnedHttp(targetUrl, '127.0.0.1', options);
         },
       });
 
@@ -199,6 +212,79 @@ describe('P03 URL extraction SSRF controls', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it.each([
+    ['http://93.184.216.34:2375/docker'],
+    ['http://example.com:8080/admin'],
+    ['https://example.com:22/ssh'],
+    ['http://example.com:3306/mysql'],
+  ])('rejects non-standard explicit port URL %s with RIGHTS_REJECTED before connection', async (target) => {
+    const lookup = vi.fn(async () => {
+      throw new Error('lookup must not run for non-standard port');
+    });
+    const request = vi.fn(async () => {
+      throw new Error('request must not run for non-standard port');
+    });
+    const result = await extractUrl(
+      { type: 'url', content: target, title: 'NonStandardPort' },
+      { lookup, request },
+    );
+    expect(lookup).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('RIGHTS_REJECTED');
+  });
+
+  it('proves injected generic fetch cannot bypass pinned request path', async () => {
+    const globalFetch = vi.fn();
+    vi.stubGlobal('fetch', globalFetch);
+
+    const lookup = vi.fn(async () => [PUBLIC_IPV4]);
+    const request = vi.fn(async (_url, pinnedIp) => {
+      expect(pinnedIp).toBe(PUBLIC_IPV4);
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: new TextEncoder().encode(ARTICLE_HTML),
+        finalUrl: 'https://example.com/climate-policy',
+      };
+    });
+
+    const result = await extractUrl(
+      { type: 'url', content: 'https://example.com/climate-policy', title: 'Climate' },
+      { lookup, request },
+    );
+
+    expect(globalFetch).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+  });
+
+  it('proves redirect preserves port restrictions and rejects non-standard redirect destination', async () => {
+    const lookup = vi.fn(async () => [PUBLIC_IPV4]);
+    let requestCount = 0;
+    const request = vi.fn(async (url) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return {
+          statusCode: 302,
+          headers: { location: 'http://example.com:8080/internal' },
+          body: new Uint8Array(0),
+          finalUrl: url.href,
+        };
+      }
+      throw new Error('Second request must not be made to non-standard port');
+    });
+
+    const result = await extractUrl(
+      { type: 'url', content: 'http://example.com/start', title: 'Start' },
+      { lookup, request },
+    );
+
+    expect(requestCount).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('RIGHTS_REJECTED');
   });
 
   it('proves private redirect target never receives a request', async () => {
@@ -227,12 +313,14 @@ describe('P03 URL extraction SSRF controls', () => {
       });
 
       const result = await extractUrl(
-        { type: 'url', content: `http://public.example.com:${publicPort}/redirect`, title: 'Redirect' },
+        { type: 'url', content: 'http://public.example.com/redirect', title: 'Redirect' },
         {
           lookup,
           request: async (url, pinnedIp, options) => {
             const { requestPinnedHttp } = await import('../sources/urlSafety');
-            return requestPinnedHttp(url, pinnedIp === PUBLIC_IPV4 ? '127.0.0.1' : pinnedIp, options);
+            const targetUrl = new URL(url.href);
+            targetUrl.port = String(publicPort);
+            return requestPinnedHttp(targetUrl, pinnedIp === PUBLIC_IPV4 ? '127.0.0.1' : pinnedIp, options);
           },
         },
       );
@@ -247,7 +335,7 @@ describe('P03 URL extraction SSRF controls', () => {
     }
   });
 
-  it('proves allowed public fixture remains extractable', async () => {
+  it('proves allowed public HTTPS fixture remains extractable', async () => {
     const publicServer = http.createServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(ARTICLE_HTML);
@@ -258,12 +346,14 @@ describe('P03 URL extraction SSRF controls', () => {
     try {
       const lookup = vi.fn(async () => [PUBLIC_IPV4]);
       const result = await extractUrl(
-        { type: 'url', content: `http://public.example.com:${port}/climate-policy`, title: 'Climate' },
+        { type: 'url', content: 'https://public.example.com/climate-policy', title: 'Climate' },
         {
           lookup,
           request: async (url, _pinnedIp, options) => {
             const { requestPinnedHttp } = await import('../sources/urlSafety');
-            return requestPinnedHttp(url, '127.0.0.1', options);
+            const targetUrl = new URL(url.href.replace('https:', 'http:'));
+            targetUrl.port = String(port);
+            return requestPinnedHttp(targetUrl, '127.0.0.1', options);
           },
         },
       );

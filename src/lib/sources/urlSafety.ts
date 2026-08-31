@@ -64,7 +64,6 @@ export type HttpPinnedRequester = (
 ) => Promise<HttpResponseData>;
 
 export type UrlFetchDeps = {
-  fetch?: typeof fetch;
   lookup?: (hostname: string) => Promise<string[]>;
   timeoutMs?: number;
   maxBytes?: number;
@@ -205,6 +204,12 @@ function parseHttpUrl(raw: string): UrlAssertion {
     return { ok: false, code: 'RIGHTS_REJECTED' };
   }
   if (url.username || url.password) {
+    return { ok: false, code: 'RIGHTS_REJECTED' };
+  }
+  if (url.protocol === 'http:' && url.port && url.port !== '80') {
+    return { ok: false, code: 'RIGHTS_REJECTED' };
+  }
+  if (url.protocol === 'https:' && url.port && url.port !== '443') {
     return { ok: false, code: 'RIGHTS_REJECTED' };
   }
   if (isBlockedHostname(url.hostname)) {
@@ -413,85 +418,6 @@ export async function requestPinnedHttp(
   });
 }
 
-function createFetchRequester(fetchImpl: typeof fetch): HttpPinnedRequester {
-  return async (url, _pinnedIp, options) => {
-    const controller = new AbortController();
-    let timer: NodeJS.Timeout | null = null;
-    if (options.timeoutMs > 0) {
-      timer = setTimeout(() => controller.abort(new Error('Request timeout')), options.timeoutMs);
-    }
-    try {
-      const response = await fetchImpl(url.href, {
-        method: 'GET',
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: { Accept: 'text/html,application/xhtml+xml' },
-      });
-
-      const headers: Record<string, string> = {};
-      response.headers.forEach((val, key) => {
-        headers[key.toLowerCase()] = val;
-      });
-
-      if (isRedirectStatus(response.status)) {
-        return {
-          statusCode: response.status,
-          headers,
-          body: new Uint8Array(0),
-          finalUrl: url.href,
-        };
-      }
-
-      const declared = Number(headers['content-length']);
-      if (Number.isFinite(declared) && declared > options.maxBytes) {
-        throw new Error('Oversized content-length');
-      }
-
-      if (!response.body) {
-        const buf = new Uint8Array(await response.arrayBuffer());
-        if (buf.byteLength > options.maxBytes) throw new Error('Oversized body');
-        return {
-          statusCode: response.status,
-          headers,
-          body: buf,
-          finalUrl: url.href,
-        };
-      }
-
-      const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
-      let totalBytes = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          totalBytes += value.byteLength;
-          if (totalBytes > options.maxBytes) {
-            reader.cancel();
-            throw new Error('Oversized stream');
-          }
-          chunks.push(value);
-        }
-      }
-      const merged = new Uint8Array(totalBytes);
-      let offset = 0;
-      for (const chunk of chunks) {
-        merged.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-
-      return {
-        statusCode: response.status,
-        headers,
-        body: merged,
-        finalUrl: url.href,
-      };
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  };
-}
-
 export async function fetchPublicHtml(
   rawUrl: string,
   deps: UrlFetchDeps = {}
@@ -499,7 +425,7 @@ export async function fetchPublicHtml(
   const lookup = deps.lookup ?? defaultDnsLookup;
   const timeoutMs = deps.timeoutMs ?? URL_FETCH_TIMEOUT_MS;
   const maxBytes = deps.maxBytes ?? URL_MAX_RESPONSE_BYTES;
-  const requester = deps.request ?? (deps.fetch ? createFetchRequester(deps.fetch) : requestPinnedHttp);
+  const requester = deps.request ?? requestPinnedHttp;
   const visited = new Set<string>();
   let current = rawUrl;
 
