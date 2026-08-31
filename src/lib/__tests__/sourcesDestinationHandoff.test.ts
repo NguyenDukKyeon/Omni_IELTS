@@ -10,6 +10,8 @@ const provenance = {
   canonicalCitation: 'Doc 1',
 };
 
+const sourceSpan = { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_001'] };
+
 const practiceJob: SourceArtifactJob = {
   id: 'job_01',
   userId: 'u1',
@@ -25,7 +27,10 @@ const practiceJob: SourceArtifactJob = {
       targetBand: 7.0,
       activityTitle: 'Clean Energy Subsidies',
       sourceSpanRef: { sourceId: 's1', sourceVersionId: 'v1' },
-      questionPayload: {},
+      questionPayload: {
+        type: 'true_false_not_given',
+        questions: [{ id: 'q1', statement: 'Subsidies are expensive.', correctAnswer: 'TRUE' }],
+      },
       provenance,
     },
   },
@@ -38,6 +43,8 @@ describe('Destination Handoff Adapters', () => {
     const persistDestination = vi.fn();
     const handoff = prepareDestinationHandoff(practiceJob, { persistDestination });
 
+    expect(handoff.navigable).toBe(true);
+    if (!handoff.navigable) throw new Error('expected navigable handoff');
     expect(handoff.targetModule).toBe('practice');
     expect(handoff.targetRoute).toBe('practice');
     expect(handoff.draftId).toBe('draft_01');
@@ -59,8 +66,9 @@ describe('Destination Handoff Adapters', () => {
         payload: {
           sectionType: 'reading_passage',
           targetBand: 7,
-          packagePayload: {},
+          packagePayload: { passage: 'text' },
           provenance,
+          sourceSpanRef: sourceSpan,
         },
       },
     };
@@ -74,7 +82,17 @@ describe('Destination Handoff Adapters', () => {
         payload: {
           deckTitle: 'Energy',
           targetBand: 7,
-          cards: [],
+          cards: [{
+            word: 'subsidy',
+            pos: 'noun',
+            contextSentence: 'x',
+            definitionVi: 'x',
+            definitionEn: 'x',
+            phonetic: 'x',
+            collocations: [],
+            cefrLevel: 'B2',
+            sourceSpan,
+          }],
           provenance,
         },
       },
@@ -92,6 +110,7 @@ describe('Destination Handoff Adapters', () => {
           keyTakeaways: ['a'],
           annotatedCitations: [{ claim: 'a', blockId: 'b_001' }],
           provenance,
+          sourceSpanRef: sourceSpan,
         },
       },
     };
@@ -107,12 +126,25 @@ describe('Destination Handoff Adapters', () => {
         destination: 'idea_bank',
         payload: {
           topic: 'Energy',
-          ideas: [],
+          ideas: [{
+            perspective: 'fiscal',
+            argumentEn: 'x',
+            explanationVi: 'x',
+            exampleOrData: 'x',
+            sourceSpan,
+          }],
           provenance,
         },
       },
     });
 
+    expect(mockHandoff.navigable).toBe(true);
+    expect(vocabHandoff.navigable).toBe(true);
+    expect(noteHandoff.navigable).toBe(true);
+    expect(ideaHandoff.navigable).toBe(true);
+    if (!mockHandoff.navigable || !vocabHandoff.navigable || !noteHandoff.navigable || !ideaHandoff.navigable) {
+      throw new Error('expected navigable handoffs');
+    }
     expect(mockHandoff.targetModule).toBe('mock_test');
     expect(mockHandoff.targetRoute).toBe('mock_test');
     expect(mockHandoff.ctaPrimaryLabelVi).toBe('Mở bài thi thử');
@@ -132,11 +164,149 @@ describe('Destination Handoff Adapters', () => {
     const persistDestination = vi.fn();
     const handoff = prepareDestinationHandoff(practiceJob, { persistDestination });
 
+    expect(handoff.navigable).toBe(true);
+    if (!handoff.navigable) throw new Error('expected navigable handoff');
     expect(handoff.draftRef.draftId).toBe('draft_01');
     expect(handoff.draftRef.destination).toBe('practice');
     expect(handoff.draftRef.provenance).toEqual(provenance);
     expect(handoff.draftRef.sourceSpan).toEqual({ sourceId: 's1', sourceVersionId: 'v1' });
+    expect(handoff.draftRef.sourceVersionId).toBe('v1');
     expect(persistDestination).not.toHaveBeenCalled();
     expect(handoff.opensOnLearnerAction).toBe(true);
+  });
+});
+
+describe('Handoff gated on genuine ready drafts', () => {
+  it('returns a non-navigable result for queued, processing, failed, or missing-draft jobs', () => {
+    const persistDestination = vi.fn();
+    for (const state of ['queued', 'processing', 'failed', 'needs_review'] as const) {
+      const job: SourceArtifactJob = {
+        ...practiceJob,
+        state,
+        artifactDraft: state === 'queued' ? undefined : practiceJob.artifactDraft,
+      };
+      const handoff = prepareDestinationHandoff(job, { persistDestination });
+      if (handoff.navigable !== false) throw new Error('expected non-navigable');
+      expect(handoff.targetRoute).toBeUndefined();
+      expect(handoff.draftId).toBeUndefined();
+      expect(handoff.ctaPrimaryLabelVi).toBeUndefined();
+      expect(handoff.autoRedirect).toBe(false);
+      expect(handoff.status).toBe('not_ready');
+    }
+    expect(persistDestination).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate when the draft destination does not match the job', () => {
+    const handoff = prepareDestinationHandoff({
+      ...practiceJob,
+      destination: 'practice',
+      artifactDraft: {
+        ...practiceJob.artifactDraft!,
+        destination: 'note',
+      },
+    });
+    expect(handoff.navigable).toBe(false);
+    if (handoff.navigable) throw new Error('expected non-navigable');
+    expect(handoff.targetRoute).toBeUndefined();
+    expect(handoff.draftId).toBeUndefined();
+    expect(handoff.ctaPrimaryLabelVi).toBeUndefined();
+  });
+
+  it('preserves controlled provenance plus sourceVersionId/selection for all five destinations', () => {
+    const destinations = [
+      practiceJob,
+      {
+        ...practiceJob,
+        id: 'job_mock',
+        destination: 'mock_section' as const,
+        selection: sourceSpan,
+        artifactDraft: {
+          id: 'draft_mock',
+          destination: 'mock_section' as const,
+          payload: {
+            sectionType: 'reading_passage' as const,
+            targetBand: 7,
+            packagePayload: { passage: 'text' },
+            provenance,
+            sourceSpanRef: sourceSpan,
+          },
+        },
+      },
+      {
+        ...practiceJob,
+        id: 'job_vocab',
+        destination: 'vocabulary_deck' as const,
+        selection: sourceSpan,
+        artifactDraft: {
+          id: 'draft_vocab',
+          destination: 'vocabulary_deck' as const,
+          payload: {
+            deckTitle: 'Energy',
+            targetBand: 7,
+            cards: [{
+              word: 'subsidy',
+              pos: 'noun',
+              contextSentence: 'x',
+              definitionVi: 'x',
+              definitionEn: 'x',
+              phonetic: 'x',
+              collocations: [],
+              cefrLevel: 'B2' as const,
+              sourceSpan,
+            }],
+            provenance,
+          },
+        },
+      },
+      {
+        ...practiceJob,
+        id: 'job_note',
+        destination: 'note' as const,
+        selection: sourceSpan,
+        artifactDraft: {
+          id: 'draft_note',
+          destination: 'note' as const,
+          payload: {
+            title: 'Note',
+            summaryVi: 'Tóm tắt',
+            keyTakeaways: ['a'],
+            annotatedCitations: [{ claim: 'a', blockId: 'b_001' }],
+            provenance,
+            sourceSpanRef: sourceSpan,
+          },
+        },
+      },
+      {
+        ...practiceJob,
+        id: 'job_idea',
+        destination: 'idea_bank' as const,
+        selection: sourceSpan,
+        artifactDraft: {
+          id: 'draft_idea',
+          destination: 'idea_bank' as const,
+          payload: {
+            topic: 'Energy',
+            ideas: [{
+              perspective: 'fiscal',
+              argumentEn: 'x',
+              explanationVi: 'x',
+              exampleOrData: 'x',
+              sourceSpan,
+            }],
+            provenance,
+          },
+        },
+      },
+    ] satisfies SourceArtifactJob[];
+
+    for (const job of destinations) {
+      const handoff = prepareDestinationHandoff(job);
+      expect(handoff.navigable).toBe(true);
+      if (!handoff.navigable) throw new Error('expected navigable');
+      expect(handoff.draftRef.provenance).toEqual(provenance);
+      expect(handoff.draftRef.sourceVersionId).toBe('v1');
+      expect(handoff.draftRef.sourceSpan || handoff.draftRef.selection).toBeTruthy();
+      expect(handoff.autoRedirect).toBe(false);
+    }
   });
 });

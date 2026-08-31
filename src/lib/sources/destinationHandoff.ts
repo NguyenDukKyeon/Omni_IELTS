@@ -7,7 +7,8 @@ import type {
   ValidatedArtifactDraftPayload,
 } from '../../types/sources';
 
-export interface DestinationHandoffResult {
+type NavigableHandoff = {
+  navigable: true;
   targetModule: ModuleId;
   targetRoute: ModuleId;
   draftId: string;
@@ -16,12 +17,29 @@ export interface DestinationHandoffResult {
     destination: DestinationType;
     provenance?: SourceProvenance;
     sourceSpan?: SourceSpan;
+    sourceVersionId: string;
+    selection?: SourceSpan;
   };
   ctaPrimaryLabelVi: string;
   ctaSecondaryLabelVi: string;
   autoRedirect: false;
   opensOnLearnerAction: true;
-}
+};
+
+type NonNavigableHandoff = {
+  navigable: false;
+  status: 'not_ready';
+  code: 'VALIDATION_FAILED';
+  userMessageVi: string;
+  suggestedActionVi: string;
+  autoRedirect: false;
+  ctaSecondaryLabelVi: string;
+  targetRoute?: undefined;
+  draftId?: undefined;
+  ctaPrimaryLabelVi?: undefined;
+};
+
+export type DestinationHandoffResult = NavigableHandoff | NonNavigableHandoff;
 
 const DESTINATION_MODULE: Record<DestinationType, ModuleId> = {
   practice: 'practice',
@@ -52,22 +70,45 @@ function sourceSpanOf(payload: ValidatedArtifactDraftPayload | undefined): Sourc
   if ('sourceSpanRef' in payload) return payload.sourceSpanRef;
   if ('cards' in payload) return payload.cards[0]?.sourceSpan;
   if ('ideas' in payload) return payload.ideas[0]?.sourceSpan;
-  if ('annotatedCitations' in payload && payload.annotatedCitations[0]) {
-    return undefined;
-  }
   return undefined;
+}
+
+function nonNavigable(): NonNavigableHandoff {
+  return {
+    navigable: false,
+    status: 'not_ready',
+    code: 'VALIDATION_FAILED',
+    userMessageVi: 'Bản nháp chưa sẵn sàng để mở trong module đích.',
+    suggestedActionVi: 'Chờ bản nháp hoàn tất hoặc tạo lại đầu ra từ nguồn này.',
+    autoRedirect: false,
+    ctaSecondaryLabelVi: SECONDARY_CTA_VI,
+  };
+}
+
+function isGenuineReadyDraft(job: SourceArtifactJob): boolean {
+  if (job.state !== 'ready') return false;
+  const draft = job.artifactDraft;
+  if (!draft?.id || draft.destination !== job.destination) return false;
+  if (draft.validationErrors && draft.validationErrors.length > 0) return false;
+  if (!draft.payload || typeof draft.payload !== 'object') return false;
+  return Boolean(provenanceOf(draft.payload));
 }
 
 export function prepareDestinationHandoff(
   job: SourceArtifactJob,
   _options?: { persistDestination?: (...args: unknown[]) => unknown },
 ): DestinationHandoffResult {
-  const destination = job.artifactDraft?.destination ?? job.destination;
-  const draftId = job.artifactDraft?.id ?? job.id;
-  const payload = job.artifactDraft?.payload;
+  if (!isGenuineReadyDraft(job) || !job.artifactDraft) {
+    return nonNavigable();
+  }
+
+  const destination = job.artifactDraft.destination;
+  const draftId = job.artifactDraft.id;
+  const payload = job.artifactDraft.payload;
   const targetModule = DESTINATION_MODULE[destination];
 
   return {
+    navigable: true,
     targetModule,
     targetRoute: targetModule,
     draftId,
@@ -75,7 +116,9 @@ export function prepareDestinationHandoff(
       draftId,
       destination,
       provenance: provenanceOf(payload),
-      sourceSpan: sourceSpanOf(payload),
+      sourceSpan: sourceSpanOf(payload) || job.selection,
+      sourceVersionId: job.sourceVersionId,
+      selection: job.selection,
     },
     ctaPrimaryLabelVi: PRIMARY_CTA_VI[destination],
     ctaSecondaryLabelVi: SECONDARY_CTA_VI,
