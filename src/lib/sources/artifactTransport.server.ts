@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { executeArtifactJob, createArtifactJob, type ArtifactRouterExecute } from './artifactJobMachine';
-import type { LearnerAuthResult, SourceHydrationResult } from './groundedChat';
+import {
+  isSourceVersionUsable,
+  isValidSelectedSpan,
+  type LearnerAuthResult,
+  type SourceHydrationResult,
+} from './groundedChat';
 import type { ConsumeSourcesQuota } from './quota.server';
 import type { SourceArtifactJob, SourceSpan } from '../../types/sources';
 import { isValidSourceArtifactTargetBand } from './targetBand';
@@ -90,10 +95,6 @@ function sourceNotReadyResult(): SourcesTransportResult {
   };
 }
 
-function sourceIsUsable(status: string, blockCount: number): boolean {
-  return status !== 'unavailable' && status !== 'handoff_required' && blockCount > 0;
-}
-
 export async function handleArtifactJobRequest(
   input: ArtifactJobRequestHandlerInput,
 ): Promise<SourcesTransportResult> {
@@ -109,9 +110,6 @@ export async function handleArtifactJobRequest(
   const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
 
-  const quotaRejection = applyVerifiedQuota(input.consumeQuota, 'artifact-generation', auth.learner.userId);
-  if (quotaRejection) return quotaRejection;
-
   const repository = input.repositoryForToken(auth.learner.accessToken);
   let hydration: SourceHydrationResult;
   try {
@@ -122,12 +120,15 @@ export async function handleArtifactJobRequest(
   if (hydration.status !== 'ok' || hydration.items.length !== 1) return selectionUnavailableResult();
 
   const selected = hydration.items[0];
-  if (!selected || !sourceIsUsable(selected.record.processingState, selected.version.blocks.length)) {
+  if (!selected) return selectionUnavailableResult();
+  if (selected.version.sourceId !== selected.record.id) return selectionUnavailableResult();
+  if (!isSourceVersionUsable(selected)) {
     return sourceNotReadyResult();
   }
-  if (parsed.data.sourceSpan && parsed.data.sourceSpan.sourceVersionId !== selected.version.id) {
-    return selectionUnavailableResult();
-  }
+  if (!isValidSelectedSpan(parsed.data.sourceSpan, [selected])) return selectionUnavailableResult();
+
+  const quotaRejection = applyVerifiedQuota(input.consumeQuota, 'artifact-generation', auth.learner.userId);
+  if (quotaRejection) return quotaRejection;
 
   const queuedJob = createArtifactJob({
     id: globalThis.crypto.randomUUID(),

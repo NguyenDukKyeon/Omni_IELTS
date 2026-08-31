@@ -153,15 +153,18 @@ function unsupportedResponse(): GroundedChatResponse {
   };
 }
 
-const HANDOFF_STATES = new Set(['unavailable', 'handoff_required']);
-
 function hasUsableBlockText(text: string): boolean {
   return text.trim().length > 0;
 }
 
-function isUsableSource(item: HydratedSource): boolean {
-  return !HANDOFF_STATES.has(item.record.processingState)
+export function isSourceVersionUsable(item: HydratedSource): boolean {
+  return item.record.processingState === 'ready'
+    && item.version.sourceId === item.record.id
     && item.version.blocks.some((block) => hasUsableBlockText(block.text));
+}
+
+function isUsableSource(item: HydratedSource): boolean {
+  return isSourceVersionUsable(item);
 }
 
 export function hydrateSelectedSources(
