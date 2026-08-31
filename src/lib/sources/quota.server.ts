@@ -1,7 +1,11 @@
 /** Server-only in-process quota for Sources cloud routes. Not durable across instances. */
 import { consumeFixedWindowQuota, type FixedWindowUsage, type QuotaDecision } from '../mediaImport';
 
-export type SourcesQuotaBucket = 'grounded-chat' | 'web-research';
+export type SourcesQuotaBucket =
+  | 'grounded-chat'
+  | 'web-research'
+  | 'source-import'
+  | 'artifact-generation';
 
 export type SourcesQuotaBucketConfig = {
   limit: number;
@@ -77,14 +81,30 @@ export function createSourcesQuotaConsumer(
     now?: () => number;
     groundedChatWindows?: Map<string, FixedWindowUsage>;
     webResearchWindows?: Map<string, FixedWindowUsage>;
+    sourceImportWindows?: Map<string, FixedWindowUsage>;
+    artifactGenerationWindows?: Map<string, FixedWindowUsage>;
   },
 ): ConsumeSourcesQuota {
   const chatWindows = options?.groundedChatWindows ?? new Map<string, FixedWindowUsage>();
   const webWindows = options?.webResearchWindows ?? new Map<string, FixedWindowUsage>();
+  const importWindows = options?.sourceImportWindows ?? new Map<string, FixedWindowUsage>();
+  const artifactWindows = options?.artifactGenerationWindows ?? new Map<string, FixedWindowUsage>();
   const now = options?.now ?? Date.now;
   return ({ bucket, userId }) => {
-    const windows = bucket === 'grounded-chat' ? chatWindows : webWindows;
-    const bucketConfig = bucket === 'grounded-chat' ? config.groundedChat : config.webResearch;
+    const windows = bucket === 'grounded-chat'
+      ? chatWindows
+      : bucket === 'web-research'
+        ? webWindows
+        : bucket === 'source-import'
+          ? importWindows
+          : artifactWindows;
+    const bucketConfig = bucket === 'grounded-chat'
+      ? config.groundedChat
+      : bucket === 'web-research'
+        ? config.webResearch
+        : bucket === 'source-import'
+          ? config.groundedChat
+          : config.webResearch;
     return consumeFixedWindowQuota(windows, userId, now(), bucketConfig.limit, bucketConfig.windowMs);
   };
 }

@@ -56,6 +56,15 @@ import {
   handleGroundedChatRequest,
   handleWebResearchRequest,
 } from "./src/lib/sources/groundedChat";
+import { handleSourceImportRequest } from "./src/lib/sources/importTransport.server";
+import {
+  handleArtifactJobRequest,
+  handleArtifactJobStatusRequest,
+} from "./src/lib/sources/artifactTransport.server";
+import {
+  handleSourceVersionRequest,
+  handleSourcesLibraryRequest,
+} from "./src/lib/sources/libraryTransport.server";
 import { parseSourcesLibraryV2Env } from "./src/lib/sources/featureFlags.server";
 import { createSourcesQuotaConsumer, parseSourcesQuotaEnv } from "./src/lib/sources/quota.server";
 import {
@@ -8532,6 +8541,153 @@ app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/
 function sourcesCloudConfig() {
   return resolveSourcesSupabaseConfig(process.env);
 }
+
+function writeSourcesTransportResult(
+  res: express.Response,
+  result: { status: number; body: Record<string, unknown>; headers?: Record<string, string> },
+) {
+  if (result.headers) {
+    for (const [name, value] of Object.entries(result.headers)) res.setHeader(name, value);
+  }
+  return res.status(result.status).json(result.body);
+}
+
+app.get('/api/sources/library', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourcesLibraryRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.get('/api/sources/versions/:versionId', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourceVersionRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    versionId: req.params.versionId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.post('/api/sources/import', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourceImportRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    consumeQuota: sourcesQuotaConsumer,
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.post('/api/sources/artifact-jobs', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleArtifactJobRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    consumeQuota: sourcesQuotaConsumer,
+    routerExecute: async ({ profile, tools, destination, sourceVersionId, sourceSpan, sourceContext, targetBand, customInstruction }) => {
+      if (profile.tier !== 'balanced' || profile.capability !== 'text' || tools.length > 0) {
+        throw new Error('Sources artifacts require the balanced text profile without tools.');
+      }
+      const prompt = [
+        'Create exactly one validated JSON artifact for the requested destination.',
+        'Use only the supplied source context. Do not search the web.',
+        `Destination: ${destination}`,
+        `Target band: ${targetBand ?? 7}`,
+        `SourceVersionId: ${sourceVersionId}`,
+        `Selected span: ${JSON.stringify(sourceSpan)}`,
+        ...(customInstruction ? [`Learner instruction: ${customInstruction}`] : []),
+        'Source context:',
+        sourceContext,
+        'Return JSON only. Do not include scores, XP, mastery, or destination persistence commands.',
+      ].join('\n');
+      const routed = await executeBalancedText({
+        request: req,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+        validateText: (text) => {
+          try {
+            JSON.parse(text);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      });
+      return { value: JSON.parse(routed.value) };
+    },
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.get('/api/sources/artifact-jobs/:jobId', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleArtifactJobStatusRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    jobId: req.params.jobId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
 
 app.post('/api/sources/grounded-chat', async (req, res) => {
   const featureEnabled = parseSourcesLibraryV2Env(process.env);

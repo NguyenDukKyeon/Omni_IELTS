@@ -1083,6 +1083,40 @@ git commit -m "feat(sources): implement destination handoff adapters and deep li
 
 ---
 
+### Batch C0: Real authenticated transport before Tasks 8–11
+
+Batch C adds the server boundary required by the Sources UI without adding a
+new product capability or program-map ID. `POST /api/sources/import` accepts
+the exact Zod `SourceImportRequestSchema`: bounded string content for text,
+URL, and VTT/SRT; bounded base64 plus declared MIME type for PDF/DOCX; and
+metadata-only YouTube/audio/chart handoffs. Binary payloads are decoded and
+signature-checked on the server before the existing extractor path runs.
+Flag validation, request validation, verified JWT, and the separate
+`source-import` quota precede RLS persistence. Ready imports persist one
+`SourceRecord` plus one immutable `SourceVersion`; handoffs persist no
+version; failures never create a ready record.
+
+`POST /api/sources/artifact-jobs` accepts one source version, an optional
+validated span, one destination, and bounded target-band/instruction fields.
+It hydrates through the learner-JWT SourcesRepository, consumes the separate
+`artifact-generation` quota, invokes the existing balanced text executor with
+no tools or web search, and persists only `SourceArtifactJob` state. `GET
+/api/sources/artifact-jobs/:jobId` is the safe learner-scoped refresh path.
+`GET /api/sources/library` and `GET /api/sources/versions/:versionId` provide
+the real RLS-backed read adapters used by the flag-ON workspace. The browser
+wrapper obtains the current Supabase session token per request and never puts
+the token in component state, storage, logs, or errors. No delete control is
+rendered until a real learner-owned delete route is added.
+
+**C0 files:** `src/lib/sources/importTransport.server.ts`,
+`src/lib/sources/artifactTransport.server.ts`,
+`src/lib/sources/libraryTransport.server.ts`,
+`src/lib/sources/transportShared.server.ts`,
+`src/lib/sources/sourcesApi.ts`, and the JWT/RLS write/read methods in
+`src/lib/sources/sourcesRepository.server.ts`.
+
+---
+
 ### Task 8: Library Explorer, Collection Drawer & Filter UI Components
 
 **Files:**

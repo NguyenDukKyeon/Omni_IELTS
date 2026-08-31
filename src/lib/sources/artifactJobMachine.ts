@@ -155,6 +155,8 @@ export type ArtifactRouterExecute = (input: {
   sourceVersionId: string;
   sourceSpan: SourceSpan;
   sourceContext: string;
+  targetBand?: number;
+  customInstruction?: string;
 }) => Promise<{ value: unknown }>;
 
 function nowIso(): string {
@@ -413,6 +415,8 @@ export async function executeArtifactJob(
       sourceVersionId: job.sourceVersionId,
       sourceSpan: span,
       sourceContext,
+      targetBand: job.targetBand,
+      customInstruction: job.customInstruction,
     });
     const stamped = applyControlledProvenance(
       job.destination,

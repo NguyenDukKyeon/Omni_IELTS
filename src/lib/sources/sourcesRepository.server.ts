@@ -1,5 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
-import type { SourceRecord, SourceVersion, VersionStage, SourceMediaType, SourceProcessingState, SourceProvenance } from '../../types/sources';
+import type {
+  SourceArtifactJob,
+  SourceCollection,
+  SourceRecord,
+  SourceVersion,
+  VersionStage,
+  SourceMediaType,
+  SourceProcessingState,
+  SourceProvenance,
+} from '../../types/sources';
 import type { LearnerAuthResult, SourcesRepository, SourceHydrationResult } from './groundedChat';
 
 export function resolveSourcesSupabaseConfig(env: Record<string, string | undefined>): {
@@ -123,17 +132,144 @@ function versionFromRow(row: Record<string, unknown>): SourceVersion {
   };
 }
 
+function collectionFromRow(row: Record<string, unknown>): SourceCollection {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    name: String(row.name),
+    color: String(row.color ?? 'vermilion'),
+    icon: String(row.icon ?? 'folder'),
+    description: row.description == null ? undefined : String(row.description),
+    sourceIds: Array.isArray(row.source_ids) ? row.source_ids.map(String) : [],
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastUsedAt: String(row.last_used_at),
+  };
+}
+
+function artifactJobFromRow(row: Record<string, unknown>): SourceArtifactJob {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    sourceVersionId: String(row.source_version_id),
+    selection: row.selection && typeof row.selection === 'object'
+      ? row.selection as SourceArtifactJob['selection']
+      : undefined,
+    destination: row.destination as SourceArtifactJob['destination'],
+    targetBand: Number(row.target_band),
+    customInstruction: row.custom_instruction == null ? undefined : String(row.custom_instruction),
+    state: row.state as SourceArtifactJob['state'],
+    artifactDraft: row.artifact_draft && typeof row.artifact_draft === 'object'
+      ? row.artifact_draft as SourceArtifactJob['artifactDraft']
+      : undefined,
+    destinationHandoff: row.destination_handoff && typeof row.destination_handoff === 'object'
+      ? row.destination_handoff as SourceArtifactJob['destinationHandoff']
+      : undefined,
+    error: row.error_details && typeof row.error_details === 'object'
+      ? row.error_details as SourceArtifactJob['error']
+      : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function recordRow(record: SourceRecord) {
+  return {
+    id: record.id,
+    user_id: record.userId,
+    title: record.title,
+    summary: record.summary,
+    media_type: record.type,
+    collection_ids: record.collectionIds,
+    tags: record.tags,
+    provenance: record.provenance,
+    current_version_id: record.currentVersionId || null,
+    processing_state: record.processingState,
+    last_used_at: record.lastUsedAt,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  };
+}
+
+function versionRow(version: SourceVersion, userId: string) {
+  return {
+    id: version.id,
+    source_id: version.sourceId,
+    user_id: userId,
+    version_number: version.versionNumber,
+    stage: version.stage,
+    content_hash: version.contentHash,
+    plain_text: version.plainText,
+    blocks: version.blocks,
+    word_count: version.wordCount,
+    page_count: version.pageCount ?? null,
+    duration_ms: version.durationMs ?? null,
+    media_url: version.mediaUrl ?? null,
+    extraction_report: version.extractionReport ?? {},
+    created_at: version.createdAt,
+  };
+}
+
+function collectionRow(collection: SourceCollection) {
+  return {
+    id: collection.id,
+    user_id: collection.userId,
+    name: collection.name,
+    color: collection.color,
+    icon: collection.icon,
+    description: collection.description ?? null,
+    source_ids: collection.sourceIds,
+    created_at: collection.createdAt,
+    updated_at: collection.updatedAt,
+    last_used_at: collection.lastUsedAt,
+  };
+}
+
+function artifactJobRow(job: SourceArtifactJob) {
+  return {
+    id: job.id,
+    user_id: job.userId,
+    source_version_id: job.sourceVersionId,
+    selection: job.selection ?? null,
+    destination: job.destination,
+    target_band: job.targetBand,
+    custom_instruction: job.customInstruction ?? null,
+    state: job.state,
+    artifact_draft: job.artifactDraft ?? null,
+    destination_handoff: job.destinationHandoff ?? { status: 'pending' },
+    error_details: job.error ?? null,
+    created_at: job.createdAt,
+    updated_at: job.updatedAt,
+  };
+}
+
+export type SourcesLibrarySnapshot = {
+  records: SourceRecord[];
+  collections: SourceCollection[];
+};
+
+export interface SourcesPersistenceRepository extends SourcesRepository {
+  listLibrary(): Promise<SourcesLibrarySnapshot>;
+  getVersionById(versionId: string): Promise<SourceVersion | undefined>;
+  saveRecord(record: SourceRecord): Promise<SourceRecord>;
+  saveVersion(version: SourceVersion, userId: string): Promise<SourceVersion>;
+  updateRecord(record: SourceRecord): Promise<SourceRecord>;
+  saveCollection(collection: SourceCollection): Promise<SourceCollection>;
+  saveArtifactJob(job: SourceArtifactJob): Promise<SourceArtifactJob>;
+  getArtifactJob(jobId: string): Promise<SourceArtifactJob | undefined>;
+}
+
 export function createLearnerJwtSourcesRepository(input: {
   accessToken: string;
   supabaseUrl: string;
   supabaseAnonKey: string;
-}): SourcesRepository {
+}): SourcesPersistenceRepository {
   const client = createClient(input.supabaseUrl, input.supabaseAnonKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { headers: { Authorization: `Bearer ${input.accessToken}` } },
   });
 
-  return {
+  const repository: SourcesPersistenceRepository = {
     async getSelectedVersions(selectedVersionIds): Promise<SourceHydrationResult> {
       const ids = [...new Set(selectedVersionIds)];
       if (!ids.length) return { status: 'selection_unavailable' };
@@ -169,5 +305,79 @@ export function createLearnerJwtSourcesRepository(input: {
         return { status: 'unavailable' };
       }
     },
+
+    async listLibrary(): Promise<SourcesLibrarySnapshot> {
+      const { data: recordRows, error: recordError } = await client
+        .from('source_records')
+        .select('id, user_id, title, summary, media_type, collection_ids, tags, provenance, current_version_id, processing_state, last_used_at, created_at, updated_at')
+        .order('updated_at', { ascending: false });
+      if (recordError) throw recordError;
+
+      const { data: collectionRows, error: collectionError } = await client
+        .from('source_collections')
+        .select('id, user_id, name, color, icon, description, source_ids, created_at, updated_at, last_used_at')
+        .order('updated_at', { ascending: false });
+      if (collectionError) throw collectionError;
+
+      return {
+        records: (recordRows ?? []).map((row) => recordFromRow(row as Record<string, unknown>)),
+        collections: (collectionRows ?? []).map((row) => collectionFromRow(row as Record<string, unknown>)),
+      };
+    },
+
+    async getVersionById(versionId: string): Promise<SourceVersion | undefined> {
+      const { data, error } = await client
+        .from('source_versions')
+        .select('id, source_id, version_number, stage, content_hash, plain_text, blocks, word_count, page_count, duration_ms, media_url, extraction_report, created_at')
+        .eq('id', versionId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? versionFromRow(data as Record<string, unknown>) : undefined;
+    },
+
+    async saveRecord(record: SourceRecord): Promise<SourceRecord> {
+      const { error } = await client.from('source_records').upsert(recordRow(record));
+      if (error) throw error;
+      return record;
+    },
+
+    async saveVersion(version: SourceVersion, userId: string): Promise<SourceVersion> {
+      const { error } = await client.from('source_versions').insert(versionRow(version, userId));
+      if (error) throw error;
+      return version;
+    },
+
+    async updateRecord(record: SourceRecord): Promise<SourceRecord> {
+      const { error } = await client
+        .from('source_records')
+        .update(recordRow(record))
+        .eq('id', record.id);
+      if (error) throw error;
+      return record;
+    },
+
+    async saveCollection(collection: SourceCollection): Promise<SourceCollection> {
+      const { error } = await client.from('source_collections').upsert(collectionRow(collection));
+      if (error) throw error;
+      return collection;
+    },
+
+    async saveArtifactJob(job: SourceArtifactJob): Promise<SourceArtifactJob> {
+      const { error } = await client.from('source_artifact_jobs').upsert(artifactJobRow(job));
+      if (error) throw error;
+      return job;
+    },
+
+    async getArtifactJob(jobId: string): Promise<SourceArtifactJob | undefined> {
+      const { data, error } = await client
+        .from('source_artifact_jobs')
+        .select('id, user_id, source_version_id, selection, destination, target_band, custom_instruction, state, artifact_draft, destination_handoff, error_details, created_at, updated_at')
+        .eq('id', jobId)
+        .maybeSingle();
+      if (error) throw error;
+      return data ? artifactJobFromRow(data as Record<string, unknown>) : undefined;
+    },
   };
+
+  return repository;
 }

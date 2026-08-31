@@ -298,6 +298,35 @@ Current Source rows live in browser IndexedDB / client-Supabase storage. `server
 `POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It is gated by the same `parseSourcesLibraryV2Env` kill switch (HTTP 403 `feature_disabled` before any other work) and the same verified-JWT rule: the handler verifies the learner Supabase access token server-side with Supabase Auth using the project URL and **anon key only** (never a service-role key) before any Brave/search, repository, AI, or quota call. Missing, malformed, expired, invalid, or unverifiable JWTs return typed `auth_required` (HTTP 401) and do not consume quota. The web-research question uses the same 8,000 Unicode-code-point bound as grounded chat; oversized questions return typed `select_smaller_source` and never reach Brave. After verified identity, the separate web-research quota bucket is consumed before Brave. Supabase transport or configuration failure returns typed `unavailable` (HTTP 503). A syntactically valid Bearer string is not sufficient. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
 
 
+### 4.1.2 Batch C0 authenticated import and artifact transport
+
+The flag-ON workspace uses real server transport before exposing import or
+artifact controls. `POST /api/sources/import` accepts the exact Zod
+`SourceImportRequestSchema`: bounded string content for text/Markdown, URL,
+and VTT/SRT; bounded base64 with declared MIME type for PDF/DOCX; and
+metadata-only YouTube/audio/chart handoffs. The server decodes binary payloads,
+checks the declared type, byte bound, and basic PDF/DOCX signature, then calls
+the existing SSRF-safe URL extractor or supported document extractor. The
+order is feature flag, request validation, verified JWT, `source-import` quota,
+then learner-JWT/RLS persistence and extraction. A ready import persists one
+record and one immutable version; a handoff persists a record without a
+version; failures never produce a ready record and return typed retry state.
+
+`POST /api/sources/artifact-jobs` accepts exactly one `sourceVersionId`, an
+optional validated `SourceSpan`, one destination, and bounded target-band and
+custom-instruction fields. It hydrates the selected version through the
+request-scoped learner-JWT repository, consumes a separate
+`artifact-generation` quota, invokes the existing balanced text executor with
+an empty tool list and no web search, and persists only the job. It returns the
+real job state (`queued`, `processing`, `validating`, `ready`, `needs_review`,
+or typed failure); destination rows are never written. The learner-scoped
+`GET /api/sources/artifact-jobs/:jobId` endpoint refreshes state without
+disclosing foreign IDs. `GET /api/sources/library` and
+`GET /api/sources/versions/:versionId` are the corresponding RLS-backed read
+paths for the flag-ON workspace. The browser wrapper obtains the current
+session token ephemerally per request; it never stores, logs, or returns the
+token to component state.
+
 ### 4.2 Selection & Context Formation
 
 - **Explicit Selection Rule**: Learners may select 1 to N sources via checkboxes in the Library Explorer or Collection view. The chat input displays an active token chip: `Context: 2 sources (4,250 words)` or `Context: Selected span (180 words)`.
