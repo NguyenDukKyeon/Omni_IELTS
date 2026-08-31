@@ -6,6 +6,13 @@ const { Client } = pg;
 const MIGRATION_PATH = 'supabase/migrations/202608300001_sources_library.sql';
 export const REQUIRED_DISPOSABLE_DB_NAME = 'omni_sources_rls_test';
 export const REQUIRED_MARKER_NAME = 'OMNI_SOURCES_RLS_TEST_ENVIRONMENT';
+export const REDACTED_DISPOSABLE_DB_URL = '[redacted disposable database URL]';
+const PINNED_LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1']);
+const CONNECT_FAILURE_MESSAGE = 'Failed to connect to disposable database';
+const MARKER_FAILURE_MESSAGE =
+  'SECURITY_VIOLATION: Missing or invalid disposable database marker omni_test.disposable_marker. Refusing to run destructive operations on non-disposable database.';
+const LIVE_EXECUTION_FAILURE_MESSAGE = 'Live database execution error';
+const UNEXPECTED_FAILURE_MESSAGE = 'Unexpected disposable database runner error';
 
 export type RlsProofResult = {
   executable: boolean;
@@ -26,24 +33,35 @@ export type PostgresConfig = {
 };
 
 /**
- * Sanitizes a database connection URL for safe logging/display by redacting passwords.
+ * Never returns a user-provided raw URL, query string, password, username, or malformed input.
+ * Display/log paths must use this fixed label only.
  */
-export function sanitizeUrlForDisplay(rawUrl: string): string {
-  try {
-    const url = new URL(rawUrl);
-    if (url.password) {
-      url.password = '***';
-    }
-    return url.toString();
-  } catch {
-    return rawUrl.replace(/:([^:@/]+)@/, ':***@');
+export function sanitizeUrlForDisplay(_rawUrl: string): string {
+  return REDACTED_DISPOSABLE_DB_URL;
+}
+
+function isSafeInternalFailureMessage(message: string): boolean {
+  return (
+    message.startsWith('SECURITY_VIOLATION:') ||
+    message.startsWith('Policy violation:') ||
+    message.startsWith('Cascade deletion failed:') ||
+    message.startsWith('Cascade state exploit failed to be blocked:')
+  );
+}
+
+function safeFailureMessage(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : '';
+  if (isSafeInternalFailureMessage(message)) {
+    return message;
   }
+  return fallback;
 }
 
 /**
- * Validates that a database URL is strictly a local loopback address targeting the
+ * Validates that a database URL is a literal pinned loopback address targeting the
  * dedicated disposable database `omni_sources_rls_test`.
- * Rejects 0.0.0.0, LAN/WAN addresses, remote hostnames, supabase domains, non-postgres protocols,
+ * Accepts only 127.0.0.1 and ::1. Rejects localhost, every hostname (including loopback
+ * aliases), 0.0.0.0, LAN/WAN addresses, remote cloud endpoints, non-postgres protocols,
  * and any database name other than `omni_sources_rls_test` before any connection is attempted.
  */
 export function assertLocalDatabaseUrl(rawUrl: string): PostgresConfig {
@@ -51,16 +69,15 @@ export function assertLocalDatabaseUrl(rawUrl: string): PostgresConfig {
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new Error(`SECURITY_VIOLATION: Invalid database URL format: "${sanitizeUrlForDisplay(rawUrl)}"`);
+    throw new Error('SECURITY_VIOLATION: Invalid database URL format.');
   }
 
   if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
-    throw new Error(`SECURITY_VIOLATION: Database protocol must be postgres: or postgresql:, got "${url.protocol}"`);
+    throw new Error('SECURITY_VIOLATION: Database protocol must be postgres: or postgresql.');
   }
 
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
-  // Reject Supabase / remote indicators
   if (
     hostname.includes('supabase.co') ||
     hostname.includes('supabase.com') ||
@@ -70,23 +87,16 @@ export function assertLocalDatabaseUrl(rawUrl: string): PostgresConfig {
     throw new Error('SECURITY_VIOLATION: Supabase or remote cloud database endpoints are strictly forbidden for disposable RLS tests.');
   }
 
-  // Strict literal loopback verification
-  const isStrictLoopback =
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '::1';
-
-  if (!isStrictLoopback) {
+  if (!PINNED_LOOPBACK_HOSTS.has(hostname)) {
     throw new Error(
-      `SECURITY_VIOLATION: Remote or non-loopback database URLs are strictly forbidden (0.0.0.0, LAN, WAN disallowed). Disposable DB runner must only target local loopback (localhost/127.0.0.1/[::1]), got "${hostname}".`
+      'SECURITY_VIOLATION: Remote or non-loopback database URLs are strictly forbidden (0.0.0.0, LAN, WAN, and hostnames including localhost disallowed). Disposable DB runner must only target literal loopback addresses 127.0.0.1 or ::1.'
     );
   }
 
-  // Dedicated database name verification
   const dbName = decodeURIComponent((url.pathname || '').replace(/^\//, '')).trim();
   if (dbName !== REQUIRED_DISPOSABLE_DB_NAME) {
     throw new Error(
-      `SECURITY_VIOLATION: Database name must be exactly "${REQUIRED_DISPOSABLE_DB_NAME}", got "${dbName || '(empty)'}". Refusing to connect to non-test database.`
+      `SECURITY_VIOLATION: Database name must be exactly "${REQUIRED_DISPOSABLE_DB_NAME}". Refusing to connect to non-test database.`
     );
   }
 
@@ -105,11 +115,9 @@ export function assertLocalDatabaseUrl(rawUrl: string): PostgresConfig {
 async function isPortReachable(host: string, port: number, timeoutMs = 1000): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
-    let isConnected = false;
 
     socket.setTimeout(timeoutMs);
     socket.once('connect', () => {
-      isConnected = true;
       socket.destroy();
       resolve(true);
     });
@@ -137,10 +145,8 @@ export async function assertDisposableMarker(client: pg.Client): Promise<void> {
     if (markerRes.rows.length === 0 || markerRes.rows[0].disposable !== true) {
       throw new Error('Disposable marker value mismatch');
     }
-  } catch (err: any) {
-    throw new Error(
-      `SECURITY_VIOLATION: Missing or invalid disposable database marker omni_test.disposable_marker: ${err.message}. Refusing to run destructive operations on non-disposable database.`
-    );
+  } catch {
+    throw new Error(MARKER_FAILURE_MESSAGE);
   }
 }
 
@@ -430,8 +436,8 @@ export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: st
   }
   details.push('PASS: Migration SQL contains required append-only trigger and isolated cascade controls');
 
-  // 2. Discover local disposable PostgreSQL instance from explicit LOCAL_DISPOSABLE_DB_URL ONLY
-  // Do NOT auto-probe or read DATABASE_URL.
+  // 2. Discover local disposable PostgreSQL instance from explicit LOCAL_DISPOSABLE_DB_URL or dbUrl ONLY.
+  // Do NOT auto-probe or read DATABASE_URL, even if it is present.
   const rawDbUrl = options.dbUrl || process.env.LOCAL_DISPOSABLE_DB_URL;
 
   if (!rawDbUrl) {
@@ -449,9 +455,8 @@ export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: st
   let dbConfig: PostgresConfig;
   try {
     dbConfig = assertLocalDatabaseUrl(rawDbUrl);
-  } catch (err: any) {
-    const scrubbedMsg = sanitizeUrlForDisplay(err.message || String(err));
-    details.push(`FAIL-CLOSED: ${scrubbedMsg}`);
+  } catch (err: unknown) {
+    details.push(`FAIL-CLOSED: ${safeFailureMessage(err, 'Invalid disposable database URL.')}`);
     return { executable: true, proven: false, status: 'failed', details };
   }
 
@@ -471,14 +476,13 @@ export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: st
   const client = new Client(dbConfig);
   try {
     await client.connect();
-  } catch (err: any) {
+  } catch {
     await client.end().catch(() => {});
-    const scrubbedMsg = sanitizeUrlForDisplay(err.message || String(err));
     if (isStrict) {
-      details.push(`FAIL-CLOSED: Failed to connect to disposable database: ${scrubbedMsg}`);
+      details.push(`FAIL-CLOSED: ${CONNECT_FAILURE_MESSAGE}`);
       return { executable: true, proven: false, status: 'failed', details };
     }
-    details.push(`GATE-STATUS: Could not connect to database: ${scrubbedMsg} (status: skipped_no_db).`);
+    details.push(`GATE-STATUS: ${CONNECT_FAILURE_MESSAGE} (status: skipped_no_db).`);
     return { executable: false, proven: false, status: 'skipped_no_db', details };
   }
 
@@ -498,10 +502,9 @@ export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: st
         'PASS: All 7 RLS proof contracts verified against live disposable database',
       ],
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     await client.end().catch(() => {});
-    const scrubbedMsg = sanitizeUrlForDisplay(err.message || String(err));
-    details.push(`FAIL: Live database execution error: ${scrubbedMsg}`);
+    details.push(`FAIL: ${safeFailureMessage(err, LIVE_EXECUTION_FAILURE_MESSAGE)}`);
     return { executable: true, proven: false, status: 'failed', details };
   }
 }
@@ -518,8 +521,8 @@ if (process.argv[1]?.endsWith('test-sources-rls-postgres.ts')) {
         process.exit(1);
       }
     })
-    .catch((err) => {
-      console.error('[RLS-PROOF] Unexpected error:', sanitizeUrlForDisplay(err instanceof Error ? err.message : String(err)));
+    .catch(() => {
+      console.error(`[RLS-PROOF] ${UNEXPECTED_FAILURE_MESSAGE}`);
       process.exit(1);
     });
 }

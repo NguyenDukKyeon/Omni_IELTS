@@ -141,22 +141,33 @@ describe('P03 source_versions RLS and immutability', () => {
 });
 
 describe('Disposable DB RLS runner safety and contracts', () => {
-  it('accepts local loopback database URLs targeting omni_sources_rls_test', async () => {
+  it('accepts only literal 127.0.0.1 and ::1 targeting omni_sources_rls_test', async () => {
     const { assertLocalDatabaseUrl } = await import('../../../scripts/test-sources-rls-postgres');
-    const local1 = assertLocalDatabaseUrl('postgres://postgres:postgres@localhost:54322/omni_sources_rls_test');
-    expect(local1.host).toBe('localhost');
-    expect(local1.port).toBe(54322);
-    expect(local1.database).toBe('omni_sources_rls_test');
+    const localIpv4 = assertLocalDatabaseUrl('postgresql://postgres:postgres@127.0.0.1:54322/omni_sources_rls_test');
+    expect(localIpv4.host).toBe('127.0.0.1');
+    expect(localIpv4.port).toBe(54322);
+    expect(localIpv4.database).toBe('omni_sources_rls_test');
 
-    const local2 = assertLocalDatabaseUrl('postgresql://postgres:postgres@127.0.0.1:54322/omni_sources_rls_test');
-    expect(local2.host).toBe('127.0.0.1');
-    expect(local2.port).toBe(54322);
-    expect(local2.database).toBe('omni_sources_rls_test');
+    const localIpv6 = assertLocalDatabaseUrl('postgres://postgres:pass@[::1]:54322/omni_sources_rls_test');
+    expect(localIpv6.host).toBe('::1');
+    expect(localIpv6.port).toBe(54322);
+    expect(localIpv6.database).toBe('omni_sources_rls_test');
+  });
 
-    const local3 = assertLocalDatabaseUrl('postgres://postgres:pass@[::1]:54322/omni_sources_rls_test');
-    expect(local3.host).toBe('::1');
-    expect(local3.port).toBe(54322);
-    expect(local3.database).toBe('omni_sources_rls_test');
+  it('rejects localhost and every hostname, including loopback aliases', async () => {
+    const { assertLocalDatabaseUrl } = await import('../../../scripts/test-sources-rls-postgres');
+    const rejectedHosts = [
+      'postgres://postgres:pass@localhost:54322/omni_sources_rls_test',
+      'postgres://postgres:pass@LOCALHOST:54322/omni_sources_rls_test',
+      'postgres://postgres:pass@localhost.:54322/omni_sources_rls_test',
+      'postgres://postgres:pass@ip6-localhost:54322/omni_sources_rls_test',
+      'postgres://postgres:pass@ip6-loopback:54322/omni_sources_rls_test',
+      'postgres://postgres:pass@loopback:54322/omni_sources_rls_test',
+      'postgres://postgres:pass@host.docker.internal:54322/omni_sources_rls_test',
+    ];
+    for (const url of rejectedHosts) {
+      expect(() => assertLocalDatabaseUrl(url)).toThrow(/SECURITY_VIOLATION/);
+    }
   });
 
   it('strictly rejects non-local, 0.0.0.0, Supabase, or remote database URLs before any connection', async () => {
@@ -195,11 +206,25 @@ describe('Disposable DB RLS runner safety and contracts', () => {
       .toThrow(/omni_sources_rls_test/);
   });
 
-  it('scrubs passwords and never leaks credentials in display or error outputs', async () => {
-    const { sanitizeUrlForDisplay } = await import('../../../scripts/test-sources-rls-postgres');
-    const scrubbed = sanitizeUrlForDisplay('postgres://postgres:super_secret_pwd_999@127.0.0.1:54322/omni_sources_rls_test');
-    expect(scrubbed).not.toContain('super_secret_pwd_999');
-    expect(scrubbed).toContain('***');
+  it('never returns raw URLs, component passwords, query tokens, usernames, or malformed input', async () => {
+    const { sanitizeUrlForDisplay, REDACTED_DISPOSABLE_DB_URL } = await import('../../../scripts/test-sources-rls-postgres');
+    const cases = [
+      'postgres://postgres:component_secret@127.0.0.1:54322/omni_sources_rls_test?sslkey=query_secret',
+      'postgres://postgres:component_secret@127.0.0.1:54322/omni_sources_rls_test',
+      'not-a-url?token=query_secret',
+      'postgres://user:password@127.0.0.1:54322/omni_sources_rls_test?token=query_secret',
+    ];
+    for (const input of cases) {
+      const scrubbed = sanitizeUrlForDisplay(input);
+      expect(scrubbed).toBe(REDACTED_DISPOSABLE_DB_URL);
+      expect(scrubbed).toBe('[redacted disposable database URL]');
+      expect(scrubbed).not.toContain('component_secret');
+      expect(scrubbed).not.toContain('query_secret');
+      expect(scrubbed).not.toContain('token=');
+      expect(scrubbed).not.toContain('sslkey');
+      expect(scrubbed).not.toContain('postgres://');
+      expect(scrubbed).not.toContain(input);
+    }
   });
 
   it('enforces disposable marker presence outside public schema', async () => {
@@ -219,6 +244,86 @@ describe('Disposable DB RLS runner safety and contracts', () => {
       query: async () => { throw new Error('relation "omni_test.disposable_marker" does not exist'); },
     } as any;
     await expect(assertDisposableMarker(mockErrorClient)).rejects.toThrow(/SECURITY_VIOLATION/);
+  });
+
+  it('does not leak invalid marker underlying errors or credentials', async () => {
+    const { assertDisposableMarker } = await import('../../../scripts/test-sources-rls-postgres');
+    const mockErrorClient = {
+      query: async () => {
+        throw new Error('password authentication failed for user "postgres" sslkey=query_secret token=query_secret');
+      },
+    } as any;
+    await expect(assertDisposableMarker(mockErrorClient)).rejects.toThrow(/SECURITY_VIOLATION/);
+    await expect(assertDisposableMarker(mockErrorClient)).rejects.toThrow(/omni_test.disposable_marker/);
+    try {
+      await assertDisposableMarker(mockErrorClient);
+      throw new Error('expected marker assertion to throw');
+    } catch (err: any) {
+      expect(err.message).not.toContain('query_secret');
+      expect(err.message).not.toContain('password authentication failed');
+      expect(err.message).not.toContain('sslkey');
+      expect(err.message).not.toContain('token=');
+    }
+  });
+
+  it('connect failure reporting uses a fixed message and does not leak credentials', async () => {
+    const net = await import('node:net');
+    const { runSourcesRlsProof } = await import('../../../scripts/test-sources-rls-postgres');
+    const server = net.createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const result = await runSourcesRlsProof({
+        strict: true,
+        dbUrl: `postgres://postgres:component_secret@127.0.0.1:${port}/omni_sources_rls_test?sslkey=query_secret`,
+      });
+      expect(result.status).toBe('failed');
+      expect(result.proven).toBe(false);
+      const joined = result.details.join('\n');
+      expect(joined).toMatch(/FAIL-CLOSED: Failed to connect to disposable database/);
+      expect(joined).not.toContain('component_secret');
+      expect(joined).not.toContain('query_secret');
+      expect(joined).not.toContain('sslkey');
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+  });
+
+  it('ignores DATABASE_URL even if present; only LOCAL_DISPOSABLE_DB_URL or dbUrl may be considered', async () => {
+    const { runSourcesRlsProof } = await import('../../../scripts/test-sources-rls-postgres');
+    const originalLocal = process.env.LOCAL_DISPOSABLE_DB_URL;
+    const originalDb = process.env.DATABASE_URL;
+    delete process.env.LOCAL_DISPOSABLE_DB_URL;
+    process.env.DATABASE_URL = 'postgres://postgres:component_secret@db.supabase.co:5432/postgres?sslkey=query_secret';
+    try {
+      const skipped = await runSourcesRlsProof({ strict: false });
+      expect(skipped.status).toBe('skipped_no_db');
+      expect(skipped.proven).toBe(false);
+      expect(skipped.executable).toBe(false);
+      const skippedJoined = skipped.details.join('\n');
+      expect(skippedJoined).toMatch(/LOCAL_DISPOSABLE_DB_URL/);
+      expect(skippedJoined).not.toContain('component_secret');
+      expect(skippedJoined).not.toContain('query_secret');
+      expect(skippedJoined).not.toContain('db.supabase.co');
+      expect(skippedJoined).not.toMatch(/DATABASE_URL/);
+
+      const withArg = await runSourcesRlsProof({
+        strict: true,
+        dbUrl: 'postgres://postgres:postgres@127.0.0.1:59999/omni_sources_rls_test',
+      });
+      expect(withArg.status).toBe('failed');
+      expect(withArg.proven).toBe(false);
+      expect(withArg.details.some((d) => d.includes('FAIL-CLOSED'))).toBe(true);
+      const argJoined = withArg.details.join('\n');
+      expect(argJoined).not.toContain('component_secret');
+      expect(argJoined).not.toContain('query_secret');
+      expect(argJoined).not.toContain('db.supabase.co');
+    } finally {
+      if (originalLocal) process.env.LOCAL_DISPOSABLE_DB_URL = originalLocal;
+      else delete process.env.LOCAL_DISPOSABLE_DB_URL;
+      if (originalDb) process.env.DATABASE_URL = originalDb;
+      else delete process.env.DATABASE_URL;
+    }
   });
 
   it('returns skipped_no_db and proven=false when LOCAL_DISPOSABLE_DB_URL is omitted in non-strict mode', async () => {
