@@ -14,7 +14,8 @@ export type NormalizedSourceErrorCode =
   | 'PDF_SCANNED_NO_TEXT'
   | 'MALFORMED_DOCUMENT'
   | 'SUBTITLE_PARSE_ERROR'
-  | 'VERSION_CONFLICT';
+  | 'VERSION_CONFLICT'
+  | 'RESOURCE_LIMIT_EXCEEDED';
 
 export interface NormalizedSourceError {
   code: NormalizedSourceErrorCode;
@@ -107,6 +108,11 @@ const FIXED_MESSAGES: Record<NormalizedSourceErrorCode, { userMessageVi: string;
   VERSION_CONFLICT: {
     userMessageVi: 'Phiên bản nguồn này đã tồn tại và không thể ghi đè.',
     suggestedActionVi: 'Tạo phiên bản mới thay vì sửa phiên bản cũ.',
+    retryable: false,
+  },
+  RESOURCE_LIMIT_EXCEEDED: {
+    userMessageVi: 'Tệp vượt quá giới hạn an toàn để xử lý. Chưa tạo phiên bản nguồn.',
+    suggestedActionVi: 'Giảm kích thước hoặc chọn tệp khác rồi thử lại.',
     retryable: false,
   },
 };

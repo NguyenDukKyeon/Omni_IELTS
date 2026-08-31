@@ -1,8 +1,13 @@
-import { PDFParse } from 'pdf-parse';
 import { failExtraction, paragraphsToBlocks, succeedExtraction, toUint8Array, type ExtractionInput, type ExtractionResult } from './types';
 import type { SourceBlock } from '../../../types/sources';
+import { binaryOutputWithinLimits } from '../binaryResourceLimits.server';
+import { runBoundedBinaryExtraction, type BinaryExtractionResult } from '../binaryExtractionWorker.server';
 
-export async function extractPdf(input: ExtractionInput): Promise<ExtractionResult> {
+export type PdfExtractionOptions = {
+  runBoundedBinaryExtraction?: (kind: 'pdf', content: Uint8Array) => Promise<BinaryExtractionResult>;
+};
+
+export async function extractPdf(input: ExtractionInput, options?: PdfExtractionOptions): Promise<ExtractionResult> {
   if (typeof input.content === 'string' && input.content.trim().length < 20) {
     return failExtraction(
       'UNSUPPORTED_FORMAT',
@@ -10,10 +15,26 @@ export async function extractPdf(input: ExtractionInput): Promise<ExtractionResu
     );
   }
 
-  let parser: PDFParse | undefined;
   try {
-    parser = new PDFParse({ data: toUint8Array(input.content) });
-    const extracted = await parser.getText();
+    const run = options?.runBoundedBinaryExtraction ?? runBoundedBinaryExtraction;
+    const extracted = await run('pdf', toUint8Array(input.content));
+    if (extracted.ok === false) {
+      const code = extracted.code === 'RESOURCE_LIMIT_EXCEEDED' ? 'RESOURCE_LIMIT_EXCEEDED' : 'EXTRACTION_FAILED';
+      return failExtraction(
+        code,
+        code === 'RESOURCE_LIMIT_EXCEEDED'
+          ? 'PDF vượt quá giới hạn an toàn để xử lý. Chưa tạo phiên bản nguồn.'
+          : 'Không đọc được PDF. Chưa tạo phiên bản nguồn.',
+        { suggestedActionVi: 'Chọn PDF text-layer khác hoặc dán văn bản thủ công rồi thử lại.' },
+      );
+    }
+    if (extracted.kind !== 'pdf') {
+      return failExtraction(
+        'EXTRACTION_FAILED',
+        'Không đọc được PDF. Chưa tạo phiên bản nguồn.',
+        { suggestedActionVi: 'Chọn PDF text-layer khác hoặc dán văn bản thủ công rồi thử lại.' },
+      );
+    }
     const pages = extracted.pages ?? [];
     const blocks: SourceBlock[] = [];
     for (const page of pages) {
@@ -35,9 +56,17 @@ export async function extractPdf(input: ExtractionInput): Promise<ExtractionResu
       );
     }
 
-    const result = succeedExtraction(blocks.map((block) => block.text).join('\n\n'), blocks, 'pdf-parse');
+    const plainText = blocks.map((block) => block.text).join('\n\n');
+    if (!binaryOutputWithinLimits(plainText, blocks.length)) {
+      return failExtraction(
+        'RESOURCE_LIMIT_EXCEEDED',
+        'Nội dung PDF vượt quá giới hạn văn bản an toàn. Chưa tạo phiên bản nguồn.',
+        { suggestedActionVi: 'Chọn tài liệu ngắn hơn hoặc chia tài liệu thành các phần nhỏ hơn.' },
+      );
+    }
+    const result = succeedExtraction(plainText, blocks, 'pdf-parse');
     if (result.success) {
-      result.version.pageCount = pages.length;
+      result.version.pageCount = extracted.total;
       result.version.extractionReport = {
         extractor: 'pdf-parse',
         extractedAt: new Date().toISOString(),
@@ -51,7 +80,5 @@ export async function extractPdf(input: ExtractionInput): Promise<ExtractionResu
       'EXTRACTION_FAILED',
       'Không đọc được PDF. Tệp có thể hỏng hoặc bị mã hóa. Hãy dán văn bản thủ công.',
     );
-  } finally {
-    await parser?.destroy().catch(() => undefined);
   }
 }
