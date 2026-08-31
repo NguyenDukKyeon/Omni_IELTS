@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { AI_TASK_PROFILES, type AiTaskProfile } from '../aiTaskProfiles';
+import {
+  estimatePromptTokens,
+  GROUNDED_CHAT_PROMPT_TOKEN_BUDGET,
+} from './groundedChat';
 import type {
   DestinationType,
   SourceArtifactJob,
@@ -149,6 +153,8 @@ export type ArtifactRouterExecute = (input: {
   tools: [];
   destination: DestinationType;
   sourceVersionId: string;
+  sourceSpan: SourceSpan;
+  sourceContext: string;
 }) => Promise<{ value: unknown }>;
 
 function nowIso(): string {
@@ -231,40 +237,46 @@ function controlledSpan(version: SourceVersion, selection?: SourceSpan): SourceS
   return {
     sourceId: version.sourceId,
     sourceVersionId: version.id,
-    blockIds: version.blocks.map((block) => block.id),
+    blockIds: version.blocks.filter((block) => block.text.trim().length > 0).map((block) => block.id),
   };
+}
+
+export function buildArtifactSourceContext(version: SourceVersion, span: SourceSpan): string {
+  const allowed = span.blockIds?.length ? new Set(span.blockIds) : null;
+  const lines: string[] = [];
+  for (const block of version.blocks) {
+    if (allowed && !allowed.has(block.id)) continue;
+    if (!block.text.trim()) continue;
+    lines.push(`Block ${block.id}: ${block.text}`);
+  }
+  return lines.join('\n');
 }
 
 function applyControlledProvenance(
   destination: DestinationType,
-  payload: ValidatedArtifactDraftPayload,
+  payload: unknown,
   provenance: SourceProvenance,
   span: SourceSpan,
-): ValidatedArtifactDraftPayload {
-  if (destination === 'practice' && 'questionPayload' in payload) {
-    return { ...payload, provenance, sourceSpanRef: span };
-  }
-  if (destination === 'mock_section' && 'packagePayload' in payload) {
-    return { ...payload, provenance, sourceSpanRef: span };
-  }
-  if (destination === 'note' && 'annotatedCitations' in payload) {
-    return { ...payload, provenance, sourceSpanRef: span };
-  }
-  if (destination === 'vocabulary_deck' && 'cards' in payload) {
+): unknown {
+  if (!payload || typeof payload !== 'object') return payload;
+  const value = { ...(payload as Record<string, unknown>), provenance };
+  if (destination === 'vocabulary_deck' && Array.isArray(value.cards)) {
     return {
-      ...payload,
-      provenance,
-      cards: payload.cards.map((card) => ({ ...card, sourceSpan: span })),
+      ...value,
+      cards: value.cards.map((card) => (
+        card && typeof card === 'object' ? { ...card, sourceSpan: span } : card
+      )),
     };
   }
-  if (destination === 'idea_bank' && 'ideas' in payload) {
+  if (destination === 'idea_bank' && Array.isArray(value.ideas)) {
     return {
-      ...payload,
-      provenance,
-      ideas: payload.ideas.map((idea) => ({ ...idea, sourceSpan: span })),
+      ...value,
+      ideas: value.ideas.map((idea) => (
+        idea && typeof idea === 'object' ? { ...idea, sourceSpan: span } : idea
+      )),
     };
   }
-  return payload;
+  return { ...value, sourceSpanRef: span };
 }
 
 export class ArtifactJobInputError extends Error {
@@ -368,6 +380,25 @@ export async function executeArtifactJob(
     return failedJob(job, 'VALIDATION_FAILED', 'Đoạn nguồn đã chọn không thuộc phiên bản này.');
   }
 
+  const span = controlledSpan(input.version, job.selection);
+  const sourceContext = buildArtifactSourceContext(input.version, span);
+  if (!sourceContext) {
+    return failedJob(job, 'VALIDATION_FAILED', 'Phiên bản nguồn không có khối văn bản dùng được để tạo bản nháp.');
+  }
+  if (estimatePromptTokens(sourceContext) > GROUNDED_CHAT_PROMPT_TOKEN_BUDGET) {
+    return {
+      ...job,
+      state: 'needs_review',
+      artifactDraft: {
+        id: `draft_${job.id}`,
+        destination: job.destination,
+        payload: {} as ValidatedArtifactDraftPayload,
+        validationErrors: ['select_smaller_source'],
+      },
+      updatedAt: nowIso(),
+    };
+  }
+
   const processing: SourceArtifactJob = {
     ...job,
     state: 'processing',
@@ -380,8 +411,16 @@ export async function executeArtifactJob(
       tools: [],
       destination: job.destination,
       sourceVersionId: job.sourceVersionId,
+      sourceSpan: span,
+      sourceContext,
     });
-    const validation = validateDraftPayload(job.destination, routed.value, input.version);
+    const stamped = applyControlledProvenance(
+      job.destination,
+      routed.value,
+      input.provenance,
+      span,
+    );
+    const validation = validateDraftPayload(job.destination, stamped, input.version);
     if (!validation.isValid || !validation.payload) {
       return {
         ...processing,
@@ -389,24 +428,17 @@ export async function executeArtifactJob(
         artifactDraft: {
           id: `draft_${job.id}`,
           destination: job.destination,
-          payload: (routed.value || {}) as ValidatedArtifactDraftPayload,
+          payload: (stamped && typeof stamped === 'object' ? stamped : {}) as ValidatedArtifactDraftPayload,
           validationErrors: validation.errors,
         },
         updatedAt: nowIso(),
       };
     }
 
-    const span = controlledSpan(input.version, job.selection);
-    const payload = applyControlledProvenance(
-      job.destination,
-      validation.payload,
-      input.provenance,
-      span,
-    );
     const draft: ValidatedArtifactDraft = {
       id: `draft_${job.id}`,
       destination: job.destination,
-      payload,
+      payload: validation.payload,
     };
     return {
       ...processing,

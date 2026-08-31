@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createArtifactJob, executeArtifactJob, validateDraftPayload } from '../sources/artifactJobMachine';
 import { AI_TASK_PROFILES } from '../aiTaskProfiles';
+import { estimatePromptTokens, GROUNDED_CHAT_PROMPT_TOKEN_BUDGET } from '../sources/groundedChat';
 import type { SourceProvenance, SourceSpan, SourceVersion } from '../../types/sources';
 
 const provenance: SourceProvenance = {
@@ -452,5 +453,168 @@ describe('Artifact job fail-closed validation', () => {
       }),
     });
     expect(scored.state).not.toBe('ready');
+  });
+});
+
+describe('Artifact router receives exact selected source span/context', () => {
+  const twoBlockVersion: SourceVersion = {
+    ...version,
+    plainText: 'SELECTED_BLOCK. UNSELECTED_BLOCK. SECRET_PLAINTEXT_MUST_NOT_LEAK',
+    blocks: [
+      { id: 'b_001', order: 1, type: 'paragraph', text: 'SELECTED_BLOCK.' },
+      { id: 'b_002', order: 2, type: 'paragraph', text: 'UNSELECTED_BLOCK.' },
+    ],
+  };
+  const selectedSpan: SourceSpan = { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_001'] };
+
+  it('passes only selected block text plus matching sourceVersionId/span to the router', async () => {
+    const routerExecute = vi.fn(async (input) => {
+      expect(input.sourceVersionId).toBe('v1');
+      expect(input.sourceSpan).toEqual(selectedSpan);
+      expect(input.sourceContext).toContain('SELECTED_BLOCK.');
+      expect(input.sourceContext).toContain('b_001');
+      expect(input.sourceContext).not.toContain('UNSELECTED_BLOCK.');
+      expect(input.sourceContext).not.toContain('SECRET_PLAINTEXT_MUST_NOT_LEAK');
+      expect(input.sourceContext).not.toContain(twoBlockVersion.plainText);
+      return { value: validPracticePayload };
+    });
+
+    const job = await executeArtifactJob(createArtifactJob({
+      id: 'job_span_ctx',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: selectedSpan,
+    }), {
+      version: twoBlockVersion,
+      provenance,
+      routerExecute,
+    });
+
+    expect(routerExecute).toHaveBeenCalledTimes(1);
+    expect(job.state).toBe('ready');
+    expect(job.artifactDraft?.payload).toMatchObject({
+      provenance,
+      sourceSpanRef: selectedSpan,
+    });
+  });
+
+  it('uses validated blocks of that exact version when no selection exists, never full plainText', async () => {
+    const routerExecute = vi.fn(async (input) => {
+      expect(input.sourceVersionId).toBe('v1');
+      expect(input.sourceSpan).toEqual({
+        sourceId: 's1',
+        sourceVersionId: 'v1',
+        blockIds: ['b_001', 'b_002'],
+      });
+      expect(input.sourceContext).toContain('SELECTED_BLOCK.');
+      expect(input.sourceContext).toContain('UNSELECTED_BLOCK.');
+      expect(input.sourceContext).not.toContain('SECRET_PLAINTEXT_MUST_NOT_LEAK');
+      return { value: {
+        ...validPracticePayload,
+        sourceSpanRef: {
+          sourceId: 's1',
+          sourceVersionId: 'v1',
+          blockIds: ['b_001', 'b_002'],
+        },
+      } };
+    });
+
+    const job = await executeArtifactJob(createArtifactJob({
+      id: 'job_full_blocks',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+    }), {
+      version: twoBlockVersion,
+      provenance,
+      routerExecute,
+    });
+
+    expect(routerExecute).toHaveBeenCalledTimes(1);
+    expect(job.state).toBe('ready');
+  });
+
+  it('does not call the router or fall back to plainText when the selection is invalid', async () => {
+    const routerExecute = vi.fn();
+    const job = await executeArtifactJob(createArtifactJob({
+      id: 'job_invalid_span_ctx',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_missing'] },
+    }), {
+      version: twoBlockVersion,
+      provenance,
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(job.state).not.toBe('ready');
+    expect(['failed', 'needs_review']).toContain(job.state);
+    expect(JSON.stringify(job)).not.toContain('SECRET_PLAINTEXT_MUST_NOT_LEAK');
+  });
+
+  it('returns needs_review without a router call when selected context exceeds the 32k budget', async () => {
+    const huge = 'm'.repeat(96_000);
+    const hugeVersion: SourceVersion = {
+      ...version,
+      plainText: `IGNORED_PLAINTEXT ${huge}`,
+      blocks: [{ id: 'b_001', order: 1, type: 'paragraph', text: huge }],
+      wordCount: 96_000,
+    };
+    const span: SourceSpan = { sourceId: 's1', sourceVersionId: 'v1', blockIds: ['b_001'] };
+    expect(estimatePromptTokens(`Block b_001: ${huge}`)).toBeGreaterThan(GROUNDED_CHAT_PROMPT_TOKEN_BUDGET);
+
+    const routerExecute = vi.fn();
+    const job = await executeArtifactJob(createArtifactJob({
+      id: 'job_budget',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: span,
+    }), {
+      version: hugeVersion,
+      provenance,
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(job.state).toBe('needs_review');
+    expect(job.artifactDraft?.validationErrors).toContain('select_smaller_source');
+    expect(JSON.stringify(job)).not.toContain('IGNORED_PLAINTEXT');
+  });
+
+  it('overwrites model-invented span with the controlled job span on ready drafts', async () => {
+    const routerExecute = vi.fn(async () => ({
+      value: {
+        ...validPracticePayload,
+        sourceSpanRef: { sourceId: 's_other', sourceVersionId: 'v_forged', blockIds: ['b_999'] },
+      },
+    }));
+    const job = await executeArtifactJob(createArtifactJob({
+      id: 'job_span_overwrite',
+      userId: 'u1',
+      sourceVersionId: 'v1',
+      destination: 'practice',
+      targetBand: 7,
+      selection: selectedSpan,
+    }), {
+      version: twoBlockVersion,
+      provenance,
+      routerExecute,
+    });
+
+    expect(job.state).toBe('ready');
+    expect(job.artifactDraft?.payload).toMatchObject({
+      provenance,
+      sourceSpanRef: selectedSpan,
+    });
+    expect(JSON.stringify(job.artifactDraft?.payload)).not.toContain('v_forged');
+    expect(JSON.stringify(job.artifactDraft?.payload)).not.toContain('b_999');
   });
 });
