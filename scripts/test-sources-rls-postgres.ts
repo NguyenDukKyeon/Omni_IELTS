@@ -91,11 +91,11 @@ export async function runSourcesRlsProof(options: { strict?: boolean } = {}): Pr
   // 3. Execute live tests on reachable database instance
   try {
     details.push('Connecting to reachable database instance...');
-    
+
     // When Supabase client is available with test keys:
     if (supabaseUrl && supabaseKey) {
       const client = createClient(supabaseUrl, supabaseKey);
-      
+
       // Verification proof contract checks
       details.push('Executing Policy Proof 1: User B cannot SELECT User A source_records');
       details.push('Executing Policy Proof 2: User B cannot INSERT source_versions for User A source');
@@ -103,7 +103,7 @@ export async function runSourcesRlsProof(options: { strict?: boolean } = {}): Pr
       details.push('Executing Policy Proof 4: Direct UPDATE and DELETE of source_versions fail (42501)');
       details.push('Executing Policy Proof 5: Parent source_records hard delete cascades children');
       details.push('Executing Policy Proof 6: Later direct child delete in same transaction cannot exploit cascade state');
-      
+
       const { error } = await client.from('source_records').select('id').limit(1);
       if (error && error.code !== 'PGRST116') {
         details.push(`Connected, verified schema response: ${error.message}`);
@@ -137,4 +137,3 @@ if (process.argv[1]?.endsWith('test-sources-rls-postgres.ts')) {
     }
   });
 }
-
