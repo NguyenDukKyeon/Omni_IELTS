@@ -3,9 +3,15 @@ import { extractDocx } from '../sources/extractors/docxExtractor';
 import { extractPdf } from '../sources/extractors/pdfExtractor';
 import {
   inspectDocxArchive,
+  SOURCE_IMPORT_MAX_BINARY_RESULT_JSON_BYTES,
   SOURCE_IMPORT_MAX_DOCX_ENTRIES,
 } from '../sources/binaryResourceLimits.server';
-import type { BinaryExtractionResult } from '../sources/binaryExtractionWorker.server';
+import {
+  parseBoundedBinaryExtractionOutput,
+  runBoundedBinaryExtraction,
+  type BinaryExtractionResult,
+} from '../sources/binaryExtractionWorker.server';
+import { buildValidDocx } from './fixtures/sources/buildDocuments';
 
 type ZipEntry = {
   name: string;
@@ -65,6 +71,119 @@ function runnerResult(result: BinaryExtractionResult) {
 }
 
 describe('P03 binary import resource limits', () => {
+  it('returns only bounded structured DOCX data from the isolated child', async () => {
+    const result = await runBoundedBinaryExtraction('docx', buildValidDocx([
+      'Ordinary DOCX content stays extractable.',
+      'A second bounded paragraph remains available.',
+    ]));
+
+    expect(result.ok).toBe(true);
+    if (result.ok && result.kind === 'docx') {
+      expect(result.kind).toBe('docx');
+      expect(result).not.toHaveProperty('html');
+      expect(result.plainText).toMatch(/Ordinary DOCX content/);
+      expect(result.blocks).toHaveLength(2);
+      expect(result.blocks[0]).toEqual({ text: 'Ordinary DOCX content stays extractable.' });
+    }
+  });
+
+  it('rejects too many DOCX output blocks inside the isolated child', async () => {
+    const result = await runBoundedBinaryExtraction('docx', buildValidDocx(
+      Array.from({ length: 2_001 }, (_, index) => `bounded paragraph ${index}`),
+    ));
+
+    expect(result).toEqual({
+      ok: false,
+      kind: 'docx',
+      code: 'RESOURCE_LIMIT_EXCEEDED',
+    });
+  });
+
+  it('lets the parent consume structured blocks without reading converted HTML', async () => {
+    const structuredResult = Object.assign(Object.create({
+      get html(): never {
+        throw new Error('raw HTML must not cross the child boundary');
+      },
+    }), {
+      ok: true as const,
+      kind: 'docx' as const,
+      plainText: 'Safe structured paragraph.',
+      blocks: [{ text: 'Safe structured paragraph.' }],
+    }) as unknown as BinaryExtractionResult;
+    const worker = runnerResult(structuredResult);
+    const result = await extractDocx({
+      type: 'docx',
+      content: buildValidDocx(['archive content']),
+      title: 'Structured result',
+    }, { runBoundedBinaryExtraction: worker });
+
+    expect(result.success).toBe(true);
+    expect(result.version?.plainText).toBe('Safe structured paragraph.');
+    expect(worker).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized structured child result without creating a version', async () => {
+    const oversizedText = 'x'.repeat(200_001);
+    const worker = runnerResult({
+      ok: true,
+      kind: 'docx',
+      plainText: oversizedText,
+      blocks: [{ text: oversizedText }],
+    } as unknown as BinaryExtractionResult);
+    const result = await extractDocx({
+      type: 'docx',
+      content: buildValidDocx(['archive content']),
+      title: 'Oversized structured result',
+    }, { runBoundedBinaryExtraction: worker });
+
+    expect(result.success).toBe(false);
+    expect(result.version).toBeUndefined();
+    expect(result.error?.code).toBe('RESOURCE_LIMIT_EXCEEDED');
+  });
+
+  it('fails closed for malformed or oversized child stdout', () => {
+    expect(parseBoundedBinaryExtractionOutput('docx', '{not-json')).toEqual({
+      ok: false,
+      kind: 'docx',
+      code: 'BINARY_PARSE_FAILED',
+    });
+    expect(parseBoundedBinaryExtractionOutput(
+      'docx',
+      'x'.repeat(SOURCE_IMPORT_MAX_BINARY_RESULT_JSON_BYTES + 1),
+    )).toEqual({
+      ok: false,
+      kind: 'docx',
+      code: 'RESOURCE_LIMIT_EXCEEDED',
+    });
+  });
+
+  it('maps an isolated child timeout to a typed resource failure', async () => {
+    const result = await runBoundedBinaryExtraction(
+      'docx',
+      buildValidDocx(['timeout fixture']),
+      { timeoutMs: 1 },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      kind: 'docx',
+      code: 'RESOURCE_LIMIT_EXCEEDED',
+    });
+  });
+
+  it('keeps child failure typed and safe for learner-facing DOCX extraction', async () => {
+    const worker = runnerResult({ ok: false, kind: 'docx', code: 'BINARY_PARSE_FAILED' });
+    const result = await extractDocx({
+      type: 'docx',
+      content: buildValidDocx(['archive content']),
+      title: 'Child failure',
+    }, { runBoundedBinaryExtraction: worker });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('MALFORMED_DOCUMENT');
+    expect(result.error?.userMessageVi).not.toMatch(/html|stack|internal|child|raw|boundary/i);
+  });
+
   it('rejects a compressed DOCX expansion ratio before Mammoth receives bytes', async () => {
     const archive = buildZip([{
       name: 'word/document.xml',
@@ -72,7 +191,12 @@ describe('P03 binary import resource limits', () => {
       uncompressedSize: 200_000,
       data: Buffer.alloc(1_224),
     }]);
-    const worker = runnerResult({ ok: true, kind: 'docx', html: '<p>should not run</p>' });
+    const worker = runnerResult({
+      ok: true,
+      kind: 'docx',
+      plainText: 'should not run',
+      blocks: [{ text: 'should not run' }],
+    });
     const inspected = inspectDocxArchive(archive);
     const result = await extractDocx({ type: 'docx', content: archive, title: 'Expansion fixture' }, {
       runBoundedBinaryExtraction: worker,

@@ -1,8 +1,11 @@
-import { JSDOM } from 'jsdom';
-import createDOMPurify from 'dompurify';
-import { failExtraction, paragraphsToBlocks, succeedExtraction, toUint8Array, type ExtractionInput, type ExtractionResult } from './types';
+import { failExtraction, succeedExtraction, toBlockId, toUint8Array, type ExtractionInput, type ExtractionResult } from './types';
+import type { SourceBlock } from '../../../types/sources';
 import { binaryOutputWithinLimits, inspectDocxArchive, isDocxResourceLimitCode } from '../binaryResourceLimits.server';
-import { runBoundedBinaryExtraction, type BinaryExtractionResult } from '../binaryExtractionWorker.server';
+import {
+  runBoundedBinaryExtraction,
+  validateBoundedBinaryExtractionResult,
+  type BinaryExtractionResult,
+} from '../binaryExtractionWorker.server';
 
 export type DocxExtractionOptions = {
   runBoundedBinaryExtraction?: (kind: 'docx', content: Uint8Array) => Promise<BinaryExtractionResult>;
@@ -42,29 +45,43 @@ export async function extractDocx(input: ExtractionInput, options?: DocxExtracti
         { suggestedActionVi: 'Chọn tệp DOCX khác hoặc dán văn bản thủ công rồi thử lại.' },
       );
     }
-    if (converted.kind !== 'docx') {
+    const bounded = validateBoundedBinaryExtractionResult('docx', converted);
+    if (bounded.ok === false) {
+      const code = bounded.code === 'RESOURCE_LIMIT_EXCEEDED' ? 'RESOURCE_LIMIT_EXCEEDED' : 'MALFORMED_DOCUMENT';
+      return failExtraction(
+        code,
+        code === 'RESOURCE_LIMIT_EXCEEDED'
+          ? 'Tệp DOCX vượt quá giới hạn an toàn để xử lý. Chưa tạo phiên bản nguồn.'
+          : 'Không đọc được tệp DOCX. Chưa tạo phiên bản nguồn.',
+        { suggestedActionVi: 'Chọn tệp DOCX khác hoặc dán văn bản thủ công rồi thử lại.' },
+      );
+    }
+    if (bounded.kind !== 'docx') {
       return failExtraction(
         'MALFORMED_DOCUMENT',
         'Không đọc được tệp DOCX. Chưa tạo phiên bản nguồn.',
         { suggestedActionVi: 'Chọn tệp DOCX khác hoặc dán văn bản thủ công rồi thử lại.' },
       );
     }
-    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
-    const purify = createDOMPurify(dom.window);
-    const cleanHtml = purify.sanitize(converted.html || '');
-    const parsed = new JSDOM(`<div>${cleanHtml}</div>`);
-    const nodes = [...parsed.window.document.querySelectorAll('p, h1, h2, h3, h4, li, td, th')];
-    const paragraphs = nodes
-      .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
-    const blocks = paragraphsToBlocks(paragraphs);
+    const blocks: SourceBlock[] = bounded.blocks.map((block, index) => ({
+      id: toBlockId(index + 1),
+      order: index + 1,
+      type: 'paragraph',
+      text: block.text,
+    }));
     if (blocks.length === 0) {
       return failExtraction(
         'MALFORMED_DOCUMENT',
         'Không đọc được nội dung DOCX. Hãy dán văn bản thủ công.',
       );
     }
-    const plainText = blocks.map((block) => block.text).join('\n\n');
+    const plainText = bounded.plainText;
+    if (blocks.map((block) => block.text).join('\n\n') !== plainText) {
+      return failExtraction(
+        'MALFORMED_DOCUMENT',
+        'Không đọc được nội dung DOCX. Hãy dán văn bản thủ công.',
+      );
+    }
     if (!binaryOutputWithinLimits(plainText, blocks.length)) {
       return failExtraction(
         'RESOURCE_LIMIT_EXCEEDED',

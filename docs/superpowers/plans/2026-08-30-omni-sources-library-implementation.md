@@ -1133,12 +1133,15 @@ for identity or rate limiting.
 DOCX central-directory inspection runs before Mammoth with these fixed limits:
 512 entries, 4 MiB uncompressed per entry, 16 MiB total uncompressed, and
 100:1 maximum compression ratio. Malformed, encrypted, multi-disk, ZIP64, and
-unsupported structures fail closed. PDF and DOCX parsing runs in a short-lived
-child process with a 256 MiB V8 old-space limit and a 15 second timeout. PDF
-parsing is limited to 100 pages through public `pdf-parse` controls. Extracted
-binary output is bounded at 200,000 Unicode code points and 2,000 blocks;
-breaches return `RESOURCE_LIMIT_EXCEEDED`, reject rather than truncate, and
-create no version.
+unsupported structures fail closed. The complete DOCX transformation —
+Mammoth conversion, JSDOM construction, DOMPurify sanitisation, allowed
+paragraph/heading/list/table extraction, whitespace normalisation, and output
+limits — runs in a short-lived child process with a 256 MiB V8 old-space limit
+and a 15 second timeout. The child returns only bounded `plainText` and block
+data; converted HTML never crosses into the parent. PDF parsing is limited to
+100 pages through public `pdf-parse` controls. Extracted binary output is
+bounded at 200,000 Unicode code points and 2,000 blocks; breaches return
+`RESOURCE_LIMIT_EXCEEDED`, reject rather than truncate, and create no version.
 
 Import quota is consumed only after verified authentication and semantic
 extraction validation. Artifact quota is consumed only after hydration proves

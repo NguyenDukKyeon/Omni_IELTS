@@ -113,13 +113,16 @@ forwarded IP header is used for identity or rate limiting.
 DOCX archives are inspected from central-directory metadata before Mammoth:
 512 entries maximum, 4 MiB uncompressed per entry, 16 MiB total uncompressed,
 and a 100:1 entry compression-ratio ceiling. Malformed, encrypted,
-multi-disk, ZIP64, and unsupported-structure archives fail closed. PDF and
-DOCX parsing runs in a short-lived child process with a 256 MiB V8 old-space
-limit and a 15 second timeout. PDF extraction is limited to the first 100
-pages and uses only public `pdf-parse` controls. Both formats reject, rather
-than truncate, output over 200,000 Unicode code points or 2,000 blocks. These
-failures use the typed `RESOURCE_LIMIT_EXCEEDED` result and never create a
-source version.
+multi-disk, ZIP64, and unsupported-structure archives fail closed. The full
+DOCX transformation (Mammoth conversion, JSDOM construction, DOMPurify
+sanitisation, allowed-block extraction, whitespace normalisation, and output
+limits) runs in a short-lived child process with a 256 MiB V8 old-space limit
+and a 15 second timeout. The child returns only bounded plain text and block
+data; the parent never receives converted HTML. PDF extraction is limited to
+the first 100 pages and uses only public `pdf-parse` controls. Both formats
+reject, rather than truncate, output over 200,000 Unicode code points or 2,000
+blocks. These failures use the typed `RESOURCE_LIMIT_EXCEEDED` result and
+never create a source version.
 
 Artifact generation hydrates exactly one RLS-visible version, requires
 `version.sourceId === record.id` and `record.processingState === 'ready'`, and

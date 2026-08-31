@@ -10,6 +10,15 @@ export const SOURCE_IMPORT_MAX_PDF_PAGES = 100;
 export const SOURCE_IMPORT_PDF_TIMEOUT_MS = 15_000;
 export const SOURCE_IMPORT_BINARY_WORKER_MAX_OLD_GENERATION_MB = 256;
 
+// DOCX results duplicate bounded text in plainText and block.text. Four bytes
+// cover the largest UTF-8 encoding per code point; 128 bytes per block cover
+// JSON keys/separators and bounded block metadata; 16 KiB covers fixed JSON
+// envelope metadata. This is the parent stdout cap, not a parser-output cap.
+export const SOURCE_IMPORT_MAX_BINARY_RESULT_JSON_BYTES =
+  SOURCE_IMPORT_MAX_BINARY_EXTRACTED_TEXT_CHARS * 4 * 2
+  + SOURCE_IMPORT_MAX_BINARY_EXTRACTED_BLOCKS * 128
+  + 16 * 1024;
+
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
 const ZIP_CENTRAL_SIGNATURE = 0x02014b50;
 const ZIP_LOCAL_SIGNATURE = 0x04034b50;
@@ -186,6 +195,11 @@ export function inspectDocxArchive(content: Uint8Array): DocxArchiveInspection {
 }
 
 export function binaryOutputWithinLimits(plainText: string, blockCount: number): boolean {
-  return Array.from(plainText).length <= SOURCE_IMPORT_MAX_BINARY_EXTRACTED_TEXT_CHARS
-    && blockCount <= SOURCE_IMPORT_MAX_BINARY_EXTRACTED_BLOCKS;
+  if (plainText.length > SOURCE_IMPORT_MAX_BINARY_EXTRACTED_TEXT_CHARS * 2) return false;
+  let codePoints = 0;
+  for (const _codePoint of plainText) {
+    codePoints += 1;
+    if (codePoints > SOURCE_IMPORT_MAX_BINARY_EXTRACTED_TEXT_CHARS) return false;
+  }
+  return blockCount <= SOURCE_IMPORT_MAX_BINARY_EXTRACTED_BLOCKS;
 }
