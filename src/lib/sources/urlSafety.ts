@@ -297,9 +297,14 @@ export async function requestPinnedHttp(
       reject(reason || new Error('Request aborted'));
     };
 
-    const req = client.request(targetUrl, {
-      method: 'GET',
+    const req = client.request({
+      protocol: targetUrl.protocol,
+      hostname: pinnedIp,
       port,
+      path: `${targetUrl.pathname}${targetUrl.search}`,
+      method: 'GET',
+      family: isFamily6 ? 6 : 4,
+      agent: false,
       headers: {
         Accept: 'text/html,application/xhtml+xml',
         'User-Agent': 'Omni-Sources/1.0',
@@ -307,7 +312,7 @@ export async function requestPinnedHttp(
       },
       lookup: (_hostname, options, callback) => {
         const cb = typeof options === 'function' ? options : callback;
-        const opts = typeof options === 'object' ? options : {};
+        const opts = typeof options === 'object' && options ? options : {};
         const family = isFamily6 ? 6 : 4;
         if (opts && opts.all) {
           cb(null, [{ address: pinnedIp, family }]);

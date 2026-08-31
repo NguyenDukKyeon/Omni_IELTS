@@ -72,10 +72,16 @@ describe('P03 URL extraction SSRF controls', () => {
   });
 
   it('proves DNS rebinding cannot route an audited public hostname to a later private address', async () => {
-    // A private server listening on loopback
+    // A private server listening on loopback. Unrelated localhost probes
+    // (Host: localhost, GET /) from parallel workers must not count as a rebind.
     let privateHitCount = 0;
-    const privateServer = http.createServer((_req, res) => {
-      privateHitCount += 1;
+    const rebindPath = '/article';
+    const privateServer = http.createServer((req, res) => {
+      const host = String(req.headers.host || '').toLowerCase();
+      const path = String(req.url || '');
+      if (host.includes('rebind-test.attacker.com') || path.startsWith(rebindPath)) {
+        privateHitCount += 1;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end('<h1>Secret Admin Console</h1>');
     });
@@ -96,7 +102,7 @@ describe('P03 URL extraction SSRF controls', () => {
       });
 
       const result = await extractUrl(
-        { type: 'url', content: 'http://rebind-test.attacker.com/article', title: 'Rebind' },
+        { type: 'url', content: `http://rebind-test.attacker.com${rebindPath}`, title: 'Rebind' },
         {
           lookup,
           timeoutMs: 300,
@@ -289,8 +295,11 @@ describe('P03 URL extraction SSRF controls', () => {
 
   it('proves private redirect target never receives a request', async () => {
     let privateHitCount = 0;
-    const privateServer = http.createServer((_req, res) => {
-      privateHitCount += 1;
+    const privateServer = http.createServer((req, res) => {
+      const path = String(req.url || '');
+      if (path.startsWith('/secret')) {
+        privateHitCount += 1;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end('<h1>Private Intranet</h1>');
     });
