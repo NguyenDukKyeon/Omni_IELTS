@@ -106,6 +106,7 @@ describe('Sources Auth verification (JWT before any cloud call)', () => {
     const verifyAccessToken = vi.fn(async () => ({ status: 'auth_required' as const }));
 
     const result = await handleWebResearchRequest({
+      featureEnabled: true,
       authorizationHeader: `Bearer ${FORGED_BEARER}`,
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
@@ -127,6 +128,7 @@ describe('Sources Auth verification (JWT before any cloud call)', () => {
       webCitations: [{ title: 'Brave hit', url: 'https://example.org' }],
     }));
     const result = await handleWebResearchRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer totally-syntactically-valid-token',
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
@@ -141,6 +143,7 @@ describe('Sources Auth verification (JWT before any cloud call)', () => {
   it('returns unavailable 503 on Auth transport failure and still does not call Brave', async () => {
     const webSearch = vi.fn();
     const result = await handleWebResearchRequest({
+      featureEnabled: true,
       authorizationHeader: `Bearer ${FORGED_BEARER}`,
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
@@ -163,6 +166,7 @@ describe('Sources Auth verification (JWT before any cloud call)', () => {
       accessToken,
     }));
     const result = await handleWebResearchRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
@@ -181,6 +185,7 @@ describe('Sources Auth verification (JWT before any cloud call)', () => {
     const getSelectedVersions = vi.fn();
     const repositoryForToken = vi.fn(() => ({ getSelectedVersions }));
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: `Bearer ${FORGED_BEARER}`,
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
@@ -222,6 +227,7 @@ describe('Sources Auth verification (JWT before any cloud call)', () => {
     }));
 
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,

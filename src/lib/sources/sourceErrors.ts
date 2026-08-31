@@ -1,5 +1,6 @@
 export type NormalizedSourceErrorCode =
   | 'AUTH_REQUIRED'
+  | 'FEATURE_DISABLED'
   | 'QUOTA_EXCEEDED'
   | 'PROVIDER_BUSY'
   | 'UNSUPPORTED_FORMAT'
@@ -29,6 +30,11 @@ const FIXED_MESSAGES: Record<NormalizedSourceErrorCode, { userMessageVi: string;
   AUTH_REQUIRED: {
     userMessageVi: 'Bạn cần đăng nhập để nhập nguồn học.',
     suggestedActionVi: 'Đăng nhập rồi thử lại.',
+    retryable: false,
+  },
+  FEATURE_DISABLED: {
+    userMessageVi: 'Chức năng này hiện không khả dụng.',
+    suggestedActionVi: 'Hãy dùng thư viện nguồn hiện tại.',
     retryable: false,
   },
   QUOTA_EXCEEDED: {

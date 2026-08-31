@@ -172,6 +172,7 @@ describe('Grounded Chat HTTP boundary', () => {
     const routerExecute = vi.fn();
     const webSearch = vi.fn();
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: undefined,
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
@@ -192,6 +193,7 @@ describe('Grounded Chat HTTP boundary', () => {
   it('returns a non-disclosing selection failure for unknown or foreign IDs and skips the provider', async () => {
     const routerExecute = vi.fn();
     const foreign = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_foreign'], question: 'What do subsidies do?' },
       cloudConfigured: true,
@@ -201,6 +203,7 @@ describe('Grounded Chat HTTP boundary', () => {
       webSearch: vi.fn(),
     });
     const missing = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_missing'], question: 'What do subsidies do?' },
       cloudConfigured: true,
@@ -225,6 +228,7 @@ describe('Grounded Chat HTTP boundary', () => {
       })),
     };
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_yt'], question: 'Summarise the lecture.' },
       cloudConfigured: true,
@@ -251,6 +255,7 @@ describe('Grounded Chat HTTP boundary', () => {
     }));
     const webSearch = vi.fn();
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
@@ -277,6 +282,7 @@ describe('Grounded Chat HTTP boundary', () => {
       webCitations: [{ title: 'OECD note', url: 'https://example.org/oecd' }],
     }));
     const unauthenticated = await handleWebResearchRequest({
+      featureEnabled: true,
       authorizationHeader: undefined,
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
@@ -289,6 +295,7 @@ describe('Grounded Chat HTTP boundary', () => {
     expect(webSearch).not.toHaveBeenCalled();
 
     const unavailable = await handleWebResearchRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
@@ -300,6 +307,7 @@ describe('Grounded Chat HTTP boundary', () => {
     expect(webSearch).not.toHaveBeenCalled();
 
     const grounded = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
@@ -324,6 +332,7 @@ describe('Grounded Chat HTTP boundary', () => {
   it('returns typed unavailable when Supabase is not configured, without calling the provider', async () => {
     const routerExecute = vi.fn();
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: false,
@@ -482,6 +491,7 @@ describe('Selected-span grounding and prompt budget', () => {
     };
 
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'Summarise.' },
       cloudConfigured: true,
@@ -526,6 +536,7 @@ describe('Grounded chat complete-prompt budget and empty-context fail-closed', (
     const hugeQuestion = 'Q'.repeat(200_000);
 
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: hugeQuestion },
       cloudConfigured: true,
@@ -565,6 +576,7 @@ describe('Grounded chat complete-prompt budget and empty-context fail-closed', (
     };
 
     const result = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question },
       cloudConfigured: true,
@@ -607,6 +619,7 @@ describe('Grounded chat complete-prompt budget and empty-context fail-closed', (
       })),
     };
     const emptyResult = await handleGroundedChatRequest({
+      featureEnabled: true,
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,

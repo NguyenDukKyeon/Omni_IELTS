@@ -80,7 +80,10 @@ export const GroundedChatResponseSchema = z.object({
 });
 
 export const WebResearchRequestSchema = z.object({
-  question: z.string().min(1),
+  question: z.string().min(1).refine(
+    (question) => countCodePoints(question) <= GROUNDED_CHAT_QUESTION_MAX_CHARS,
+    { message: 'question_exceeds_bounded_input' },
+  ),
   conversationId: z.string().min(1).optional(),
 });
 
@@ -117,9 +120,17 @@ export type WebSearchFn = (input: { question: string; conversationId?: string })
   webCitations: Array<{ title: string; url: string; snippet?: string }>;
 }>;
 
+export type SourcesQuotaBucket = 'grounded-chat' | 'web-research';
+
+export type ConsumeSourcesQuota = (input: {
+  bucket: SourcesQuotaBucket;
+  userId: string;
+}) => { allowed: boolean; retryAfterSeconds: number };
+
 export type SourcesHttpResult = {
   status: number;
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
 };
 
 const UNSUPPORTED_ANSWER_VI = 'Nguồn tài liệu đã chọn không chứa thông tin để trả lời câu hỏi này. Bạn có thể chọn thêm nguồn khác hoặc kích hoạt \'Tra cứu dẫn chứng\' từ web.';
@@ -310,6 +321,34 @@ function extractBearerToken(authorizationHeader?: string | null): string | null 
   return token.length > 0 ? token : null;
 }
 
+function featureDisabledResult(): SourcesHttpResult {
+  const error = normalizeSourceError({ code: 'FEATURE_DISABLED' });
+  return {
+    status: 403,
+    body: {
+      status: 'feature_disabled',
+      code: error.code,
+      userMessageVi: error.userMessageVi,
+      suggestedActionVi: error.suggestedActionVi,
+    },
+  };
+}
+
+function quotaExceededResult(retryAfterSeconds: number): SourcesHttpResult {
+  return {
+    status: 429,
+    headers: { 'Retry-After': String(retryAfterSeconds) },
+    body: {
+      status: 'quota_exceeded',
+      code: 'QUOTA_EXCEEDED',
+      userMessageVi: 'Bạn đã gửi quá nhiều yêu cầu. Hãy thử lại sau ít phút.',
+      suggestedActionVi: 'Đợi rồi bấm thử lại.',
+      retryAfterSeconds,
+      retryable: true,
+    },
+  };
+}
+
 function authRequiredResult(): SourcesHttpResult {
   const error = normalizeSourceError({ code: 'AUTH_REQUIRED' });
   return {
@@ -360,6 +399,18 @@ function selectSmallerSourceResult(): SourcesHttpResult {
   };
 }
 
+function boundedQuestionResult(): SourcesHttpResult {
+  return {
+    status: 400,
+    body: {
+      status: 'select_smaller_source',
+      code: 'INVALID_INPUT',
+      userMessageVi: 'Câu hỏi vượt quá 8.000 ký tự. Hãy rút ngắn câu hỏi rồi thử lại.',
+      suggestedActionVi: 'Rút ngắn câu hỏi rồi gửi lại.',
+    },
+  };
+}
+
 function providerErrorResult(error: unknown): SourcesHttpResult {
   const normalized: NormalizedSourceError = normalizeSourceError(error);
   return {
@@ -395,7 +446,19 @@ function questionExceedsBound(body: unknown): boolean {
   return typeof question === 'string' && countCodePoints(question) > GROUNDED_CHAT_QUESTION_MAX_CHARS;
 }
 
+function applyVerifiedQuota(
+  consumeQuota: ConsumeSourcesQuota | undefined,
+  bucket: SourcesQuotaBucket,
+  userId: string,
+): SourcesHttpResult | null {
+  if (!consumeQuota) return null;
+  const quota = consumeQuota({ bucket, userId });
+  if (quota.allowed) return null;
+  return quotaExceededResult(quota.retryAfterSeconds);
+}
+
 export async function handleGroundedChatRequest(input: {
+  featureEnabled?: boolean;
   authorizationHeader?: string | null;
   body: unknown;
   cloudConfigured: boolean;
@@ -403,7 +466,10 @@ export async function handleGroundedChatRequest(input: {
   repositoryForToken: (accessToken: string) => SourcesRepository;
   routerExecute: GroundedRouterExecute;
   webSearch?: WebSearchFn;
+  consumeQuota?: ConsumeSourcesQuota;
 }): Promise<SourcesHttpResult> {
+  if (input.featureEnabled !== true) return featureDisabledResult();
+
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();
   if (!input.cloudConfigured) return unavailableResult();
@@ -411,7 +477,10 @@ export async function handleGroundedChatRequest(input: {
   const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
 
-  if (questionExceedsBound(input.body)) return selectSmallerSourceResult();
+  const quotaRejection = applyVerifiedQuota(input.consumeQuota, 'grounded-chat', auth.userId);
+  if (quotaRejection) return quotaRejection;
+
+  if (questionExceedsBound(input.body)) return boundedQuestionResult();
 
   const parsed = GroundedChatRequestSchema.safeParse(input.body);
   if (!parsed.success) {
@@ -464,19 +533,28 @@ export async function handleGroundedChatRequest(input: {
 }
 
 export async function handleWebResearchRequest(input: {
+  featureEnabled?: boolean;
   authorizationHeader?: string | null;
   body: unknown;
   cloudConfigured: boolean;
   searchAdapterConfigured: boolean;
   verifyAccessToken?: (accessToken: string) => Promise<LearnerAuthResult>;
   webSearch?: WebSearchFn;
+  consumeQuota?: ConsumeSourcesQuota;
 }): Promise<SourcesHttpResult> {
+  if (input.featureEnabled !== true) return featureDisabledResult();
+
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();
   if (!input.cloudConfigured) return unavailableResult();
 
   const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
+
+  const quotaRejection = applyVerifiedQuota(input.consumeQuota, 'web-research', auth.userId);
+  if (quotaRejection) return quotaRejection;
+
+  if (questionExceedsBound(input.body)) return boundedQuestionResult();
 
   if (!input.searchAdapterConfigured || !input.webSearch) {
     return unavailableResult();

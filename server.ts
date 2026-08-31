@@ -56,6 +56,8 @@ import {
   handleGroundedChatRequest,
   handleWebResearchRequest,
 } from "./src/lib/sources/groundedChat";
+import { parseSourcesLibraryV2Env } from "./src/lib/sources/featureFlags.server";
+import { createSourcesQuotaConsumer, parseSourcesQuotaEnv } from "./src/lib/sources/quota.server";
 import {
   createLearnerJwtSourcesRepository,
   resolveSourcesSupabaseConfig,
@@ -105,6 +107,7 @@ dotenv.config({ quiet: true });
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const execFileAsync = promisify(execFile);
+const sourcesQuotaConsumer = createSourcesQuotaConsumer(parseSourcesQuotaEnv(process.env));
 const configuredLiveHubReceiptSecret = process.env.LIVE_HUB_RECEIPT_SECRET?.trim();
 const liveHubReceiptSecret = configuredLiveHubReceiptSecret || crypto.randomBytes(32).toString('hex');
 if (!configuredLiveHubReceiptSecret) {
@@ -8531,8 +8534,10 @@ function sourcesCloudConfig() {
 }
 
 app.post('/api/sources/grounded-chat', async (req, res) => {
+  const featureEnabled = parseSourcesLibraryV2Env(process.env);
   const cloud = sourcesCloudConfig();
   const result = await handleGroundedChatRequest({
+    featureEnabled,
     authorizationHeader: req.header('authorization'),
     body: req.body,
     cloudConfigured: cloud.configured,
@@ -8546,6 +8551,7 @@ app.post('/api/sources/grounded-chat', async (req, res) => {
       supabaseUrl: cloud.supabaseUrl,
       supabaseAnonKey: cloud.supabaseAnonKey,
     }),
+    consumeQuota: sourcesQuotaConsumer,
     routerExecute: async ({ prompt, question, profile, tools }) => {
       if (profile.tier !== 'balanced' || profile.capability !== 'text' || tools.length > 0) {
         throw new Error('Grounded chat must use the balanced text profile without tools.');
@@ -8562,13 +8568,18 @@ app.post('/api/sources/grounded-chat', async (req, res) => {
       };
     },
   });
+  if (result.headers?.['Retry-After']) {
+    res.setHeader('Retry-After', result.headers['Retry-After']);
+  }
   return res.status(result.status).json(result.body);
 });
 
 app.post('/api/sources/web-research', async (req, res) => {
+  const featureEnabled = parseSourcesLibraryV2Env(process.env);
   const cloud = sourcesCloudConfig();
   const braveKey = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
   const result = await handleWebResearchRequest({
+    featureEnabled,
     authorizationHeader: req.header('authorization'),
     body: req.body,
     cloudConfigured: cloud.configured,
@@ -8578,6 +8589,7 @@ app.post('/api/sources/web-research', async (req, res) => {
       supabaseUrl: cloud.supabaseUrl,
       supabaseAnonKey: cloud.supabaseAnonKey,
     }),
+    consumeQuota: sourcesQuotaConsumer,
     webSearch: braveKey
       ? async ({ question }) => {
           const evidence = await requestBraveForecastEvidence({ apiKey: braveKey, query: question });
@@ -8591,6 +8603,9 @@ app.post('/api/sources/web-research', async (req, res) => {
         }
       : undefined,
   });
+  if (result.headers?.['Retry-After']) {
+    res.setHeader('Retry-After', result.headers['Retry-After']);
+  }
   return res.status(result.status).json(result.body);
 });
 
