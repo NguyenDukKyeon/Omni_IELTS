@@ -276,7 +276,25 @@ Request body for private-source chat (Zod-validated):
 }
 ```
 
-The handler loads only the caller's RLS-visible `SourceVersion` rows whose ids are in `selectedVersionIds`, and attaches `SourceRecord` metadata (`title`, `canonicalCitation`, `rightsState`, `processingState`). Versions in `unavailable` or `handoff_required` are excluded from prompt context and reported in `excludedSources`.
+The handler does not receive source plaintext in the request. It authenticates the learner and hydrates exactly the selected IDs through a request-scoped repository (section 4.1.1). Versions in `unavailable` or `handoff_required` that the learner owns are excluded from prompt context and reported in `excludedSources`. Missing, foreign, or otherwise non-visible IDs never produce a partial context.
+
+### 4.1.1 Authenticated request-scoped SourcesRepository boundary
+
+Current Source rows live in browser IndexedDB / client-Supabase storage. `server.ts` has no process-memory Source catalogue and no authenticated Source repository of its own. Grounded Chat therefore cannot invent hydration.
+
+`POST /api/sources/grounded-chat` must:
+
+1. Authenticate the learner from the `Authorization: Bearer <Supabase JWT>` header. Guests keep offline/sample library behaviour on the client; cloud Source Chat is not silently available without a learner JWT.
+2. Construct a **request-scoped** `SourcesRepository` that queries `source_versions` and parent `source_records` through Supabase using that learner JWT and the existing RLS policies.
+3. Use the Supabase URL and **anon key only**. Never a service-role key, never a shared server session, never a parallel provider SDK.
+4. Hydrate **exactly** the `selectedVersionIds`. Do not accept client-supplied raw source text, and do not read Source rows from process memory.
+5. If any selected ID is missing, belongs to another learner, or is not RLS-visible, return one typed `selection_unavailable` response that does not disclose whether a row exists, and **do not** invoke the AI router.
+6. Missing or invalid auth: typed `auth_required` (`NormalizedSourceError` code `AUTH_REQUIRED`). No provider call.
+7. Supabase or the cloud source store unavailable: typed `unavailable`. No fake context and no provider call.
+8. Do not log or persist raw `SourceVersion` plain text, bearer tokens, or API keys.
+
+`POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It also requires authenticated cloud access. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
+
 
 ### 4.2 Selection & Context Formation
 

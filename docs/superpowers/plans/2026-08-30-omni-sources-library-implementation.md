@@ -60,7 +60,8 @@ src/
 │       ├── importJobMachine.ts            # Batch ingestion state machine
 │       ├── sourceErrors.ts                # Normalized typed errors & scrubbed diagnostics
 │       ├── libraryStore.ts                # Library search, filter, and collection management
-│       ├── groundedChat.ts                # Context builder, citation validator, Zod schemas
+│       ├── groundedChat.ts                # Context builder, citation validator, Zod schemas, request handlers
+│       ├── sourcesRepository.server.ts    # Request-scoped learner-JWT SourcesRepository (server only)
 │       ├── artifactJobMachine.ts          # Single-destination generation & quality validation
 │       └── destinationHandoff.ts          # Handoff adapters to Practice, Mock, Vocab, Note
 ├── components/
@@ -684,23 +685,50 @@ git commit -m "feat(sources): implement library search, filter, and collection s
 
 ---
 
+### Task 5.0: Authenticated grounded-chat repository boundary (architecture correction)
+
+**Files:**
+
+- Modify only: `docs/superpowers/specs/2026-08-30-omni-sources-library-design.md`
+- Modify only: `docs/architecture/adr/2026-08-30-sources-library-domain-and-destination-boundary.md`
+- Modify only: this plan (Task 5 files / handler contract below)
+- No new PRD, NFR, CAP, METRIC, or GUARD IDs
+
+The approved Task 5 request body contains only `selectedVersionIds`. Current Source data is browser IndexedDB / client-Supabase storage, and `server.ts` has no authenticated Source repository. Task 5 must not fake hydration from process memory, trust client-supplied raw source text, use a service-role key, or create a parallel provider path.
+
+Server boundary that Task 5 must implement:
+
+- `POST /api/sources/grounded-chat` authenticates the learner’s Supabase Bearer JWT.
+- A request-scoped `SourcesRepository` retrieves requested `SourceVersion`s and parent `SourceRecord`s through Supabase using the learner JWT and existing RLS.
+- Use Supabase URL + anon key only; never service-role credentials.
+- The server must hydrate exactly the selected IDs. Missing, foreign, or unselected IDs must not reveal whether a source exists and must not invoke AI (`selection_unavailable`).
+- Missing/invalid auth: typed `auth_required` response, no provider call.
+- Supabase unavailable: truthful typed `unavailable` response, no fake context.
+- Do not log or persist raw `SourceVersion` plain text, bearer token, or keys.
+- `POST /api/sources/web-research` remains the only explicit search path and also requires authenticated cloud access. If no existing approved search adapter is configured, return typed `unavailable`; do not add crawling/search packages.
+- Guests retain offline/sample behaviour; cloud Source Chat is not silently available to guests.
+
+---
+
 ### Task 5: Selected-Source Context & Executable Grounded Chat
 
 **Files:**
 
 - Create: `src/lib/sources/groundedChat.ts`
+- Create: `src/lib/sources/sourcesRepository.server.ts` (request-scoped learner-JWT + anon-key adapter; not imported by browser modules)
 - Modify: `server.ts` (add `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` only)
 - Test: `src/lib/__tests__/sourcesGroundedChat.test.ts`
 
 **Interfaces:**
 
-- Consumes: selected `SourceVersion[]` plus `SourceRecord` metadata, existing `GroundedProviderRouter`, `AI_TASK_PROFILES.balanced`, `classifyApiFailure`, `zod`
-- Produces: `buildGroundedContext`, `validateGroundedCitations`, `executeGroundedChat`, `GroundedChatRequestSchema`, `GroundedChatResponseSchema`
+- Consumes: selected `SourceVersion[]` plus `SourceRecord` metadata via request-scoped `SourcesRepository`, existing `GroundedProviderRouter`, `AI_TASK_PROFILES.balanced`, `classifyApiFailure`, `zod`
+- Produces: `buildGroundedContext`, `validateGroundedCitations`, `executeGroundedChat`, `handleGroundedChatRequest`, `handleWebResearchRequest`, `GroundedChatRequestSchema`, `GroundedChatResponseSchema`
 
 Exact API boundary:
 
-- `POST /api/sources/grounded-chat` body `{ selectedVersionIds: string[]; question: string; sourceSpan?: SourceSpan; conversationId?: string }`
-- `POST /api/sources/web-research` body `{ question: string; conversationId?: string }` — the only path that may invoke `CAP-GLB-SEARCH`
+- `POST /api/sources/grounded-chat` body `{ selectedVersionIds: string[]; question: string; sourceSpan?: SourceSpan; conversationId?: string }` plus `Authorization: Bearer <Supabase JWT>`
+- Hydration is server-side through RLS; the body never carries source plaintext
+- `POST /api/sources/web-research` body `{ question: string; conversationId?: string }` — the only path that may invoke `CAP-GLB-SEARCH`, and only when an existing approved adapter is configured
 - Server handler must call `router.execute` on the existing `GroundedProviderRouter` instance used by Live Hub / AI gateway. It must not construct `@google/genai` or fetch `/api/gemini/*`.
 - Model profile: `AI_TASK_PROFILES.balanced` (`capability: 'text'`, `tools: []`). Do not use `AI_TASK_PROFILES.grounded` (it enables `googleSearch`).
 
@@ -864,7 +892,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/sources/groundedChat.ts src/lib/__tests__/sourcesGroundedChat.test.ts server.ts
+git add src/lib/sources/groundedChat.ts src/lib/sources/sourcesRepository.server.ts src/lib/__tests__/sourcesGroundedChat.test.ts server.ts
 git commit -m "feat(sources): execute grounded chat through the central AI router"
 ```
 
