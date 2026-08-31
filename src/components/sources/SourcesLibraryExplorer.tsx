@@ -29,7 +29,7 @@ export interface SourcesLibraryExplorerProps {
   errorMessage?: string;
   selectedSourceIds: readonly string[];
   onSelectedSourceIdsChange: (sourceIds: string[]) => void;
-  onToggleSource: (source: SourceRecord, selected: boolean) => void;
+  onToggleSource?: (source: SourceRecord, selected: boolean) => void;
   onOpenSource: (source: SourceRecord) => void;
   onCreateArtifact: (source: SourceRecord) => void;
   onCreateCollection: (name: string) => Promise<void> | void;
@@ -137,7 +137,7 @@ export function SourcesLibraryExplorer({
       ? selectedSourceIds.filter((sourceId) => sourceId !== source.id)
       : [...selectedSourceIds, source.id];
     onSelectedSourceIdsChange(nextSelected);
-    onToggleSource(source, !selected.has(source.id));
+    onToggleSource?.(source, !selected.has(source.id));
   };
 
   return (

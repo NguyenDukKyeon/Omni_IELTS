@@ -31,6 +31,62 @@ const source: SourceRecord = {
   updatedAt: '2026-08-31T00:00:00.000Z',
 };
 
+const sourceControlIds = [
+  'sources.library.search-input',
+  'sources.library.filter-format',
+  'sources.library.filter-rights',
+  'sources.library.filter-sort',
+  'sources.library.filter-collection',
+  'sources.library.select-toggle',
+  'sources.library.open-source',
+  'sources.library.retry',
+  'sources.import.open',
+  'sources.import.empty-cta',
+  'sources.artifact.open-modal',
+  'sources.reader.select-span',
+  'sources.chat.send',
+  'sources.chat.web-research',
+  'sources.chat.citation-open',
+  'sources.chat.citation-close',
+  'sources.chat.composer',
+  'sources.chat.question-input',
+  'sources.chat.retry',
+  'sources.chat.research-retry',
+  'sources.chat.web-result',
+  'sources.reader.retry',
+  'sources.artifact.close',
+  'sources.artifact.form',
+  'sources.artifact.generate',
+  'sources.artifact.retry',
+  'sources.artifact.target-band',
+  'sources.artifact.custom-instruction',
+  'sources.artifact.open',
+  'sources.artifact.create-another',
+  'sources.view.tab-library',
+  'sources.view.tab-reader',
+  'sources.view.tab-create',
+  'sources.view.open-create',
+  'sources.collection.create-button',
+  'sources.collection.form',
+  'sources.collection.name-input',
+  'sources.collection.save-button',
+  'sources.collection.cancel-button',
+  'sources.collection.all',
+  'sources.collection.select',
+  'sources.import.close',
+  'sources.import.form',
+  'sources.import.title',
+  'sources.import.type',
+  'sources.import.paste-text',
+  'sources.import.url',
+  'sources.import.pdf',
+  'sources.import.docx',
+  'sources.import.vtt',
+  'sources.import.youtube',
+  'sources.import.submit',
+  'sources.import.retry',
+];
+
 describe('Sources Library Explorer UX contracts', () => {
   it('registers the P03 library and collection flows with executable evidence', () => {
     const flowIds = UX_FLOW_CONTRACTS.filter((flow) => flow.module === 'sources').map((flow) => flow.id);
@@ -40,14 +96,7 @@ describe('Sources Library Explorer UX contracts', () => {
       'sources.selection.toggle',
       'sources.collection.create',
     ]));
-    expect(UX_CONTROL_CONTRACTS.map((control) => control.id)).toEqual(expect.arrayContaining([
-      'sources.library.search-input',
-      'sources.library.filter-format',
-      'sources.library.filter-rights',
-      'sources.library.filter-sort',
-      'sources.collection.create-button',
-      'sources.collection.save-button',
-    ]));
+    expect(UX_CONTROL_CONTRACTS.map((control) => control.id)).toEqual(expect.arrayContaining(sourceControlIds));
   });
 
   it('renders labelled filter controls inside the Sources scope', () => {

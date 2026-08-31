@@ -68,6 +68,10 @@ for (const file of collectTsxFiles(path.join(root, 'src'))) {
 }
 
 for (const contract of UX_CONTROL_CONTRACTS) {
+  const flow = UX_FLOW_CONTRACTS.find((candidate) => candidate.id === contract.flowId);
+  // Sources owns its own migrated scope. Its controls are validated by the
+  // source-specific evidence tests, not by the app-shell scope audit.
+  if (flow?.module === 'sources') continue;
   if (!seenMigratedControls.has(contract.id)) {
     issues.push(`Migrated control contract "${contract.id}" is not used inside app-shell-v2.`);
   }

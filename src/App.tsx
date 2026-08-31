@@ -15,9 +15,11 @@ import { MistakeNotebookModal } from './components/MistakeNotebookModal';
 import { DiagnosticPsychometricianModal } from './components/diagnostic/DiagnosticPsychometricianModal';
 import { SentenceAcademicStylistModal } from './components/practice/SentenceAcademicStylistModal';
 import { AppNotification } from './components/AppNotification';
+import { getClientSourcesLibraryV2Flag, resolveSourcesViewName } from './lib/sources/featureFlags';
 
 import { DashboardView } from './views/DashboardView';
 import { SourceIngestionView } from './views/SourceIngestionView';
+import { SourcesView } from './views/SourcesView';
 import { VocabularySRSView } from './views/VocabularySRSView';
 import { GrammarStrategyView } from './views/GrammarStrategyView';
 import { MediaLabView } from './views/MediaLabView';
@@ -30,6 +32,7 @@ import { ReviewProgressView } from './views/ReviewProgressView';
 const MainContent: React.FC = () => {
   const {
     activeModule,
+    setActiveModule,
     isExamModeActive,
     isDiagnosticOpen,
     setIsDiagnosticOpen,
@@ -43,7 +46,9 @@ const MainContent: React.FC = () => {
       case 'dashboard':
         return <DashboardView />;
       case 'sources':
-        return <SourceIngestionView />;
+        return resolveSourcesViewName(getClientSourcesLibraryV2Flag()) === 'SourcesView'
+          ? <SourcesView onNavigate={setActiveModule} />
+          : <SourceIngestionView />;
       case 'vocabulary':
         return <VocabularySRSView />;
       case 'grammar':

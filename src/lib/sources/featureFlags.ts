@@ -21,6 +21,16 @@ export function isSourcesLibraryV2Enabled(flag?: SourcesLibraryFlagInput): boole
   return false;
 }
 
+export function getClientSourcesLibraryV2Flag(): boolean {
+  if (typeof window !== 'undefined') {
+    const injected = (window as Window & {
+      __OMNI_FLAGS__?: { sourcesLibraryV2?: boolean };
+    }).__OMNI_FLAGS__?.sourcesLibraryV2;
+    if (typeof injected === 'boolean') return injected;
+  }
+  return import.meta.env.VITE_OMNI_SOURCES_LIBRARY_V2 === 'true';
+}
+
 export function resolveSourcesViewName(flag?: SourcesLibraryFlagInput):
   | 'SourceIngestionView'
   | 'SourcesView' {
