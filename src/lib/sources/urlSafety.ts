@@ -547,4 +547,3 @@ export async function fetchPublicHtml(
 
   return fail('URL_UNREACHABLE');
 }
-
