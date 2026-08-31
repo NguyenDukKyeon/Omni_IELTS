@@ -9,6 +9,7 @@ export interface FocusDockLayoutProps {
   evidence: ReactNode;
   examMode: boolean;
   focusMode?: boolean;
+  mainKey?: string;
 }
 
 export function FocusDockLayout({
@@ -17,6 +18,7 @@ export function FocusDockLayout({
   evidence,
   examMode,
   focusMode = false,
+  mainKey,
 }: FocusDockLayoutProps) {
   const { navCollapsed, evidenceDock } = useAppShell();
   const showChrome = !examMode;
@@ -34,7 +36,7 @@ export function FocusDockLayout({
           className={`omni-focus-dock__body${showEvidence ? ' omni-focus-dock__body--with-evidence' : ''}${examMode ? ' omni-focus-dock__body--exam' : ''}`}
         >
           {showChrome ? <div className="omni-focus-dock__nav">{navigation}</div> : null}
-          <main id="main-viewport-content" className="omni-focus-dock__main">
+          <main id="main-viewport-content" key={mainKey} className="omni-focus-dock__main">
             {children}
           </main>
           {showEvidence ? <div className="omni-focus-dock__evidence">{evidence}</div> : null}

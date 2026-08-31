@@ -1,3 +1,5 @@
+import type { ModuleId } from '../types';
+
 export type SourceMediaType =
   | 'text'
   | 'pdf'
@@ -190,6 +192,22 @@ export interface ValidatedArtifactDraft {
   destination: DestinationType;
   payload: ValidatedArtifactDraftPayload;
   validationErrors?: string[];
+}
+
+/**
+ * Ephemeral handoff state shared by the app navigation boundary.
+ * Destination modules own persistence; Sources only supplies this draft.
+ */
+export interface PendingArtifactHandoff {
+  job: SourceArtifactJob;
+  draft: ValidatedArtifactDraft;
+  provenance: SourceProvenance;
+  sourceVersion: SourceVersion;
+  sourceSpan?: SourceSpan;
+  destination: DestinationType;
+  targetModule: ModuleId;
+  targetRoute: ModuleId;
+  draftId: string;
 }
 
 export interface SourceArtifactJob {

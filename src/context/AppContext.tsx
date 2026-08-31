@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useState, useEffect } from 'react';
 import {
   ModuleId,
   UserProfile,
@@ -28,6 +28,9 @@ import { calculateNextSRS, ReviewRating } from '../services/srsScheduler';
 import { calculateLevel, updateStreak, XP_REWARDS } from '../services/gamification';
 import { askAITutor } from '../services/aiTutor';
 import { transitionMistakeLifecycle } from '../lib/mistakeDrill';
+import { consumePendingArtifactHandoff as consumePendingHandoffState, routePendingArtifactHandoff } from '../lib/sources/artifactNavigation';
+import { isValidPendingArtifactHandoff } from '../lib/sources/destinationHandoff';
+import type { DestinationType, PendingArtifactHandoff } from '../types/sources';
 import { useAppShell } from './AppShellContext';
 
 interface NotificationState {
@@ -39,6 +42,10 @@ interface NotificationState {
 interface AppContextType {
   activeModule: ModuleId;
   setActiveModule: (mod: ModuleId) => void;
+  pendingArtifactHandoff: PendingArtifactHandoff | null;
+  openArtifactHandoff: (handoff: PendingArtifactHandoff) => boolean;
+  consumePendingArtifactHandoff: (destination: DestinationType) => PendingArtifactHandoff | null;
+  clearPendingArtifactHandoff: () => void;
   profile: UserProfile;
   updateProfile: (updates: Partial<UserProfile>) => void;
   sources: LearningSource[];
@@ -109,6 +116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const { resolvedTheme, setThemePreference } = useAppShell();
   const darkMode = resolvedTheme === 'dark';
   const [activeModule, setActiveModule] = useState<ModuleId>('dashboard');
+  const [pendingArtifactHandoff, setPendingArtifactHandoff] = useState<PendingArtifactHandoff | null>(null);
   const [isAITutorOpen, setIsAITutorOpen] = useState<boolean>(false);
   const [isMistakeNotebookOpen, setIsMistakeNotebookOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
@@ -121,6 +129,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isTutorLoading, setIsTutorLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<NotificationState | null>(null);
   const [isExamModeActive, setIsExamModeActive] = useState<boolean>(false);
+
+  const openArtifactHandoff = useCallback((handoff: PendingArtifactHandoff): boolean => {
+    if (!isValidPendingArtifactHandoff(handoff)) return false;
+    const next = routePendingArtifactHandoff({
+      activeModule,
+      pendingArtifactHandoff,
+    }, handoff);
+    if (next.pendingArtifactHandoff !== handoff) return false;
+    setPendingArtifactHandoff(next.pendingArtifactHandoff);
+    setActiveModule(next.activeModule);
+    const resetMainViewportScroll = () => {
+      if (typeof document === 'undefined') return;
+      const mainViewport = document.getElementById('main-viewport-content');
+      if (mainViewport instanceof HTMLElement) mainViewport.scrollTop = 0;
+    };
+    resetMainViewportScroll();
+    if (typeof window !== 'undefined') window.setTimeout(resetMainViewportScroll, 0);
+    return true;
+  }, [activeModule, pendingArtifactHandoff]);
+
+  const clearPendingArtifactHandoff = useCallback(() => {
+    setPendingArtifactHandoff(null);
+  }, []);
+
+  const consumePendingArtifactHandoff = useCallback((destination: DestinationType) => {
+    const result = consumePendingHandoffState({
+      activeModule,
+      pendingArtifactHandoff,
+    }, destination);
+    if (result.handoff) setPendingArtifactHandoff(result.state.pendingArtifactHandoff);
+    return result.handoff;
+  }, [activeModule, pendingArtifactHandoff]);
 
   useEffect(() => {
     const onCompat = (event: Event) => {
@@ -693,6 +733,10 @@ Tôi có thể hỗ trợ bạn theo đúng ngữ cảnh của màn hình hiện
       value={{
         activeModule,
         setActiveModule,
+        pendingArtifactHandoff,
+        openArtifactHandoff,
+        consumePendingArtifactHandoff,
+        clearPendingArtifactHandoff,
         profile,
         updateProfile,
         sources,
@@ -758,3 +802,32 @@ export const useApp = () => {
   }
   return context;
 };
+
+export function usePendingArtifactHandoff(destination: DestinationType): PendingArtifactHandoff | null {
+  const { pendingArtifactHandoff, clearPendingArtifactHandoff } = useApp();
+  const [consumedHandoff, setConsumedHandoff] = useState<PendingArtifactHandoff | null>(null);
+
+  useEffect(() => {
+    if (pendingArtifactHandoff?.destination !== destination) return;
+    setConsumedHandoff(pendingArtifactHandoff);
+    clearPendingArtifactHandoff();
+  }, [clearPendingArtifactHandoff, destination, pendingArtifactHandoff]);
+
+  return consumedHandoff;
+}
+
+export function usePendingArtifactHandoffForDestinations(
+  destinations: readonly DestinationType[],
+): PendingArtifactHandoff | null {
+  const { pendingArtifactHandoff, clearPendingArtifactHandoff } = useApp();
+  const [consumedHandoff, setConsumedHandoff] = useState<PendingArtifactHandoff | null>(null);
+  const destinationKey = destinations.join('|');
+
+  useEffect(() => {
+    if (!pendingArtifactHandoff || !destinations.includes(pendingArtifactHandoff.destination)) return;
+    setConsumedHandoff(pendingArtifactHandoff);
+    clearPendingArtifactHandoff();
+  }, [clearPendingArtifactHandoff, destinationKey, pendingArtifactHandoff, destinations]);
+
+  return consumedHandoff;
+}

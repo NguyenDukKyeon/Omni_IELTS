@@ -36,6 +36,7 @@ import { getGeminiRequestHeaders } from '../services/aiTutor';
 import { persistInitialMockAttempt, PersistedMockAttemptSnapshot } from '../lib/mockAttemptPersistence';
 import { savePrivateArtifactIfAuthenticated } from '../services/supabase';
 import { getContentOriginBadge } from '../lib/contentOrigin';
+import { PendingArtifactDraftPanel } from '../components/sources/PendingArtifactDraftPanel';
 
 type ExamPhase = 'idle' | 'in_progress' | 'evaluating' | 'report_view';
 
@@ -458,6 +459,7 @@ export const MockTestView: React.FC = () => {
 
   return (
     <div id="mock-test-module" className="space-y-6">
+      {examPhase !== 'in_progress' ? <PendingArtifactDraftPanel destination="mock_section" /> : null}
       {/* 1. RUNNING EXAM MODE (Distraction-Free) */}
       {examPhase === 'in_progress' && (
         <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col h-screen select-none overflow-hidden">

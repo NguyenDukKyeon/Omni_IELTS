@@ -1,9 +1,11 @@
 import type { ModuleId } from '../../types';
 import type {
   DestinationType,
+  PendingArtifactHandoff,
   SourceArtifactJob,
   SourceProvenance,
   SourceSpan,
+  SourceVersion,
   ValidatedArtifactDraftPayload,
 } from '../../types/sources';
 
@@ -131,6 +133,39 @@ function isGenuineReadyDraft(job: SourceArtifactJob): boolean {
   return true;
 }
 
+function spanSupportedByVersion(span: SourceSpan, version: SourceVersion): boolean {
+  if (span.sourceId !== version.sourceId || span.sourceVersionId !== version.id) return false;
+  if (!span.blockIds?.length) return true;
+  const blockIds = new Set(version.blocks.map((block) => block.id));
+  return span.blockIds.every((blockId) => blockIds.has(blockId));
+}
+
+function provenanceMatches(left: SourceProvenance | undefined, right: SourceProvenance | undefined): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isPendingArtifactHandoffShape(value: unknown): value is PendingArtifactHandoff {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<PendingArtifactHandoff>;
+  if (!candidate.job || !candidate.draft || !candidate.provenance || !candidate.sourceVersion) return false;
+  const jobDraft = candidate.job.artifactDraft;
+  if (candidate.job.state !== 'ready' || !jobDraft) return false;
+  if (jobDraft.id !== candidate.draft.id || jobDraft.destination !== candidate.draft.destination) return false;
+  if (JSON.stringify(jobDraft.payload) !== JSON.stringify(candidate.draft.payload)) return false;
+  if (candidate.draft.id !== candidate.draftId || candidate.draft.destination !== candidate.destination) return false;
+  if (candidate.job.destination !== candidate.destination || candidate.job.sourceVersionId !== candidate.sourceVersion.id) return false;
+  if (typeof candidate.sourceVersion.id !== 'string' || typeof candidate.sourceVersion.sourceId !== 'string') return false;
+  const prepared = prepareDestinationHandoff(candidate.job);
+  if (!prepared.navigable) return false;
+  if (prepared.targetModule !== candidate.targetModule || prepared.targetRoute !== candidate.targetRoute) return false;
+  if (prepared.draftId !== candidate.draftId || !provenanceMatches(prepared.draftRef.provenance, candidate.provenance)) return false;
+  const spans = collectPayloadSpans(candidate.draft.payload);
+  if (!spans.length || spans.some((span) => !spanSupportedByVersion(span, candidate.sourceVersion))) return false;
+  if (candidate.sourceSpan && !spanSupportedByVersion(candidate.sourceSpan, candidate.sourceVersion)) return false;
+  if (candidate.sourceSpan && candidate.job.selection && !spansEqual(candidate.sourceSpan, candidate.job.selection)) return false;
+  return true;
+}
+
 export function prepareDestinationHandoff(
   job: SourceArtifactJob,
   _options?: { persistDestination?: (...args: unknown[]) => unknown },
@@ -162,4 +197,40 @@ export function prepareDestinationHandoff(
     autoRedirect: false,
     opensOnLearnerAction: true,
   };
+}
+
+export function createPendingArtifactHandoff(
+  job: SourceArtifactJob,
+  sourceVersion: SourceVersion,
+): PendingArtifactHandoff | null {
+  const prepared = prepareDestinationHandoff(job);
+  if (!prepared.navigable || !job.artifactDraft) return null;
+  if (sourceVersion.id !== job.sourceVersionId) return null;
+
+  const spans = collectPayloadSpans(job.artifactDraft.payload);
+  if (!spans.length || spans.some((span) => !spanSupportedByVersion(span, sourceVersion))) return null;
+  if (job.selection && spans.some((span) => !spansEqual(span, job.selection as SourceSpan))) return null;
+
+  const provenance = prepared.draftRef.provenance;
+  if (!provenance) return null;
+  const pending: PendingArtifactHandoff = {
+    job,
+    draft: job.artifactDraft,
+    provenance,
+    sourceVersion,
+    sourceSpan: job.selection ?? prepared.draftRef.sourceSpan,
+    destination: job.destination,
+    targetModule: prepared.targetModule,
+    targetRoute: prepared.targetRoute,
+    draftId: prepared.draftId,
+  };
+  return isPendingArtifactHandoffShape(pending) ? pending : null;
+}
+
+export function isValidPendingArtifactHandoff(value: unknown): value is PendingArtifactHandoff {
+  try {
+    return isPendingArtifactHandoffShape(value);
+  } catch {
+    return false;
+  }
 }

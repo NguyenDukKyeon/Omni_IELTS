@@ -20,6 +20,7 @@ import { SpeakingQuestionModule } from '../components/practice/SpeakingQuestionM
 import { ForecastLiveHub } from '../components/forecast/ForecastLiveHub';
 import { ItemWriterPracticeModal } from '../components/practice/ItemWriterPracticeModal';
 import { FullGraderModal } from '../components/practice/FullGraderModal';
+import { PendingArtifactDraftPanel } from '../components/sources/PendingArtifactDraftPanel';
 
 export type PracticeTabType = SkillType | 'forecast_hub';
 
@@ -94,6 +95,7 @@ export const IELTSPracticeView: React.FC = () => {
 
   return (
     <div id="ielts_practice_view" className="space-y-6 animate-fadeIn pb-12">
+      <PendingArtifactDraftPanel destination="practice" />
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-900 text-white p-6 rounded-3xl shadow-lg border border-indigo-800/40">
         <div className="space-y-1">

@@ -1,4 +1,4 @@
-import { FilePlus2, Library, PanelRight, RefreshCw } from 'lucide-react';
+import { FilePlus2, Library, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getSourceVersion,
@@ -6,23 +6,24 @@ import {
   SourcesApiError,
   type SourceImportResponse,
 } from '../lib/sources/sourcesApi';
-import { getSession } from '../services/supabase';
+import { getSession, signInWithGoogle } from '../services/supabase';
 import { sourcesStorage } from '../services/sourcesStorage';
 import type { ModuleId } from '../types';
 import type { SourceCollection, SourceRecord, SourceSpan, SourceVersion } from '../types/sources';
 import { ArtifactStudioModal } from '../components/sources/ArtifactStudioModal';
+import { PendingSourcesDraftPanel } from '../components/sources/PendingArtifactDraftPanel';
 import { SourceGroundedChat } from '../components/sources/SourceGroundedChat';
 import { SourceImportPanel } from '../components/sources/SourceImportPanel';
 import { SourceReader, type SourceReaderState } from '../components/sources/SourceReader';
 import { SourcesLibraryExplorer, type SourcesLibraryExplorerState } from '../components/sources/SourcesLibraryExplorer';
-import type { DestinationHandoffResult } from '../lib/sources/destinationHandoff';
+import type { PendingArtifactHandoff } from '../types/sources';
 
 type SourcesViewTab = 'library' | 'reader' | 'create';
 
 const TABS: Array<{ id: SourcesViewTab; label: string; controlId: string }> = [
-  { id: 'library', label: 'Library', controlId: 'sources.view.tab-library' },
-  { id: 'reader', label: 'Reader & Chat', controlId: 'sources.view.tab-reader' },
-  { id: 'create', label: 'Create', controlId: 'sources.view.tab-create' },
+  { id: 'library', label: 'Thư viện', controlId: 'sources.view.tab-library' },
+  { id: 'reader', label: 'Đọc & hỏi', controlId: 'sources.view.tab-reader' },
+  { id: 'create', label: 'Tạo bản nháp', controlId: 'sources.view.tab-create' },
 ];
 
 function libraryStateForError(error: unknown): SourcesLibraryExplorerState {
@@ -46,13 +47,15 @@ function collectionNow(): string {
 
 export interface SourcesViewProps {
   onNavigate?: (moduleId: ModuleId) => void;
+  onOpenArtifact?: (handoff: PendingArtifactHandoff) => boolean | void;
 }
 
-export function SourcesView({ onNavigate }: SourcesViewProps) {
+export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
   const [records, setRecords] = useState<SourceRecord[]>([]);
   const [collections, setCollections] = useState<SourceCollection[]>([]);
   const [libraryState, setLibraryState] = useState<SourcesLibraryExplorerState>('loading');
   const [libraryError, setLibraryError] = useState<string>();
+  const [isGuest, setIsGuest] = useState(false);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [activeSourceId, setActiveSourceId] = useState<string>();
   const [readerVersion, setReaderVersion] = useState<SourceVersion>();
@@ -83,14 +86,16 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
       const response = await listSourcesLibrary();
       setRecords(response.records);
       setCollections(response.collections);
+      setIsGuest(false);
       setLibraryState(response.records.length > 0 ? 'ready' : 'empty');
     } catch (error) {
       setRecords([]);
       setCollections([]);
+      setIsGuest(error instanceof SourcesApiError && error.statusLabel === 'auth_required');
       setLibraryState(libraryStateForError(error));
       setLibraryError(error instanceof SourcesApiError && error.statusLabel === 'auth_required'
-        ? 'Guest mode keeps this cloud library empty. Sign in to import or sync private Sources.'
-        : 'The private Sources library could not be loaded. Retry without losing your local selection.');
+        ? 'Bạn đang ở chế độ khách. Đăng nhập để thêm hoặc đồng bộ nguồn riêng.'
+        : 'Không thể tải thư viện nguồn riêng. Hãy thử lại; lựa chọn hiện tại vẫn được giữ.');
     }
   }, []);
 
@@ -151,6 +156,14 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
     setIsImportOpen(false);
   };
 
+  const handleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : 'Không thể mở bước đăng nhập.');
+    }
+  };
+
   const handleCreateCollection = async (name: string) => {
     const session = await getSession();
     if (!session?.user?.id) throw new SourcesApiError({
@@ -178,31 +191,30 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
     if (activeSource) openArtifact(activeSource);
   };
 
-  const openDestination = (handoff: DestinationHandoffResult & { navigable: true }) => {
+  const openDestination = (handoff: PendingArtifactHandoff) => {
+    const accepted = onOpenArtifact?.(handoff);
+    if (onOpenArtifact && accepted === false) return;
     setIsArtifactOpen(false);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('omni:sources-artifact-handoff', {
-        detail: handoff.draftRef,
-      }));
-    }
-    onNavigate?.(handoff.targetModule);
+    if (!onOpenArtifact) onNavigate?.(handoff.targetModule);
   };
 
   const contextLabel = selectedVersionIds.length === 0
-    ? 'No ready source version selected'
-    : `Context: ${selectedVersionIds.length} selected source version${selectedVersionIds.length === 1 ? '' : 's'}`;
+    ? 'Chưa chọn phiên bản nguồn sẵn sàng'
+    : `Ngữ cảnh: đã chọn ${selectedVersionIds.length} phiên bản nguồn`;
+  const guestEmpty = isGuest && records.length === 0;
+  const canImport = !isGuest && (libraryState === 'empty' || libraryState === 'ready');
 
   return (
-    <section className="omni-sources-view" data-ux-scope="sources-library-v2" aria-labelledby="sources-view-title">
+    <section className={`omni-sources-view${guestEmpty ? ' omni-sources-view--guest-empty' : ''}`} data-ux-scope="sources-library-v2" aria-labelledby="sources-view-title">
       <header className="omni-sources-view__header">
         <div>
-          <h1 id="sources-view-title">Sources workspace</h1>
-          <p>Read evidence, ask only what your sources support, and create one destination draft at a time.</p>
+          <h1 id="sources-view-title">Thư viện nguồn</h1>
+          <p>Đọc nguồn, hỏi trong phạm vi bằng chứng và tạo từng bản nháp cho một module đích.</p>
         </div>
         <div className="omni-sources-view__header-mark" aria-hidden="true"><Library /></div>
       </header>
 
-      <nav className="omni-sources-view__tabs" role="tablist" aria-label="Sources workspace views">
+      <nav className="omni-sources-view__tabs" role="tablist" aria-label="Các khu vực của thư viện nguồn">
         {TABS.map((tab) => (
           <button
             type="button"
@@ -219,6 +231,8 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
         ))}
       </nav>
 
+      {onOpenArtifact ? <PendingSourcesDraftPanel /> : null}
+
       <div className="omni-sources-view__workspace">
         <div className="omni-sources-view__pane omni-sources-view__pane--library" data-mobile-active={activeTab === 'library' ? 'true' : 'false'}>
           <SourcesLibraryExplorer
@@ -226,13 +240,15 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
             collections={collections}
             state={libraryState}
             errorMessage={libraryError}
+            isGuest={isGuest}
             selectedSourceIds={selectedSourceIds}
             onSelectedSourceIdsChange={setSelectedSourceIds}
             onOpenSource={openSource}
             onCreateArtifact={openArtifact}
             onCreateCollection={handleCreateCollection}
             onRetry={() => void loadLibrary()}
-            onAddSource={() => setIsImportOpen(true)}
+            onAddSource={canImport ? () => setIsImportOpen(true) : undefined}
+            onSignIn={isGuest ? () => void handleSignIn() : undefined}
           />
           {isImportOpen ? <SourceImportPanel onClose={() => setIsImportOpen(false)} onImported={handleImport} /> : null}
         </div>
@@ -249,8 +265,8 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
             />
           ) : (
             <div className="omni-sources-view__empty-pane" role="status">
-              <h2>No source selected</h2>
-              <p>Open a ready source from Library to read its validated blocks.</p>
+              <h2>Chưa chọn nguồn</h2>
+              <p>Mở một nguồn sẵn sàng trong Thư viện để đọc các khối nội dung đã kiểm tra.</p>
             </div>
           )}
           {readerError ? <p className="omni-sources-view__pane-error" role="status">{readerError}</p> : null}
@@ -261,22 +277,22 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
           <div className="omni-sources-create-context">
             <div className="omni-sources-create-context__heading">
               <div>
-                <p className="omni-sources-create-context__label">Create / evidence</p>
-                <h2 id="sources-create-title">One source. One destination.</h2>
+                <p className="omni-sources-create-context__label">Tạo / bằng chứng</p>
+                <h2 id="sources-create-title">Một nguồn. Một đích tiếp nhận.</h2>
               </div>
               <PanelRight aria-hidden="true" />
             </div>
             {activeSource ? (
               <div className="omni-sources-create-context__source">
                 <strong>{activeSource.title}</strong>
-                <span>{activeSource.processingState === 'ready' ? 'Ready source version' : 'No ready source version'}</span>
-                <span>{selectedSpan?.sourceVersionId === activeSource.currentVersionId ? 'Selected span is active' : 'Whole version is available when ready'}</span>
+                <span>{activeSource.processingState === 'ready' ? 'Phiên bản nguồn sẵn sàng' : 'Chưa có phiên bản sẵn sàng'}</span>
+                <span>{selectedSpan?.sourceVersionId === activeSource.currentVersionId ? 'Đang dùng phạm vi đã chọn' : 'Có thể dùng toàn bộ phiên bản khi sẵn sàng'}</span>
               </div>
             ) : (
               <div className="omni-sources-view__empty-pane" role="status">
                 <FilePlus2 aria-hidden="true" />
-                <h3>Choose a source first</h3>
-                <p>Artifact Studio will keep the source selection here until you choose a destination.</p>
+                <h3>Chọn một nguồn trước</h3>
+                <p>Bản chọn nguồn sẽ được giữ ở đây cho đến khi bạn chọn đích tiếp nhận.</p>
               </div>
             )}
             {activeSource ? (
@@ -289,16 +305,12 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
                 onClick={openArtifactForActiveSource}
               >
                 <FilePlus2 aria-hidden="true" />
-                Create from this source
+                Tạo từ nguồn này
               </button>
             ) : null}
-            <p className="omni-sources-create-context__rule">Sources prepares a validated draft. Practice, Mock, Vocabulary, or Notes persists it only after you open it.</p>
+             <p className="omni-sources-create-context__rule">Sources chỉ chuẩn bị bản nháp đã kiểm tra. Module Practice, Mock, Vocabulary hoặc ghi chú chỉ lưu sau thao tác mở của bạn.</p>
           </div>
-          <div className="omni-sources-create-context__jobs" role="status">
-            <RefreshCw aria-hidden="true" />
-            <span>Job status appears here after a real server request.</span>
-          </div>
-        </aside>
+         </aside>
       </div>
 
       {artifactSource ? (
@@ -308,9 +320,7 @@ export function SourcesView({ onNavigate }: SourcesViewProps) {
           version={artifactVersion}
           selectedSpan={artifactSource.id === activeSourceId ? selectedSpan : undefined}
           onClose={() => setIsArtifactOpen(false)}
-          onOpenArtifact={(handoff) => {
-            if (handoff.navigable) openDestination(handoff);
-          }}
+          onOpenArtifact={openDestination}
           onCreateAnother={() => setActiveTab('create')}
         />
       ) : null}

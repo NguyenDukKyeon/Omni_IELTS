@@ -3,11 +3,11 @@ import type { DestinationHandoffResult } from '../../lib/sources/destinationHand
 import type { SourceArtifactJob } from '../../types/sources';
 
 const DESTINATION_LABELS: Record<SourceArtifactJob['destination'], string> = {
-  practice: 'Practice activity',
-  mock_section: 'Mock section',
-  vocabulary_deck: 'Vocabulary deck',
-  note: 'Note',
-  idea_bank: 'Idea bank',
+  practice: 'Bài luyện tập',
+  mock_section: 'Phần thi thử',
+  vocabulary_deck: 'Bộ từ vựng',
+  note: 'Ghi chú',
+  idea_bank: 'Ngân hàng ý',
 };
 
 export interface ArtifactDraftPreviewProps {
@@ -19,12 +19,12 @@ export interface ArtifactDraftPreviewProps {
 
 function draftTitle(job: SourceArtifactJob): string {
   const payload = job.artifactDraft?.payload;
-  if (!payload || typeof payload !== 'object') return 'Validated draft';
+  if (!payload || typeof payload !== 'object') return 'Bản nháp đã kiểm tra';
   if ('activityTitle' in payload && typeof payload.activityTitle === 'string') return payload.activityTitle;
   if ('deckTitle' in payload && typeof payload.deckTitle === 'string') return payload.deckTitle;
   if ('title' in payload && typeof payload.title === 'string') return payload.title;
   if ('topic' in payload && typeof payload.topic === 'string') return payload.topic;
-  return 'Validated draft';
+  return 'Bản nháp đã kiểm tra';
 }
 
 export function ArtifactDraftPreview({
@@ -39,8 +39,8 @@ export function ArtifactDraftPreview({
   if (!isNavigable || !handoff?.navigable) {
     return (
       <div className="omni-artifact-preview omni-artifact-preview--not-ready" role="status">
-        <strong>Draft needs review</strong>
-        <p>{job?.artifactDraft?.validationErrors?.join(', ') || 'The server has not returned a navigable validated draft.'}</p>
+        <strong>Bản nháp cần được xem lại</strong>
+        <p>{job?.artifactDraft?.validationErrors?.join(', ') || 'Máy chủ chưa trả về bản nháp đã kiểm tra để mở.'}</p>
       </div>
     );
   }
@@ -49,11 +49,11 @@ export function ArtifactDraftPreview({
     <div className="omni-artifact-preview" data-artifact-job-id={job?.id}>
       <div className="omni-artifact-preview__status">
         <ShieldCheck aria-hidden="true" />
-        <span>Validated draft ready</span>
+        <span>Bản nháp đã sẵn sàng</span>
       </div>
-      <p className="omni-artifact-preview__destination">{destination ? DESTINATION_LABELS[destination] : 'Destination draft'}</p>
-      <h3>{job ? draftTitle(job) : 'Validated draft'}</h3>
-      <p className="omni-artifact-preview__note">The destination owner will persist this draft after you open it.</p>
+      <p className="omni-artifact-preview__destination">{destination ? DESTINATION_LABELS[destination] : 'Bản nháp đích'}</p>
+      <h3>{job ? draftTitle(job) : 'Bản nháp đã kiểm tra'}</h3>
+      <p className="omni-artifact-preview__note">Module đích sẽ lưu bản nháp sau thao tác mở của bạn.</p>
       <div className="omni-artifact-preview__actions">
         {onOpen ? (
           <button
@@ -64,7 +64,7 @@ export function ArtifactDraftPreview({
             onClick={onOpen}
           >
             <ArrowUpRight aria-hidden="true" />
-            Open artifact
+            Mở bản nháp
           </button>
         ) : null}
         {onCreateAnother ? (
@@ -76,11 +76,10 @@ export function ArtifactDraftPreview({
             onClick={onCreateAnother}
           >
             <RotateCcw aria-hidden="true" />
-            Create another output
+            Tạo bản nháp khác
           </button>
         ) : null}
       </div>
     </div>
   );
 }
-

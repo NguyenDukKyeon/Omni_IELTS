@@ -5,9 +5,20 @@ import {
   SourcesApiError,
   type ArtifactJobResponse,
 } from '../../lib/sources/sourcesApi';
-import { prepareDestinationHandoff, type DestinationHandoffResult } from '../../lib/sources/destinationHandoff';
+import {
+  createPendingArtifactHandoff,
+  prepareDestinationHandoff,
+  type DestinationHandoffResult,
+} from '../../lib/sources/destinationHandoff';
+import {
+  isValidSourceArtifactTargetBand,
+  SOURCE_ARTIFACT_TARGET_BAND_MAX,
+  SOURCE_ARTIFACT_TARGET_BAND_MIN,
+  SOURCE_ARTIFACT_TARGET_BAND_STEP,
+} from '../../lib/sources/targetBand';
 import type {
   DestinationType,
+  PendingArtifactHandoff,
   SourceArtifactJob,
   SourceRecord,
   SourceSpan,
@@ -34,7 +45,7 @@ export interface ArtifactStudioModalProps {
   version?: SourceVersion;
   selectedSpan?: SourceSpan;
   onClose: () => void;
-  onOpenArtifact?: (handoff: DestinationHandoffResult) => void;
+  onOpenArtifact?: (handoff: PendingArtifactHandoff) => boolean | void;
   onCreateAnother?: () => void;
   initialState?: ArtifactStudioPresentationState;
   createJob?: typeof createArtifactJobRequest;
@@ -52,13 +63,13 @@ function stateForError(error: unknown): ArtifactStudioPresentationState {
 
 function stateMessage(state: ArtifactStudioPresentationState): string {
   switch (state) {
-    case 'loading': return 'The server is processing one source version for one destination.';
-    case 'empty': return 'Select one destination and use a ready source version to begin.';
-    case 'stale': return 'This job state may be out of date. Refresh before opening a draft.';
-    case 'degraded': return 'A lightweight validation path is active; no destination row is written here.';
-    case 'unavailable': return 'Artifact generation is unavailable or this source cannot be extracted in P03.';
-    case 'retryable_error': return 'The artifact job did not finish. Retry the same bounded request.';
-    case 'rejected': return 'The request or draft was rejected. No destination artifact was persisted.';
+    case 'loading': return 'Máy chủ đang xử lý một phiên bản nguồn cho một đích tiếp nhận.';
+    case 'empty': return 'Chọn một đích và dùng phiên bản nguồn sẵn sàng để bắt đầu.';
+    case 'stale': return 'Trạng thái yêu cầu có thể đã cũ. Làm mới trước khi mở bản nháp.';
+    case 'degraded': return 'Đang dùng bước kiểm tra rút gọn; Sources không lưu dữ liệu module đích.';
+    case 'unavailable': return 'Không thể tạo bản nháp hoặc nguồn này chưa thể trích xuất trong P03.';
+    case 'retryable_error': return 'Yêu cầu tạo bản nháp chưa hoàn tất. Hãy thử lại trong phạm vi hiện tại.';
+    case 'rejected': return 'Yêu cầu hoặc bản nháp bị từ chối. Không có dữ liệu đích nào được lưu.';
     default: return '';
   }
 }
@@ -97,6 +108,7 @@ export function ArtifactStudioModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const destinationGroupRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const handoffNavigationRef = useRef(false);
   const [destination, setDestination] = useState<DestinationType>();
   const [targetBand, setTargetBand] = useState(7);
   const [customInstruction, setCustomInstruction] = useState('');
@@ -108,11 +120,12 @@ export function ArtifactStudioModal({
 
   useEffect(() => {
     if (!isOpen) return undefined;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+     handoffNavigationRef.current = false;
     const focusFrame = window.requestAnimationFrame(() => destinationGroupRef.current?.focus());
     const restoreFocus = () => {
       window.cancelAnimationFrame(focusFrame);
-      if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus();
+       if (!handoffNavigationRef.current && previousFocusRef.current?.isConnected) previousFocusRef.current.focus();
     };
     return restoreFocus;
   }, [isOpen]);
@@ -163,8 +176,9 @@ export function ArtifactStudioModal({
     const nextState = jobStateToPresentation(completedJob);
     if (nextState === 'ready') {
       const nextHandoff = prepareDestinationHandoff(completedJob);
+      const pendingHandoff = version ? createPendingArtifactHandoff(completedJob, version) : null;
       setHandoff(nextHandoff);
-      setState(nextHandoff.navigable ? 'ready' : 'rejected');
+      setState(nextHandoff.navigable && pendingHandoff ? 'ready' : 'rejected');
       return;
     }
     setHandoff(undefined);
@@ -207,15 +221,22 @@ export function ArtifactStudioModal({
     onCreateAnother?.();
   };
 
+  const openValidatedArtifact = () => {
+    if (!onOpenArtifact || !job || !version || !handoff?.navigable) return;
+    const pending = createPendingArtifactHandoff(job, version);
+    if (!pending) return;
+    handoffNavigationRef.current = true;
+    const accepted = onOpenArtifact(pending);
+    if (accepted === false) handoffNavigationRef.current = false;
+  };
+
   if (!isOpen) return null;
 
   const showingPreview = state === 'ready' && Boolean(handoff?.navigable);
   const canGenerate = Boolean(
     destination
     && usableSource
-    && Number.isFinite(targetBand)
-    && targetBand >= 0
-    && targetBand <= 9
+     && isValidSourceArtifactTargetBand(targetBand)
     && state !== 'loading',
   );
 
@@ -232,14 +253,14 @@ export function ArtifactStudioModal({
       >
         <header className="omni-artifact-studio__header">
           <div>
-            <p className="omni-artifact-studio__label">Artifact Studio</p>
-            <h2 id="artifact-studio-title">Create one output from this source</h2>
-            <p>{source?.title || 'No source selected'}</p>
+             <p className="omni-artifact-studio__label">Xưởng tạo bản nháp</p>
+             <h2 id="artifact-studio-title">Tạo một bản nháp từ nguồn này</h2>
+             <p>{source?.title || 'Chưa chọn nguồn'}</p>
           </div>
           <button
             type="button"
             className="omni-artifact-studio__close"
-            aria-label="Close Artifact Studio"
+             aria-label="Đóng xưởng tạo bản nháp"
             data-ux-control="sources.artifact.close"
             data-ux-flow="sources.artifact.open-modal"
             onClick={onClose}
@@ -252,7 +273,7 @@ export function ArtifactStudioModal({
           <ArtifactDraftPreview
             job={job}
             handoff={handoff}
-            onOpen={() => { if (handoff.navigable) onOpenArtifact?.(handoff); }}
+            onOpen={onOpenArtifact ? openValidatedArtifact : undefined}
             onCreateAnother={createAnother}
           />
         ) : (
@@ -261,8 +282,8 @@ export function ArtifactStudioModal({
               <div className="omni-artifact-studio__progress" role="status" aria-live="polite">
                 <LoaderCircle aria-hidden="true" />
                 <div>
-                  <strong>Processing source job</strong>
-                  <p>Analyzing the selected blocks, then validating the one requested destination.</p>
+                   <strong>Đang xử lý yêu cầu nguồn</strong>
+                   <p>Đang phân tích các khối đã chọn rồi kiểm tra đích tiếp nhận đã yêu cầu.</p>
                 </div>
               </div>
             ) : null}
@@ -271,24 +292,24 @@ export function ArtifactStudioModal({
               <div className={`omni-artifact-studio__state omni-artifact-studio__state--${state}`} role={state === 'retryable_error' ? 'alert' : 'status'}>
                 {state === 'rejected' ? <AlertCircle aria-hidden="true" /> : state === 'stale' ? <Clock3 aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
                 <div>
-                  <strong>{state === 'degraded' ? 'Reduced validation' : state === 'unavailable' ? 'Generation unavailable' : state === 'retryable_error' ? 'Retryable job error' : state === 'stale' ? 'Stale job state' : 'No ready draft'}</strong>
+                   <strong>{state === 'degraded' ? 'Kiểm tra rút gọn' : state === 'unavailable' ? 'Không thể tạo bản nháp' : state === 'retryable_error' ? 'Yêu cầu có thể thử lại' : state === 'stale' ? 'Trạng thái đã cũ' : 'Chưa có bản nháp sẵn sàng'}</strong>
                   <p>{job?.error?.messageVi || (job?.artifactDraft?.validationErrors?.join(', ') || stateMessage(state))}</p>
                 </div>
                 {state === 'retryable_error' && lastRequest ? (
                   <button type="button" data-ux-control="sources.artifact.retry" data-ux-flow="sources.artifact.generate" onClick={retry}>
                     <RefreshCw aria-hidden="true" />
-                    Retry
+                     Thử lại
                   </button>
                 ) : null}
               </div>
             ) : null}
 
             <div className="omni-artifact-studio__source-state" role="status">
-              {usableSource ? 'Ready source version selected' : 'A ready source version and usable blocks are required'}
+               {usableSource ? 'Đã chọn phiên bản nguồn sẵn sàng' : 'Cần phiên bản nguồn sẵn sàng và các khối có thể sử dụng'}
             </div>
 
             <div className="omni-artifact-studio__field">
-              <h3>Choose one destination</h3>
+               <h3>Chọn một đích tiếp nhận</h3>
               <DestinationPicker
                 selected={destination}
                 onSelect={setDestination}
@@ -299,12 +320,12 @@ export function ArtifactStudioModal({
 
             <div className="omni-artifact-studio__options">
               <label>
-                <span>Target band</span>
+                 <span>Band mục tiêu</span>
                 <input
                   type="number"
-                  min={0}
-                  max={9}
-                  step={0.5}
+                   min={SOURCE_ARTIFACT_TARGET_BAND_MIN}
+                   max={SOURCE_ARTIFACT_TARGET_BAND_MAX}
+                   step={SOURCE_ARTIFACT_TARGET_BAND_STEP}
                   value={targetBand}
                   data-ux-control="sources.artifact.target-band"
                   data-ux-flow="sources.artifact.generate"
@@ -312,11 +333,11 @@ export function ArtifactStudioModal({
                 />
               </label>
               <label>
-                <span>Custom instruction (optional)</span>
+                 <span>Hướng dẫn thêm (không bắt buộc)</span>
                 <textarea
                   value={customInstruction}
                   maxLength={2_000}
-                  placeholder="Keep the output concise…"
+                   placeholder="Ví dụ: giữ bản nháp ngắn gọn…"
                   data-ux-control="sources.artifact.custom-instruction"
                   data-ux-flow="sources.artifact.generate"
                   onChange={(event) => setCustomInstruction(event.target.value)}
@@ -325,7 +346,7 @@ export function ArtifactStudioModal({
             </div>
 
             <div className="omni-artifact-studio__footer">
-              <p>{state === 'empty' ? stateMessage('empty') : 'This action creates a draft only. The destination owner persists it after you open it.'}</p>
+               <p>{state === 'empty' ? stateMessage('empty') : 'Thao tác này chỉ tạo bản nháp. Module đích sẽ lưu sau khi bạn chủ động mở.'}</p>
               <button
                 type="submit"
                 className="omni-artifact-studio__generate"
@@ -333,7 +354,7 @@ export function ArtifactStudioModal({
                 data-ux-control="sources.artifact.generate"
                 data-ux-flow="sources.artifact.generate"
               >
-                Generate one draft
+                 Tạo một bản nháp
               </button>
             </div>
           </form>
