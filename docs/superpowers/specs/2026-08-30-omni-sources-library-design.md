@@ -293,13 +293,13 @@ Current Source rows live in browser IndexedDB / client-Supabase storage. `server
 7. Supabase or the cloud source store unavailable: typed `unavailable`. No fake context and no provider call.
 8. Do not log or persist raw `SourceVersion` plain text, bearer tokens, or API keys.
 
-`POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It also requires authenticated cloud access. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
+`POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It also requires authenticated cloud access: the handler verifies the learner Supabase access token server-side with Supabase Auth using the project URL and **anon key only** (never a service-role key) before any Brave/search, repository, AI, or quota call. Missing, malformed, expired, invalid, or unverifiable JWTs return typed `auth_required` (HTTP 401). Supabase transport or configuration failure returns typed `unavailable` (HTTP 503). A syntactically valid Bearer string is not sufficient. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
 
 
 ### 4.2 Selection & Context Formation
 
 - **Explicit Selection Rule**: Learners may select 1 to N sources via checkboxes in the Library Explorer or Collection view. The chat input displays an active token chip: `Context: 2 sources (4,250 words)` or `Context: Selected span (180 words)`.
-- **Token Budget & Truncation**: When total selected context exceeds the prompt budget (32k tokens), the system prompts the learner to select a sub-collection or specific blocks, preventing silent arbitrary middle-truncation.
+- **Token Budget & Truncation**: When total selected context exceeds the prompt budget (32k tokens), the system prompts the learner to select a sub-collection or specific blocks, preventing silent arbitrary middle-truncation. The runtime uses a documented conservative estimate: Unicode code-point count ÷ 3, plus 256 tokens of instruction overhead. If that estimate exceeds 32,000, grounded chat returns typed `select_smaller_source` and does not call the model. An explicit `sourceSpan` is validated against hydrated selected pairs (`sourceId` + `sourceVersionId` + every supplied `blockId` on that exact version). Unknown or mismatched spans yield `unsupported_by_sources` with no model call and never fall back to full `plainText`.
 - **Single Source Chat vs Multi-Source Chat**: In Source Detail, single-source chat is pre-scoped to `currentVersionId`. In Library Explorer, multi-source chat activates only when at least one source is checked.
 - Unselected versions are never added to the model context.
 
@@ -431,6 +431,7 @@ export interface ValidatedMockDraft {
   blueprintId?: string;
   targetBand: number;
   packagePayload: Record<string, unknown>;
+  sourceSpanRef: SourceSpan;
   provenance: SourceProvenance;
 }
 
@@ -456,6 +457,7 @@ export interface ValidatedNoteDraft {
   summaryVi: string;
   keyTakeaways: string[];
   annotatedCitations: Array<{ claim: string; blockId: string }>;
+  sourceSpanRef: SourceSpan;
   provenance: SourceProvenance;
 }
 
