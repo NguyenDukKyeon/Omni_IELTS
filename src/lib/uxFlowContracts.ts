@@ -65,6 +65,36 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     errorStates: ['invalid_source', 'import_failed'], evidence: ['e2e/sources.spec.ts'],
   },
   {
+    id: 'sources.library.filter', module: 'sources', owner: 'SourcesLibraryExplorer',
+    precondition: 'The Sources Library is visible', trigger: 'Learner searches, filters, sorts, or selects a collection',
+    expectedTransition: 'library list -> matching library list', sideEffect: 'Update local library presentation state',
+    errorStates: ['library_unavailable'], evidence: ['src/lib/__tests__/sourcesUxContracts.test.ts'],
+  },
+  {
+    id: 'sources.import.submit', module: 'sources', owner: 'SourcesLibraryExplorer',
+    precondition: 'The Sources import action is visible', trigger: 'Learner opens or submits a supported source import',
+    expectedTransition: 'import form -> queued -> processing -> ready|typed_failure', sideEffect: 'Persist a learner-owned SourceRecord and immutable SourceVersion when valid',
+    errorStates: ['auth_required', 'invalid_input', 'extraction_failed', 'handoff_required'], evidence: ['src/lib/__tests__/sourcesUxContracts.test.ts'],
+  },
+  {
+    id: 'sources.selection.toggle', module: 'sources', owner: 'SourcesLibraryExplorer',
+    precondition: 'A source card is visible', trigger: 'Learner selects or deselects a source',
+    expectedTransition: 'unselected <-> selected', sideEffect: 'Update selected source versions for grounded work',
+    errorStates: [], evidence: ['src/lib/__tests__/sourcesUxContracts.test.ts'],
+  },
+  {
+    id: 'sources.collection.create', module: 'sources', owner: 'CollectionDrawer',
+    precondition: 'The collection drawer is visible', trigger: 'Learner creates a named collection',
+    expectedTransition: 'collection form -> persisted collection|validation error', sideEffect: 'Persist one learner-owned SourceCollection',
+    errorStates: ['invalid_input', 'storage_unavailable'], evidence: ['src/lib/__tests__/sourcesUxContracts.test.ts'],
+  },
+  {
+    id: 'sources.artifact.open-modal', module: 'sources', owner: 'SourceCard',
+    precondition: 'A ready source card is visible', trigger: 'Learner chooses to create one output from a source',
+    expectedTransition: 'source card -> Artifact Studio open', sideEffect: 'Keep source selection in Sources; create no destination row',
+    errorStates: ['source_unavailable'], evidence: ['src/lib/__tests__/sourcesUxContracts.test.ts'],
+  },
+  {
     id: 'vocabulary.srs', module: 'vocabulary', owner: 'VocabularySRSView',
     precondition: 'Vocabulary module is visible', trigger: 'Learner manages or reviews a vocabulary card',
     expectedTransition: 'due -> answered -> rescheduled|mastered', sideEffect: 'Persist review outcome',
@@ -189,6 +219,7 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
 ];
 
 const SHELL_E2E_EVIDENCE = ['e2e/app-shell-redesign.spec.ts'];
+const SOURCES_CONTRACT_EVIDENCE = ['src/lib/__tests__/sourcesUxContracts.test.ts'];
 
 function shellControl(
   id: string,
@@ -213,6 +244,32 @@ function shellControl(
     failureCategories,
     recoveryActions,
     evidence: SHELL_E2E_EVIDENCE,
+  };
+}
+
+function sourcesControl(
+  id: string,
+  flowId: string,
+  owner: string,
+  action: string,
+  beforeState: string,
+  afterState: string,
+  sideEffects: string[] = ['Update Sources presentation state'],
+  failureCategories: string[] = ['unavailable'],
+  recoveryActions: string[] = ['Retry the action or choose another source'],
+): UxControlContract {
+  return {
+    id,
+    flowId,
+    owner,
+    preconditions: ['The Sources Library surface is visible'],
+    action,
+    beforeState,
+    afterState,
+    sideEffects,
+    failureCategories,
+    recoveryActions,
+    evidence: SOURCES_CONTRACT_EVIDENCE,
   };
 }
 
@@ -296,6 +353,25 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   shellControl('shell.mobile.theme-light', 'app.navigation', 'MobileModuleSheet', 'Choose light theme from More', 'More sheet open', 'light theme active', ['Persist theme preference']),
   shellControl('shell.mobile.theme-dark', 'app.navigation', 'MobileModuleSheet', 'Choose dark theme from More', 'More sheet open', 'dark theme active', ['Persist theme preference']),
   shellControl('shell.mobile.theme-high-contrast', 'app.navigation', 'MobileModuleSheet', 'Choose high contrast theme from More', 'More sheet open', 'high contrast theme active', ['Persist theme preference']),
+
+  sourcesControl('sources.library.search-input', 'sources.library.filter', 'SourcesFilterBar', 'Search source titles, summaries, and tags', 'library visible', 'filtered library visible'),
+  sourcesControl('sources.library.filter-format', 'sources.library.filter', 'SourcesFilterBar', 'Filter by source format', 'library visible', 'format-filtered library visible'),
+  sourcesControl('sources.library.filter-rights', 'sources.library.filter', 'SourcesFilterBar', 'Filter by rights state', 'library visible', 'rights-filtered library visible'),
+  sourcesControl('sources.library.filter-sort', 'sources.library.filter', 'SourcesFilterBar', 'Sort the source list', 'library visible', 'sorted library visible'),
+  sourcesControl('sources.library.filter-collection', 'sources.library.filter', 'SourcesFilterBar', 'Filter by collection', 'library visible', 'collection-filtered library visible'),
+  sourcesControl('sources.library.select-toggle', 'sources.selection.toggle', 'SourceCard', 'Select or deselect a source version for context', 'source unselected or selected', 'source selected or deselected'),
+  sourcesControl('sources.library.open-source', 'sources.selection.toggle', 'SourceCard', 'Open the selected source reader', 'ready source card visible', 'source reader scoped to the current version'),
+  sourcesControl('sources.library.retry', 'sources.manage', 'SourcesLibraryExplorer', 'Retry loading the Sources Library', 'retryable library error visible', 'library loading'),
+  sourcesControl('sources.import.open', 'sources.import.submit', 'SourcesLibraryExplorer', 'Open the real source import action', 'library visible', 'import form visible'),
+  sourcesControl('sources.import.empty-cta', 'sources.import.submit', 'SourcesLibraryExplorer', 'Open the real source import action from the empty state', 'empty library visible', 'import form visible'),
+  sourcesControl('sources.artifact.open-modal', 'sources.artifact.open-modal', 'SourceCard', 'Open Artifact Studio for this source version', 'ready source card visible', 'artifact studio open'),
+  sourcesControl('sources.collection.create-button', 'sources.collection.create', 'CollectionDrawer', 'Open the collection form', 'collection drawer visible', 'collection form visible'),
+  sourcesControl('sources.collection.form', 'sources.collection.create', 'CollectionDrawer', 'Submit a collection name', 'collection form visible', 'collection persisted or validation error'),
+  sourcesControl('sources.collection.name-input', 'sources.collection.create', 'CollectionDrawer', 'Name a new collection', 'collection form visible', 'collection name edited'),
+  sourcesControl('sources.collection.save-button', 'sources.collection.create', 'CollectionDrawer', 'Save the new collection', 'valid collection name entered', 'collection persisted and listed'),
+  sourcesControl('sources.collection.cancel-button', 'sources.collection.create', 'CollectionDrawer', 'Cancel collection creation', 'collection form visible', 'collection form closed'),
+  sourcesControl('sources.collection.all', 'sources.library.filter', 'CollectionDrawer', 'Show all sources', 'a collection filter is active', 'all source records visible'),
+  sourcesControl('sources.collection.select', 'sources.library.filter', 'CollectionDrawer', 'Filter by a collection', 'collection drawer visible', 'selected collection sources visible'),
 ];
 
 export function validateUxFlowContracts(contracts: UxFlowContract[]) {

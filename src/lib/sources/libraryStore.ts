@@ -1,9 +1,17 @@
-import type { SourceMediaType, SourceProcessingState, SourceRecord } from '../../types/sources';
+import type {
+  ContentRightsState,
+  SourceMediaType,
+  SourceProcessingState,
+  SourceRecord,
+} from '../../types/sources';
+
+export type SourceLibrarySort = 'recently_updated' | 'title_asc' | 'type';
 
 export interface SourceLibraryFilters {
   mediaType?: SourceMediaType;
   collectionId?: string;
   processingState?: SourceProcessingState;
+  rightsState?: ContentRightsState;
 }
 
 function matchesFilters(source: SourceRecord, filters: SourceLibraryFilters): boolean {
@@ -14,6 +22,9 @@ function matchesFilters(source: SourceRecord, filters: SourceLibraryFilters): bo
     return false;
   }
   if (filters.processingState !== undefined && source.processingState !== filters.processingState) {
+    return false;
+  }
+  if (filters.rightsState !== undefined && source.provenance.rightsState !== filters.rightsState) {
     return false;
   }
   return true;
@@ -46,6 +57,21 @@ export function searchSources(
     return sources.filter(() => true);
   }
   return sources.filter((source) => searchableText(source).includes(needle));
+}
+
+export function sortSources(
+  sources: readonly SourceRecord[],
+  sort: SourceLibrarySort = 'recently_updated',
+): SourceRecord[] {
+  return [...sources].sort((left, right) => {
+    if (sort === 'title_asc') return left.title.localeCompare(right.title);
+    if (sort === 'type') {
+      const typeOrder = left.type.localeCompare(right.type);
+      return typeOrder || left.title.localeCompare(right.title);
+    }
+    const updatedOrder = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+    return Number.isNaN(updatedOrder) ? 0 : updatedOrder;
+  });
 }
 
 export function addSourceToCollection(
