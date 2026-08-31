@@ -52,6 +52,14 @@ import { ForecastServerCache } from "./src/lib/forecastServerCache";
 import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
 import {
+  handleGroundedChatRequest,
+  handleWebResearchRequest,
+} from "./src/lib/sources/groundedChat";
+import {
+  createLearnerJwtSourcesRepository,
+  resolveSourcesSupabaseConfig,
+} from "./src/lib/sources/sourcesRepository.server";
+import {
   BifrostGatewayClient,
   WebBridgeGatewayClient,
   buildGeminiGatewayRequestBody,
@@ -8488,6 +8496,72 @@ Prioritize official IELTS preparation pages, dated recall reports, and pages tha
 app.post('/api/forecast/refresh', handleForecastRefresh);
 app.post('/api/gemini/forecast-grounding', handleForecastRefresh);
 app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/speaking-live-audio-evaluation'));
+
+function sourcesCloudConfig() {
+  return resolveSourcesSupabaseConfig(process.env);
+}
+
+app.post('/api/sources/grounded-chat', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleGroundedChatRequest({
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    routerExecute: async ({ prompt, question, profile, tools }) => {
+      if (profile.tier !== 'balanced' || profile.capability !== 'text' || tools.length > 0) {
+        throw new Error('Grounded chat must use the balanced text profile without tools.');
+      }
+      return groundedProviderRouter.execute({
+        primary: {
+          provider: 'gemini',
+          model: AI_TASK_PROFILES.balanced.model,
+          run: async () => {
+            const ai = getGeminiClient(req);
+            const generated = await callOfficialProvidersResiliently(ai, {
+              contents: `${prompt}\n\nQuestion: ${question}\nReturn JSON only.`,
+              taskTier: 'balanced',
+              config: { responseMimeType: 'application/json' },
+            });
+            if (!generated.text) {
+              throw generated.error || new Error('empty grounded chat response');
+            }
+            return JSON.parse(generated.text);
+          },
+        },
+      });
+    },
+  });
+  return res.status(result.status).json(result.body);
+});
+
+app.post('/api/sources/web-research', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const braveKey = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
+  const result = await handleWebResearchRequest({
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    searchAdapterConfigured: Boolean(braveKey),
+    webSearch: braveKey
+      ? async ({ question }) => {
+          const evidence = await requestBraveForecastEvidence({ apiKey: braveKey, query: question });
+          return {
+            webCitations: (evidence.sources || []).map((source) => ({
+              title: source.title,
+              url: source.url,
+              snippet: source.snippet,
+            })),
+          };
+        }
+      : undefined,
+  });
+  return res.status(result.status).json(result.body);
+});
 
 const ConsentActionSchema = z.enum(['direct', 'search_more', 'practice_available', 'ai_fill_missing', 'create_ai_variant']);
 
