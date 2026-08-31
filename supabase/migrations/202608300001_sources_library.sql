@@ -160,18 +160,28 @@ CREATE POLICY "source_artifact_jobs_owner_delete" ON public.source_artifact_jobs
     )
   );
 
--- Append-only versions: block direct UPDATE/DELETE. Parent delete sets omni.sources_cascade
--- so the ON DELETE CASCADE path is permitted.
+-- Append-only versions: block direct UPDATE/DELETE. Parent delete sets active source ID
+-- for the individual row cascade, which is cleared in AFTER DELETE so transaction-local
+-- flags cannot leak across subsequent statements.
 CREATE OR REPLACE FUNCTION public.prevent_source_version_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  IF TG_OP = 'DELETE' AND current_setting('omni.sources_cascade', true) = 'on' THEN
-    RETURN OLD;
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'source_versions are append-only; update forbidden'
+      USING ERRCODE = '42501';
   END IF;
-  RAISE EXCEPTION 'source_versions are append-only'
-    USING ERRCODE = '42501';
+
+  IF TG_OP = 'DELETE' THEN
+    IF current_setting('omni.active_deleting_source_id', true) = OLD.source_id::text THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'source_versions are append-only; direct delete forbidden'
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
 END;
 $$;
 
@@ -186,7 +196,17 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  PERFORM set_config('omni.sources_cascade', 'on', true);
+  PERFORM set_config('omni.active_deleting_source_id', OLD.id::text, true);
+  RETURN OLD;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.clear_source_record_cascade_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  PERFORM set_config('omni.active_deleting_source_id', '', true);
   RETURN OLD;
 END;
 $$;
@@ -196,3 +216,9 @@ CREATE TRIGGER source_records_before_delete
   BEFORE DELETE ON public.source_records
   FOR EACH ROW
   EXECUTE FUNCTION public.mark_source_record_cascade_delete();
+
+DROP TRIGGER IF EXISTS source_records_after_delete ON public.source_records;
+CREATE TRIGGER source_records_after_delete
+  AFTER DELETE ON public.source_records
+  FOR EACH ROW
+  EXECUTE FUNCTION public.clear_source_record_cascade_delete();

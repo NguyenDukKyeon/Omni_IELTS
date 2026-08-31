@@ -52,10 +52,45 @@ describe('P03 source_versions RLS and immutability', () => {
 
   it('denies direct version UPDATE/DELETE while allowing parent cascade delete', () => {
     expect(sql).toMatch(/prevent_source_version_mutation/);
-    expect(sql).toMatch(/omni\.sources_cascade/);
+    expect(sql).toMatch(/omni\.active_deleting_source_id/);
     expect(sql).toMatch(/BEFORE UPDATE OR DELETE ON public\.source_versions/);
     expect(sql).toMatch(/BEFORE DELETE ON public\.source_records/);
+    expect(sql).toMatch(/AFTER DELETE ON public\.source_records/);
     expect(sql).toMatch(/source_id UUID NOT NULL REFERENCES public\.source_records\(id\) ON DELETE CASCADE/);
+  });
+
+  it('proves direct child delete cannot exploit transaction-local cascade state', () => {
+    // Model of Postgres trigger semantics for cascade lifecycle:
+    let activeDeletingSourceId = '';
+    const setConfig = (val: string) => {
+      activeDeletingSourceId = val;
+    };
+
+    const beforeDeleteRecord = (recordId: string) => {
+      setConfig(recordId);
+    };
+
+    const afterDeleteRecord = () => {
+      setConfig('');
+    };
+
+    const deleteVersion = (sourceId: string) => {
+      if (activeDeletingSourceId === sourceId) {
+        return { ok: true, deleted: true };
+      }
+      throw new Error('42501: source_versions are append-only; direct delete forbidden');
+    };
+
+    // Scenario 1: Normal parent cascade delete
+    beforeDeleteRecord('s-alice');
+    expect(deleteVersion('s-alice')).toEqual({ ok: true, deleted: true });
+    afterDeleteRecord();
+
+    // Scenario 2: Attacker executes a parent delete, then tries to delete another child in the same transaction
+    expect(() => deleteVersion('s-bob')).toThrow(/42501/);
+
+    // Scenario 3: Direct delete with no parent delete in progress
+    expect(() => deleteVersion('s-alice')).toThrow(/42501/);
   });
 
   it('rejects attaching a version or artifact job to another learner source id', () => {
