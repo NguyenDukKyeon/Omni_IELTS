@@ -2,17 +2,18 @@ import { FileUp, LoaderCircle, Send, X } from 'lucide-react';
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { importSource, SourcesApiError, type SourceImportResponse } from '../../lib/sources/sourcesApi';
 import type { SourceImportRequest } from '../../lib/sources/importTransport.server';
+import { SOURCE_IMPORT_MAX_BINARY_BYTES } from '../../lib/sources/importLimits';
 
 type ImportSourceType = 'text' | 'url' | 'pdf' | 'docx' | 'vtt_srt' | 'youtube';
 type ImportPanelState = 'idle' | 'loading' | 'ready' | 'handoff_required' | 'retry_wait' | 'failed' | 'auth_required' | 'unavailable';
 
 const TYPE_OPTIONS: Array<{ value: ImportSourceType; label: string }> = [
-  { value: 'text', label: 'Text / Markdown' },
-  { value: 'url', label: 'Article URL' },
+  { value: 'text', label: 'Văn bản / Markdown' },
+  { value: 'url', label: 'URL bài viết' },
   { value: 'pdf', label: 'PDF' },
   { value: 'docx', label: 'DOCX' },
   { value: 'vtt_srt', label: 'VTT / SRT' },
-  { value: 'youtube', label: 'YouTube handoff' },
+  { value: 'youtube', label: 'Tham chiếu YouTube' },
 ];
 
 const CONTENT_CONTROLS: Record<ImportSourceType, string> = {
@@ -47,12 +48,12 @@ function stateForError(error: unknown): ImportPanelState {
 
 function stateMessage(state: ImportPanelState): string {
   switch (state) {
-    case 'ready': return 'Source saved with one immutable version.';
-    case 'handoff_required': return 'Reference saved. The owning module handles playback or chart rendering.';
-    case 'auth_required': return 'Sign in before sending a source to cloud storage.';
-    case 'unavailable': return 'The source service is unavailable. No ready source was created.';
-    case 'retry_wait': return 'The request can be retried without choosing the file again.';
-    case 'failed': return 'The source was not saved as ready content. Check the input and try again.';
+    case 'ready': return 'Nguồn đã được lưu cùng một phiên bản bất biến.';
+    case 'handoff_required': return 'Đã lưu tham chiếu. Module sở hữu sẽ phụ trách phát hoặc hiển thị biểu đồ.';
+    case 'auth_required': return 'Đăng nhập trước khi gửi nguồn lên bộ nhớ đám mây.';
+    case 'unavailable': return 'Dịch vụ nguồn hiện không khả dụng. Chưa tạo nguồn sẵn sàng.';
+    case 'retry_wait': return 'Bạn có thể thử lại mà không cần chọn lại tệp.';
+    case 'failed': return 'Nguồn chưa được lưu dưới dạng nội dung sẵn sàng. Kiểm tra đầu vào rồi thử lại.';
     default: return '';
   }
 }
@@ -114,8 +115,8 @@ export function SourceImportPanel({
     } catch (error) {
       setState('failed');
       setErrorMessage(error instanceof Error && error.message === 'file_required'
-        ? 'Choose a PDF or DOCX file before sending.'
-        : 'Enter a title and bounded source content before sending.');
+        ? 'Chọn tệp PDF hoặc DOCX trước khi gửi.'
+        : 'Nhập tên nguồn và nội dung trong giới hạn trước khi gửi.');
     }
   };
 
@@ -124,7 +125,17 @@ export function SourceImportPanel({
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setFile(event.target.files?.[0]);
+    const nextFile = event.target.files?.[0];
+    if (nextFile && nextFile.size > SOURCE_IMPORT_MAX_BINARY_BYTES) {
+      event.target.value = '';
+      setFile(undefined);
+      setState('failed');
+      setErrorMessage('Tệp vượt quá giới hạn 8 MB. Hãy chọn tệp nhỏ hơn.');
+      return;
+    }
+    setFile(nextFile);
+    setState('idle');
+    setErrorMessage(undefined);
   };
 
   const isBinary = type === 'pdf' || type === 'docx';
@@ -133,14 +144,14 @@ export function SourceImportPanel({
     <section className="omni-source-import" aria-labelledby="source-import-title">
       <header className="omni-source-import__header">
         <div>
-          <p className="omni-source-import__label">Private source import</p>
-          <h2 id="source-import-title">Add one source</h2>
-          <p>Text is bounded here. PDF and DOCX are checked on the server before extraction.</p>
+          <p className="omni-source-import__label">Thêm nguồn riêng</p>
+          <h2 id="source-import-title">Thêm một nguồn</h2>
+          <p>Văn bản có giới hạn. PDF và DOCX sẽ được máy chủ kiểm tra trước khi trích xuất.</p>
         </div>
         <button
           type="button"
           className="omni-source-import__close"
-          aria-label="Close source import"
+          aria-label="Đóng bước thêm nguồn"
           data-ux-control="sources.import.close"
           data-ux-flow="sources.import.submit"
           onClick={onClose}
@@ -151,7 +162,7 @@ export function SourceImportPanel({
 
       <form className="omni-source-import__form" onSubmit={submit} data-ux-control="sources.import.form" data-ux-flow="sources.import.submit">
         <label>
-          <span>Title</span>
+          <span>Tên nguồn</span>
           <input
             type="text"
             value={title}
@@ -163,7 +174,7 @@ export function SourceImportPanel({
           />
         </label>
         <label>
-          <span>Source type</span>
+          <span>Loại nguồn</span>
           <select
             value={type}
             data-ux-control="sources.import.type"
@@ -176,7 +187,7 @@ export function SourceImportPanel({
 
         {isBinary ? (
           <label className="omni-source-import__file">
-            <span>{type === 'pdf' ? 'PDF file' : 'DOCX file'}</span>
+            <span>{type === 'pdf' ? 'Tệp PDF' : 'Tệp DOCX'}</span>
             <input
               type="file"
               accept={type === 'pdf' ? 'application/pdf,.pdf' : '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
@@ -184,16 +195,16 @@ export function SourceImportPanel({
               data-ux-flow="sources.import.submit"
               onChange={onFileChange}
             />
-            <span className="omni-source-import__file-name">{file?.name || 'No file selected'}</span>
+            <span className="omni-source-import__file-name">{file?.name || 'Chưa chọn tệp'}</span>
           </label>
         ) : (
           <label>
-            <span>{type === 'youtube' ? 'YouTube URL' : type === 'url' ? 'Article URL' : 'Bounded content'}</span>
+             <span>{type === 'youtube' ? 'URL YouTube' : type === 'url' ? 'URL bài viết' : 'Nội dung có giới hạn'}</span>
             <textarea
               value={content}
               maxLength={1_000_000}
               required
-              placeholder={type === 'youtube' ? 'https://www.youtube.com/watch?v=…' : 'Paste the source content here…'}
+              placeholder={type === 'youtube' ? 'https://www.youtube.com/watch?v=…' : 'Dán nội dung nguồn tại đây…'}
               data-ux-control={CONTENT_CONTROLS[type]}
               data-ux-flow="sources.import.submit"
               onChange={(event) => setContent(event.target.value)}
@@ -206,12 +217,12 @@ export function SourceImportPanel({
             <p>{errorMessage || stateMessage(state)}</p>
             {(state === 'retry_wait' || state === 'unavailable') && lastRequest ? (
               <button type="button" data-ux-control="sources.import.retry" data-ux-flow="sources.import.submit" onClick={retry}>
-                Retry
+                Thử lại
               </button>
             ) : null}
           </div>
         ) : null}
-        {state === 'loading' ? <p className="omni-source-import__loading" role="status"><LoaderCircle aria-hidden="true" /> Sending source for validation…</p> : null}
+        {state === 'loading' ? <p className="omni-source-import__loading" role="status"><LoaderCircle aria-hidden="true" /> Đang gửi nguồn để kiểm tra…</p> : null}
 
         <button
           type="submit"
@@ -221,11 +232,10 @@ export function SourceImportPanel({
           data-ux-flow="sources.import.submit"
         >
           {state === 'loading' ? <LoaderCircle aria-hidden="true" /> : <Send aria-hidden="true" />}
-          Send source
+          Gửi nguồn
         </button>
       </form>
-      <p className="omni-source-import__footnote"><FileUp aria-hidden="true" /> Cloud import requires a verified learner session.</p>
+      <p className="omni-source-import__footnote"><FileUp aria-hidden="true" /> Thêm nguồn lên đám mây cần phiên đăng nhập đã xác thực.</p>
     </section>
   );
 }
-

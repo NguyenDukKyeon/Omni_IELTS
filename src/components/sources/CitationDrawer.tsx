@@ -24,13 +24,13 @@ export function CitationDrawer({
     <aside className="omni-citation-drawer" role="dialog" aria-modal="false" aria-labelledby="citation-drawer-title">
       <div className="omni-citation-drawer__header">
         <div>
-          <p className="omni-citation-drawer__label">Source citation</p>
+          <p className="omni-citation-drawer__label">Trích dẫn nguồn</p>
           <h3 id="citation-drawer-title">{citation.sourceTitle}</h3>
         </div>
         <button
           type="button"
           className="omni-citation-drawer__close"
-          aria-label="Close citation"
+          aria-label="Đóng trích dẫn"
           data-ux-control="sources.chat.citation-close"
           data-ux-flow="sources.chat.citation-open"
           onClick={onClose}
@@ -38,16 +38,15 @@ export function CitationDrawer({
           <X aria-hidden="true" />
         </button>
       </div>
-      <p className="omni-citation-drawer__block">Block {citation.blockId}</p>
+      <p className="omni-citation-drawer__block">Khối {citation.blockId}</p>
       {citation.exactSnippet ? (
         <blockquote>
           <Quote aria-hidden="true" />
           <span>{citation.exactSnippet}</span>
         </blockquote>
       ) : (
-        <p className="omni-citation-drawer__missing">The server cited this block without an excerpt.</p>
+        <p className="omni-citation-drawer__missing">Máy chủ trích dẫn khối này nhưng không trả về đoạn trích.</p>
       )}
     </aside>
   );
 }
-

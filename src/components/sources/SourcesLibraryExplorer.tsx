@@ -35,15 +35,17 @@ export interface SourcesLibraryExplorerProps {
   onCreateCollection: (name: string) => Promise<void> | void;
   onRetry?: () => void;
   onAddSource?: () => void;
+  isGuest?: boolean;
+  onSignIn?: () => void;
 }
 
 function stateTitle(state: SourcesLibraryExplorerState): string {
   switch (state) {
-    case 'stale': return 'Showing a cached library';
-    case 'degraded': return 'Reduced-data mode';
-    case 'unavailable': return 'Library unavailable';
-    case 'retryable_error': return 'The library needs a retry';
-    case 'rejected': return 'Some source inputs were rejected';
+    case 'stale': return 'Đang hiển thị thư viện đã lưu tạm';
+    case 'degraded': return 'Chế độ dữ liệu rút gọn';
+    case 'unavailable': return 'Thư viện tạm thời không khả dụng';
+    case 'retryable_error': return 'Cần thử lại yêu cầu thư viện';
+    case 'rejected': return 'Một số nguồn bị từ chối';
     default: return '';
   }
 }
@@ -51,18 +53,18 @@ function stateTitle(state: SourcesLibraryExplorerState): string {
 function stateMessage(state: SourcesLibraryExplorerState, errorMessage?: string): string {
   if (errorMessage) return errorMessage;
   switch (state) {
-    case 'stale': return 'This view may be out of date. Refresh when you are online.';
-    case 'degraded': return 'Text previews remain available; heavy media is not loaded in this view.';
-    case 'unavailable': return 'The server could not return your private Sources library.';
-    case 'retryable_error': return 'The last library request did not finish. Your existing source state is unchanged.';
-    case 'rejected': return 'An input was blocked by format or rights rules. No ready source was created.';
+    case 'stale': return 'Dữ liệu có thể đã cũ. Hãy làm mới khi có mạng.';
+    case 'degraded': return 'Bản xem trước văn bản vẫn có; nội dung media nặng không được tải ở đây.';
+    case 'unavailable': return 'Máy chủ chưa thể trả về thư viện nguồn riêng của bạn.';
+    case 'retryable_error': return 'Yêu cầu thư viện chưa hoàn tất. Trạng thái nguồn hiện tại vẫn được giữ.';
+    case 'rejected': return 'Nguồn bị chặn do định dạng hoặc quyền sử dụng. Chưa tạo nguồn sẵn sàng.';
     default: return '';
   }
 }
 
 function SkeletonCards() {
   return (
-    <div className="omni-sources-library__grid" aria-label="Loading source library">
+    <div className="omni-sources-library__grid" aria-label="Đang tải thư viện nguồn">
       {Array.from({ length: 6 }, (_, index) => (
         <div className="omni-source-card omni-source-card--skeleton" key={index} aria-hidden="true">
           <span />
@@ -75,13 +77,24 @@ function SkeletonCards() {
   );
 }
 
-function EmptyLibrary({ onAddSource }: { onAddSource?: () => void }) {
+function EmptyLibrary({ isGuest, onAddSource, onSignIn }: { isGuest?: boolean; onAddSource?: () => void; onSignIn?: () => void }) {
   return (
     <div className="omni-sources-library__empty" role="status">
       <Search aria-hidden="true" />
-      <h2>No sources yet</h2>
-      <p>Bring one bounded text, article URL, document, or caption file into your private library.</p>
-      {onAddSource ? (
+      <h2>{isGuest ? 'Thư viện nguồn riêng đang trống' : 'Chưa có nguồn'}</h2>
+      <p>{isGuest ? 'Đăng nhập để thêm nguồn học tập của bạn vào thư viện riêng.' : 'Thêm một đoạn văn, URL bài viết, tài liệu hoặc phụ đề trong giới hạn cho phép.'}</p>
+      {isGuest && onSignIn ? (
+        <button
+          type="button"
+          className="omni-sources-library__empty-action"
+          data-ux-control="sources.import.sign-in"
+          data-ux-flow="sources.import.submit"
+          onClick={onSignIn}
+        >
+          <Plus aria-hidden="true" />
+          Đăng nhập để thêm nguồn
+        </button>
+      ) : onAddSource ? (
         <button
           type="button"
           className="omni-sources-library__empty-action"
@@ -90,7 +103,7 @@ function EmptyLibrary({ onAddSource }: { onAddSource?: () => void }) {
           onClick={onAddSource}
         >
           <Plus aria-hidden="true" />
-          Add a source
+          Thêm nguồn
         </button>
       ) : null}
     </div>
@@ -110,6 +123,8 @@ export function SourcesLibraryExplorer({
   onCreateCollection,
   onRetry,
   onAddSource,
+  isGuest = false,
+  onSignIn,
 }: SourcesLibraryExplorerProps) {
   const [query, setQuery] = useState('');
   const [mediaType, setMediaType] = useState<SourceMediaType | 'all'>('all');
@@ -144,10 +159,10 @@ export function SourcesLibraryExplorer({
     <section className="omni-sources-library" data-ux-scope="sources-library-v2" aria-labelledby="sources-library-title">
       <header className="omni-sources-library__header">
         <div>
-          <h1 id="sources-library-title">Sources Library</h1>
-          <p>Choose the material you want to read, question, or turn into one owned draft.</p>
+          <h1 id="sources-library-title">Thư viện nguồn</h1>
+          <p>Chọn nội dung để đọc, đặt câu hỏi hoặc chuyển thành một bản nháp thuộc phiên làm việc của bạn.</p>
         </div>
-        {onAddSource ? (
+        {!isGuest && onAddSource ? (
           <button
             type="button"
             className="omni-sources-library__add"
@@ -156,7 +171,7 @@ export function SourcesLibraryExplorer({
             onClick={onAddSource}
           >
             <Plus aria-hidden="true" />
-            Add source
+            Thêm nguồn
           </button>
         ) : null}
       </header>
@@ -176,7 +191,7 @@ export function SourcesLibraryExplorer({
               onClick={onRetry}
             >
               <RefreshCw aria-hidden="true" />
-              Retry
+              Thử lại
             </button>
           ) : null}
         </div>
@@ -211,17 +226,17 @@ export function SourcesLibraryExplorer({
             ) : null}
             <div className="omni-sources-library__results">
               <div className="omni-sources-library__result-heading">
-                <p>{visibleSources.length} {visibleSources.length === 1 ? 'source' : 'sources'}</p>
-                <p role="status">{selected.size} selected for context</p>
+                <p>{visibleSources.length} {visibleSources.length === 1 ? 'nguồn' : 'nguồn'}</p>
+                <p role="status">{selected.size} nguồn được chọn làm ngữ cảnh</p>
               </div>
               {showHardUnavailable || state === 'empty' || (sources.length === 0 && state === 'ready') ? (
-                <EmptyLibrary onAddSource={onAddSource} />
+                <EmptyLibrary isGuest={isGuest} onAddSource={onAddSource} onSignIn={onSignIn} />
               ) : visibleSources.length === 0 ? (
                 <div className="omni-sources-library__no-match" role="status">
-                  No sources match these filters.
+                  Không có nguồn nào khớp bộ lọc.
                 </div>
               ) : (
-                <div className="omni-sources-library__grid" role="list" aria-label="Source records">
+                <div className="omni-sources-library__grid" role="list" aria-label="Danh sách nguồn">
                   {visibleSources.map((source) => (
                     <div role="listitem" key={source.id}>
                       <SourceCard

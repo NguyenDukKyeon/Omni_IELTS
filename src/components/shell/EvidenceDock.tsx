@@ -252,7 +252,7 @@ export function EvidenceDock() {
             )}
           </section>
         ))}
-        {currentMedia && activeModule !== 'media' && (
+        {currentMedia && activeModule !== 'media' && activeModule !== 'sources' && (
           <section id="continue-learning" className="omni-evidence-dock__section omni-evidence-dock__continue">
             <h3 className="omni-evidence-dock__section-title">Tiếp tục học</h3>
             <button

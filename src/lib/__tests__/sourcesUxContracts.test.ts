@@ -42,6 +42,7 @@ const sourceControlIds = [
   'sources.library.retry',
   'sources.import.open',
   'sources.import.empty-cta',
+  'sources.import.sign-in',
   'sources.artifact.open-modal',
   'sources.reader.select-span',
   'sources.chat.send',
@@ -128,7 +129,7 @@ describe('Sources Library Explorer UX contracts', () => {
     );
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('PDF');
-    expect(html).toContain('Owned by learner');
+    expect(html).toContain('Bạn sở hữu');
     expect(html).toContain('urban-heat.pdf');
     expect(html).not.toMatch(/band|progress|score|XP/i);
   });

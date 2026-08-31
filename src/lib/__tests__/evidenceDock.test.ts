@@ -88,4 +88,22 @@ describe('Evidence Dock', () => {
       'dashboard-context',
     ]);
   });
+
+  it('shows only truthful Sources context and never borrows learning evidence', () => {
+    const model = buildEvidenceDockModel({
+      activeModule: 'sources',
+      dueMistakeCount: 8,
+      dueVocabCount: 5,
+      currentMediaTitle: 'Unrelated media session',
+      recentEvidence: [{ id: 'att-1', label: 'Unrelated completed attempt', destination: 'practice' }],
+    });
+
+    expect(model.sections.map(({ id }) => id)).toEqual(['sources-context']);
+    expect(model.sections[0].items).toEqual([expect.objectContaining({
+      id: 'sources-no-evidence',
+      status: 'missing',
+      action: 'none',
+    })]);
+    expect(JSON.stringify(model)).not.toMatch(/Unrelated|due-mistakes|recent-evidence|current-media/);
+  });
 });

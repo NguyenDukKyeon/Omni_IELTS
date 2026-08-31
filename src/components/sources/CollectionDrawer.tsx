@@ -25,7 +25,7 @@ export function CollectionDrawer({
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Enter a collection name before saving.');
+      setError('Nhập tên bộ sưu tập trước khi lưu.');
       return;
     }
     setIsSaving(true);
@@ -35,18 +35,18 @@ export function CollectionDrawer({
       setName('');
       setIsCreating(false);
     } catch {
-      setError('The collection could not be saved. Try again.');
+      setError('Không thể lưu bộ sưu tập. Hãy thử lại.');
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <aside className="omni-collection-drawer" aria-label="Source collections">
+    <aside className="omni-collection-drawer" aria-label="Bộ sưu tập nguồn">
       <div className="omni-collection-drawer__heading">
         <div>
-          <p className="omni-collection-drawer__title">Collections</p>
-          <p className="omni-collection-drawer__summary">Keep related sources together.</p>
+          <p className="omni-collection-drawer__title">Bộ sưu tập</p>
+          <p className="omni-collection-drawer__summary">Gom các nguồn liên quan vào một chỗ.</p>
         </div>
         <Layers aria-hidden="true" className="omni-collection-drawer__icon" />
       </div>
@@ -59,7 +59,7 @@ export function CollectionDrawer({
         data-ux-flow="sources.library.filter"
         onClick={() => onSelectCollection(undefined)}
       >
-        <span>All sources</span>
+        <span>Tất cả nguồn</span>
         <span>{collections.reduce((count, collection) => count + collection.sourceIds.length, 0) || '—'}</span>
       </button>
 
@@ -86,7 +86,7 @@ export function CollectionDrawer({
       {isCreating ? (
         <form className="omni-collection-drawer__form" onSubmit={submit} data-ux-control="sources.collection.form" data-ux-flow="sources.collection.create">
           <label>
-            <span>Collection name</span>
+            <span>Tên bộ sưu tập</span>
             <input
               type="text"
               value={name}
@@ -107,7 +107,7 @@ export function CollectionDrawer({
               onClick={() => { setIsCreating(false); setError(null); }}
             >
               <X aria-hidden="true" />
-              Cancel
+              Hủy
             </button>
             <button
               type="submit"
@@ -116,7 +116,7 @@ export function CollectionDrawer({
               data-ux-control="sources.collection.save-button"
               data-ux-flow="sources.collection.create"
             >
-              {isSaving ? 'Saving…' : 'Save collection'}
+              {isSaving ? 'Đang lưu…' : 'Lưu bộ sưu tập'}
             </button>
           </div>
         </form>
@@ -129,7 +129,7 @@ export function CollectionDrawer({
           onClick={() => { setIsCreating(true); setError(null); }}
         >
           <FolderPlus aria-hidden="true" />
-          Create collection
+          Tạo bộ sưu tập
           <Plus aria-hidden="true" />
         </button>
       )}

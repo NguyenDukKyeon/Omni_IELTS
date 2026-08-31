@@ -51,13 +51,13 @@ function stateForError(error: unknown): GroundedChatPresentationState {
 
 function messageForState(state: GroundedChatPresentationState): string {
   switch (state) {
-    case 'auth_required': return 'Sign in to ask about private cloud Sources.';
-    case 'feature_disabled': return 'This Sources capability is not available right now.';
-    case 'quota_exceeded': return 'The Sources request limit is temporarily reached. Try again later.';
-    case 'unavailable': return 'Grounded chat is unavailable. Your selected source state is unchanged.';
-    case 'unsupported_by_sources': return 'The selected source blocks do not support this answer.';
-    case 'select_smaller_source': return 'Select fewer source blocks or ask a shorter question.';
-    case 'retryable_error': return 'The request did not finish. You can retry without changing source selection.';
+    case 'auth_required': return 'Đăng nhập để hỏi về các nguồn riêng trên đám mây.';
+    case 'feature_disabled': return 'Tính năng Sources hiện chưa khả dụng.';
+    case 'quota_exceeded': return 'Bạn đã dùng hết lượt yêu cầu Sources tạm thời. Hãy thử lại sau.';
+    case 'unavailable': return 'Trao đổi có căn cứ hiện không khả dụng. Lựa chọn nguồn vẫn được giữ.';
+    case 'unsupported_by_sources': return 'Các khối nguồn đã chọn không đủ căn cứ cho câu trả lời này.';
+    case 'select_smaller_source': return 'Chọn ít khối nguồn hơn hoặc rút ngắn câu hỏi.';
+    case 'retryable_error': return 'Yêu cầu chưa hoàn tất. Bạn có thể thử lại mà không đổi lựa chọn nguồn.';
     default: return '';
   }
 }
@@ -65,7 +65,7 @@ function messageForState(state: GroundedChatPresentationState): string {
 export function SourceGroundedChat({
   selectedVersionIds,
   selectedSpan,
-  contextLabel = 'No source selected',
+  contextLabel = 'Chưa chọn nguồn',
   executeChat = executeGroundedChat,
   executeResearch = requestWebResearch,
   onResponse,
@@ -137,8 +137,8 @@ export function SourceGroundedChat({
     <section className="omni-source-chat" aria-labelledby="source-chat-title">
       <header className="omni-source-chat__header">
         <div>
-          <p className="omni-source-chat__label">Grounded chat</p>
-          <h2 id="source-chat-title">Ask the selected source</h2>
+          <p className="omni-source-chat__label">Trao đổi có căn cứ</p>
+          <h2 id="source-chat-title">Hỏi nguồn đã chọn</h2>
         </div>
         <MessageCircle aria-hidden="true" className="omni-source-chat__icon" />
       </header>
@@ -146,12 +146,12 @@ export function SourceGroundedChat({
       <p className="omni-source-chat__context" role="status">{contextLabel}</p>
 
       <form className="omni-source-chat__composer" onSubmit={handleSubmit} data-ux-control="sources.chat.composer" data-ux-flow="sources.chat.send">
-        <label htmlFor="sources-chat-question">Question for the selected source</label>
+        <label htmlFor="sources-chat-question">Câu hỏi cho nguồn đã chọn</label>
         <textarea
           id="sources-chat-question"
           value={question}
           maxLength={8_000}
-          placeholder="Ask what the selected source says…"
+          placeholder="Hỏi nguồn đã chọn nói gì…"
           data-ux-control="sources.chat.question-input"
           data-ux-flow="sources.chat.send"
           onChange={(event) => setQuestion(event.target.value)}
@@ -165,7 +165,7 @@ export function SourceGroundedChat({
             data-ux-flow="sources.chat.send"
           >
             <Send aria-hidden="true" />
-            Ask selected source
+            Hỏi nguồn đã chọn
           </button>
           <button
             type="button"
@@ -181,14 +181,14 @@ export function SourceGroundedChat({
         </div>
       </form>
 
-      {state === 'loading' ? <p className="omni-source-chat__state" role="status" aria-live="polite">Reading the selected source blocks…</p> : null}
+      {state === 'loading' ? <p className="omni-source-chat__state" role="status" aria-live="polite">Đang đọc các khối nguồn đã chọn…</p> : null}
       {state !== 'idle' && state !== 'loading' && state !== 'ready' ? (
         <div className={`omni-source-chat__state omni-source-chat__state--${state}`} role={state === 'unsupported_by_sources' ? 'status' : 'alert'}>
           <p>{state === 'unsupported_by_sources' && response?.answer ? response.answer : messageForState(state)}</p>
           {(state === 'quota_exceeded' || state === 'unavailable' || state === 'retryable_error') && lastQuestion ? (
             <button type="button" data-ux-control="sources.chat.retry" data-ux-flow="sources.chat.send" onClick={retry}>
               <RefreshCw aria-hidden="true" />
-              Retry question
+              Thử lại câu hỏi
             </button>
           ) : null}
         </div>
@@ -196,10 +196,10 @@ export function SourceGroundedChat({
 
       {response && state === 'ready' ? (
         <div className="omni-source-chat__answer">
-          <p className="omni-source-chat__answer-label">Answer grounded in the selected source</p>
+          <p className="omni-source-chat__answer-label">Câu trả lời dựa trên nguồn đã chọn</p>
           <p>{response.answer}</p>
           {hasCitations ? (
-            <div className="omni-source-chat__citations" aria-label="Source citations">
+            <div className="omni-source-chat__citations" aria-label="Trích dẫn nguồn">
               {response.citations.map((citation, index) => (
                 <button
                   type="button"
@@ -219,21 +219,21 @@ export function SourceGroundedChat({
 
       {researchState !== 'idle' ? (
         <div className="omni-source-chat__research-result">
-          {researchState === 'loading' ? <p role="status">Looking for cited web evidence…</p> : null}
+          {researchState === 'loading' ? <p role="status">Đang tìm bằng chứng web có trích dẫn…</p> : null}
           {researchState !== 'loading' && researchState !== 'ready' ? (
             <div className="omni-source-chat__state omni-source-chat__state--research" role="alert">
               <p>{messageForState(researchState)}</p>
               {(researchState === 'quota_exceeded' || researchState === 'unavailable' || researchState === 'retryable_error') ? (
                 <button type="button" data-ux-control="sources.chat.research-retry" data-ux-flow="sources.chat.web-research" onClick={retryResearch}>
                   <RefreshCw aria-hidden="true" />
-                  Retry research
+                  Thử lại tra cứu
                 </button>
               ) : null}
             </div>
           ) : null}
           {researchState === 'ready' && researchResponse?.webCitations.length ? (
             <div>
-              <p className="omni-source-chat__answer-label">Web evidence — clearly separate from private-source chat</p>
+              <p className="omni-source-chat__answer-label">Bằng chứng web — tách biệt với trao đổi nguồn riêng</p>
               <ul>
                 {researchResponse.webCitations.map((citation) => (
                   <li key={citation.url}>
@@ -243,7 +243,7 @@ export function SourceGroundedChat({
                 ))}
               </ul>
             </div>
-          ) : researchState === 'ready' ? <p role="status">No web citations were returned.</p> : null}
+          ) : researchState === 'ready' ? <p role="status">Không có trích dẫn web nào được trả về.</p> : null}
         </div>
       ) : null}
 

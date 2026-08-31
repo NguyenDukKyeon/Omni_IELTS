@@ -22,10 +22,10 @@ function ownerLabel(record: SourceRecord): string | undefined {
 
 function stateMessage(state: SourceReaderState): string {
   switch (state) {
-    case 'stale': return 'This reader may be out of date. Refresh the source version when online.';
-    case 'degraded': return 'Text-only reader mode is active. No media surface is loaded here.';
-    case 'unavailable': return 'The source version is unavailable right now.';
-    case 'rejected': return 'This source version was rejected and cannot be displayed as ready content.';
+    case 'stale': return 'Trình đọc có thể đã cũ. Làm mới phiên bản nguồn khi có mạng.';
+    case 'degraded': return 'Đang ở chế độ chỉ đọc văn bản. Media không được hiển thị tại đây.';
+    case 'unavailable': return 'Phiên bản nguồn hiện không khả dụng.';
+    case 'rejected': return 'Phiên bản nguồn bị từ chối và không thể hiển thị như nội dung sẵn sàng.';
     default: return '';
   }
 }
@@ -87,7 +87,7 @@ export function SourceReader({
     <section className="omni-source-reader" aria-labelledby="source-reader-title">
       <header className="omni-source-reader__header">
         <div>
-          <p className="omni-source-reader__type">{record.type.toUpperCase()} · version {version?.versionNumber ?? '—'}</p>
+          <p className="omni-source-reader__type">{record.type.toUpperCase()} · phiên bản {version?.versionNumber ?? '—'}</p>
           <h2 id="source-reader-title">{record.title}</h2>
         </div>
         <MousePointer2 aria-hidden="true" className="omni-source-reader__header-icon" />
@@ -104,7 +104,7 @@ export function SourceReader({
               onClick={onRetry}
             >
               <RefreshCw aria-hidden="true" />
-              Refresh version
+              Làm mới phiên bản
             </button>
           ) : null}
         </div>
@@ -112,24 +112,24 @@ export function SourceReader({
 
       {owner || record.processingState === 'handoff_required' ? (
         <div className="omni-source-reader__handoff" role="status">
-          <strong>{owner || 'Another module'} owns this source.</strong>
-          <span>{record.provenance.handoffReasonVi || 'Sources does not mount playback, transcription, or chart rendering.'}</span>
+          <strong>{owner || 'Module khác'} phụ trách nguồn này.</strong>
+          <span>{record.provenance.handoffReasonVi || 'Sources không phát media, chép lời hoặc hiển thị biểu đồ tại đây.'}</span>
         </div>
       ) : null}
 
       {state === 'loading' ? (
-        <div className="omni-source-reader__blocks omni-source-reader__blocks--skeleton" aria-label="Loading source text">
+          <div className="omni-source-reader__blocks omni-source-reader__blocks--skeleton" aria-label="Đang tải nội dung nguồn">
           <span /><span /><span /><span />
         </div>
       ) : !isValidVersion || orderedBlocks.length === 0 ? (
         <div className="omni-source-reader__empty" role="status">
-          <h3>No validated text blocks</h3>
-          <p>Select a ready extracted version before asking grounded questions.</p>
+          <h3>Chưa có khối văn bản đã kiểm tra</h3>
+          <p>Chọn một phiên bản đã trích xuất và sẵn sàng trước khi đặt câu hỏi có căn cứ.</p>
         </div>
       ) : (
         <>
           <div className="omni-source-reader__selection-note">
-            <span>{selectedBlockIds.size > 0 ? `${selectedBlockIds.size} block(s) selected` : 'Select a block or drag across text'}</span>
+            <span>{selectedBlockIds.size > 0 ? `Đã chọn ${selectedBlockIds.size} khối` : 'Chọn một khối hoặc kéo qua đoạn văn'}</span>
             {selectedBlockIds.size > 0 ? <Check aria-hidden="true" /> : null}
           </div>
           <div ref={blocksRef} className="omni-source-reader__blocks" onMouseUp={handleTextSelection}>
@@ -142,11 +142,11 @@ export function SourceReader({
                   data-source-block-id={block.id}
                 >
                   <div className="omni-source-reader__block-meta">
-                    <span>Block {block.id}</span>
+                  <span>Khối {block.id}</span>
                     <button
                       type="button"
                       aria-pressed={blockSelected}
-                      aria-label={`${blockSelected ? 'Deselect' : 'Select'} block ${block.id}`}
+                      aria-label={`${blockSelected ? 'Bỏ chọn' : 'Chọn'} khối ${block.id}`}
                       data-ux-control={sourceControlId('sources.reader.select-span', `${record.id}-${block.id}`)}
                       data-ux-flow="sources.selection.toggle"
                       onClick={() => {
@@ -156,7 +156,7 @@ export function SourceReader({
                         selectBlocks(next);
                       }}
                     >
-                      {blockSelected ? 'Selected' : 'Select block'}
+                      {blockSelected ? 'Đã chọn' : 'Chọn khối'}
                     </button>
                   </div>
                   {block.type === 'heading' ? <h3>{block.text}</h3> : <p>{block.text}</p>}

@@ -412,6 +412,7 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   sourcesControl('sources.library.retry', 'sources.manage', 'SourcesLibraryExplorer', 'Retry loading the Sources Library', 'retryable library error visible', 'library loading'),
   sourcesControl('sources.import.open', 'sources.import.submit', 'SourcesLibraryExplorer', 'Open the real source import action', 'library visible', 'import form visible'),
   sourcesControl('sources.import.empty-cta', 'sources.import.submit', 'SourcesLibraryExplorer', 'Open the real source import action from the empty state', 'empty library visible', 'import form visible'),
+  sourcesControl('sources.import.sign-in', 'sources.import.submit', 'SourcesLibraryExplorer', 'Open learner sign-in before private source import', 'guest source library visible', 'Google sign-in flow opened'),
   sourcesControl('sources.artifact.open-modal', 'sources.artifact.open-modal', 'SourceCard', 'Open Artifact Studio for this source version', 'ready source card visible', 'artifact studio open'),
   sourcesControl('sources.reader.select-span', 'sources.reader.select-span', 'SourceReader', 'Select a validated source block or span', 'reader visible', 'exact source span selected'),
   sourcesControl('sources.chat.send', 'sources.chat.send', 'SourceGroundedChat', 'Send a grounded question', 'usable source selected and question entered', 'cited response or typed refusal'),

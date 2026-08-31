@@ -14,33 +14,33 @@ import type { SourceMediaType, SourceRecord, SourceProcessingState } from '../..
 type IconProps = { className?: string; 'aria-hidden'?: boolean };
 
 const TYPE_META: Record<SourceMediaType, { label: string; icon: ComponentType<IconProps> }> = {
-  text: { label: 'Text / Markdown', icon: FileText },
+  text: { label: 'Văn bản / Markdown', icon: FileText },
   pdf: { label: 'PDF', icon: FileText },
   docx: { label: 'DOCX', icon: FileText },
-  url: { label: 'Article URL', icon: Link2 },
+  url: { label: 'URL bài viết', icon: Link2 },
   youtube: { label: 'YouTube', icon: PlaySquare },
-  audio: { label: 'Audio', icon: AudioLines },
+  audio: { label: 'Âm thanh', icon: AudioLines },
   vtt_srt: { label: 'VTT / SRT', icon: Captions },
-  chart_image: { label: 'Chart image', icon: Image },
+  chart_image: { label: 'Ảnh biểu đồ', icon: Image },
 };
 
 const RIGHTS_LABELS = {
-  owned_by_learner: 'Owned by learner',
-  licensed_public: 'Licensed public',
-  fair_use_academic: 'Academic fair use',
-  restricted_citation_only: 'Citation only',
-  rejected_unsupported: 'Rights rejected',
+  owned_by_learner: 'Bạn sở hữu',
+  licensed_public: 'Được cấp phép công khai',
+  fair_use_academic: 'Sử dụng học thuật hợp lý',
+  restricted_citation_only: 'Chỉ trích dẫn',
+  rejected_unsupported: 'Quyền sử dụng bị từ chối',
 } as const;
 
 const PROCESSING_LABELS: Record<SourceProcessingState, string> = {
-  queued: 'Queued',
-  processing: 'Processing',
-  ready: 'Ready',
-  degraded: 'Degraded',
-  failed: 'Failed',
-  rejected: 'Rejected',
-  unavailable: 'Unavailable',
-  handoff_required: 'Handoff required',
+  queued: 'Đang chờ',
+  processing: 'Đang xử lý',
+  ready: 'Sẵn sàng',
+  degraded: 'Dữ liệu rút gọn',
+  failed: 'Xử lý lỗi',
+  rejected: 'Bị từ chối',
+  unavailable: 'Không khả dụng',
+  handoff_required: 'Do module khác tiếp nhận',
 };
 
 export function sourceControlId(base: string, sourceId: string): string {
@@ -91,13 +91,13 @@ export function SourceCard({
           type="button"
           className="omni-source-card__select"
           aria-pressed={selected}
-          aria-label={`${selected ? 'Deselect' : 'Select'} ${source.title}`}
+          aria-label={`${selected ? 'Bỏ chọn' : 'Chọn'} ${source.title}`}
           data-ux-control={sourceControlId('sources.library.select-toggle', source.id)}
           data-ux-flow="sources.selection.toggle"
           onClick={() => onToggleSelection(source)}
         >
           <span aria-hidden="true" className="omni-source-card__select-mark" />
-          <span>{selected ? 'Selected' : 'Select'}</span>
+          <span>{selected ? 'Đã chọn' : 'Chọn'}</span>
         </button>
       </div>
 
@@ -105,11 +105,11 @@ export function SourceCard({
 
       <dl className="omni-source-card__details">
         <div>
-          <dt>Rights</dt>
+          <dt>Quyền</dt>
           <dd>{RIGHTS_LABELS[source.provenance.rightsState]}</dd>
         </div>
         <div>
-          <dt>Provenance</dt>
+          <dt>Nguồn gốc</dt>
           <dd>{source.provenance.originalFilename || source.provenance.canonicalCitation}</dd>
         </div>
       </dl>
@@ -117,7 +117,7 @@ export function SourceCard({
       {owner ? (
         <p className="omni-source-card__handoff" role="status">
           <BookOpen aria-hidden="true" />
-          <span>{owner} owns playback or rendering for this source.</span>
+          <span>{owner} phụ trách phát hoặc hiển thị nguồn này.</span>
         </p>
       ) : null}
       {source.provenance.handoffReasonVi ? (
@@ -134,7 +134,7 @@ export function SourceCard({
               data-ux-flow="sources.selection.toggle"
               onClick={() => onOpen(source)}
             >
-              Open reader
+              Đọc nguồn
             </button>
           ) : null}
           {onCreateArtifact && isReady ? (
@@ -146,7 +146,7 @@ export function SourceCard({
               onClick={() => onCreateArtifact(source)}
             >
               <ArrowUpRight aria-hidden="true" />
-              Create output
+              Tạo bản nháp
             </button>
           ) : null}
         </div>

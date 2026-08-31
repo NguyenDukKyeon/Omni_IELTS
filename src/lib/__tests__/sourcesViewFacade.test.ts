@@ -19,9 +19,9 @@ describe('Sources route facade', () => {
   it('mounts the flag-on workspace with three desktop/mobile zones', () => {
     const html = renderToStaticMarkup(React.createElement(SourcesView));
     expect(html).toContain('data-ux-scope="sources-library-v2"');
-    expect(html).toContain('Library');
-    expect(html).toContain('Reader &amp; Chat');
-    expect(html).toContain('Create');
+    expect(html).toContain('Thư viện');
+    expect(html).toContain('Đọc &amp; hỏi');
+    expect(html).toContain('Tạo bản nháp');
     expect(html).toContain('data-ux-control="sources.view.tab-library"');
     expect(html).toContain('data-ux-control="sources.view.tab-reader"');
     expect(html).toContain('data-ux-control="sources.view.tab-create"');
