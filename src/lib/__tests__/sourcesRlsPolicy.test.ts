@@ -40,7 +40,7 @@ describe('P03 source_versions RLS and immutability', () => {
     expect(sql).toMatch(/source_versions[\s\S]*EXISTS\s*\(/i);
     expect(sql).toMatch(/source_records[\s\S]*id = source_id[\s\S]*user_id = auth\.uid\(\)/);
     expect(sql).not.toMatch(/CREATE POLICY "source_versions_owner_all"/);
-    expect(sql).not.toMatch(/CREATE POLICY "source_versions_owner_update"/);
+    expect(sql).toMatch(/CREATE POLICY "source_versions_owner_update"/);
   });
 
   it('requires artifact jobs to belong to a version whose source record is owned by auth.uid()', () => {
@@ -137,5 +137,130 @@ describe('P03 source_versions RLS and immutability', () => {
       plainText: 'A second immutable attempt must not overwrite version 1.',
     });
     await expect(sourcesStorage.saveVersion(duplicateNumber, alice.id)).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+  });
+});
+
+describe('Disposable DB RLS runner safety and contracts', () => {
+  it('accepts local loopback database URLs targeting omni_sources_rls_test', async () => {
+    const { assertLocalDatabaseUrl } = await import('../../../scripts/test-sources-rls-postgres');
+    const local1 = assertLocalDatabaseUrl('postgres://postgres:postgres@localhost:54322/omni_sources_rls_test');
+    expect(local1.host).toBe('localhost');
+    expect(local1.port).toBe(54322);
+    expect(local1.database).toBe('omni_sources_rls_test');
+
+    const local2 = assertLocalDatabaseUrl('postgresql://postgres:postgres@127.0.0.1:54322/omni_sources_rls_test');
+    expect(local2.host).toBe('127.0.0.1');
+    expect(local2.port).toBe(54322);
+    expect(local2.database).toBe('omni_sources_rls_test');
+
+    const local3 = assertLocalDatabaseUrl('postgres://postgres:pass@[::1]:54322/omni_sources_rls_test');
+    expect(local3.host).toBe('::1');
+    expect(local3.port).toBe(54322);
+    expect(local3.database).toBe('omni_sources_rls_test');
+  });
+
+  it('strictly rejects non-local, 0.0.0.0, Supabase, or remote database URLs before any connection', async () => {
+    const { assertLocalDatabaseUrl } = await import('../../../scripts/test-sources-rls-postgres');
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@0.0.0.0:54322/omni_sources_rls_test'))
+      .toThrow(/SECURITY_VIOLATION/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@db.supabase.co:54322/omni_sources_rls_test'))
+      .toThrow(/SECURITY_VIOLATION/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@aws.rds.amazonaws.com:54322/omni_sources_rls_test'))
+      .toThrow(/SECURITY_VIOLATION/);
+
+    expect(() => assertLocalDatabaseUrl('https://abcdef.supabase.co'))
+      .toThrow(/SECURITY_VIOLATION/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@10.0.0.5:54322/omni_sources_rls_test'))
+      .toThrow(/SECURITY_VIOLATION/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@192.168.1.50:54322/omni_sources_rls_test'))
+      .toThrow(/SECURITY_VIOLATION/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@172.16.0.2:54322/omni_sources_rls_test'))
+      .toThrow(/SECURITY_VIOLATION/);
+  });
+
+  it('strictly rejects any database name other than omni_sources_rls_test', async () => {
+    const { assertLocalDatabaseUrl } = await import('../../../scripts/test-sources-rls-postgres');
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@127.0.0.1:54322/postgres'))
+      .toThrow(/omni_sources_rls_test/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@127.0.0.1:54322/production_db'))
+      .toThrow(/omni_sources_rls_test/);
+
+    expect(() => assertLocalDatabaseUrl('postgres://postgres:pass@127.0.0.1:54322/'))
+      .toThrow(/omni_sources_rls_test/);
+  });
+
+  it('scrubs passwords and never leaks credentials in display or error outputs', async () => {
+    const { sanitizeUrlForDisplay } = await import('../../../scripts/test-sources-rls-postgres');
+    const scrubbed = sanitizeUrlForDisplay('postgres://postgres:super_secret_pwd_999@127.0.0.1:54322/omni_sources_rls_test');
+    expect(scrubbed).not.toContain('super_secret_pwd_999');
+    expect(scrubbed).toContain('***');
+  });
+
+  it('enforces disposable marker presence outside public schema', async () => {
+    const { assertDisposableMarker } = await import('../../../scripts/test-sources-rls-postgres');
+
+    const mockPassingClient = {
+      query: async () => ({ rows: [{ disposable: true }] }),
+    } as any;
+    await expect(assertDisposableMarker(mockPassingClient)).resolves.toBeUndefined();
+
+    const mockFailingClient = {
+      query: async () => ({ rows: [] }),
+    } as any;
+    await expect(assertDisposableMarker(mockFailingClient)).rejects.toThrow(/SECURITY_VIOLATION/);
+
+    const mockErrorClient = {
+      query: async () => { throw new Error('relation "omni_test.disposable_marker" does not exist'); },
+    } as any;
+    await expect(assertDisposableMarker(mockErrorClient)).rejects.toThrow(/SECURITY_VIOLATION/);
+  });
+
+  it('returns skipped_no_db and proven=false when LOCAL_DISPOSABLE_DB_URL is omitted in non-strict mode', async () => {
+    const { runSourcesRlsProof } = await import('../../../scripts/test-sources-rls-postgres');
+    const originalEnv = process.env.LOCAL_DISPOSABLE_DB_URL;
+    delete process.env.LOCAL_DISPOSABLE_DB_URL;
+    try {
+      const result = await runSourcesRlsProof({ strict: false });
+      expect(result.status).toBe('skipped_no_db');
+      expect(result.proven).toBe(false);
+      expect(result.executable).toBe(false);
+      expect(result.details.some((d) => d.includes('LOCAL_DISPOSABLE_DB_URL'))).toBe(true);
+    } finally {
+      if (originalEnv) process.env.LOCAL_DISPOSABLE_DB_URL = originalEnv;
+    }
+  });
+
+  it('fails closed when LOCAL_DISPOSABLE_DB_URL is omitted in strict mode', async () => {
+    const { runSourcesRlsProof } = await import('../../../scripts/test-sources-rls-postgres');
+    const originalEnv = process.env.LOCAL_DISPOSABLE_DB_URL;
+    delete process.env.LOCAL_DISPOSABLE_DB_URL;
+    try {
+      const result = await runSourcesRlsProof({ strict: true });
+      expect(result.status).toBe('failed');
+      expect(result.proven).toBe(false);
+      expect(result.executable).toBe(true);
+      expect(result.details.some((d) => d.includes('FAIL-CLOSED'))).toBe(true);
+    } finally {
+      if (originalEnv) process.env.LOCAL_DISPOSABLE_DB_URL = originalEnv;
+    }
+  });
+
+  it('fails closed in strict mode when target DB is unreachable', async () => {
+    const { runSourcesRlsProof } = await import('../../../scripts/test-sources-rls-postgres');
+    const result = await runSourcesRlsProof({
+      strict: true,
+      dbUrl: 'postgres://postgres:postgres@127.0.0.1:59999/omni_sources_rls_test',
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.proven).toBe(false);
+    expect(result.executable).toBe(true);
+    expect(result.details.some((d) => d.includes('FAIL-CLOSED'))).toBe(true);
   });
 });

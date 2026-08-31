@@ -16,7 +16,7 @@ describe('P03 dependency policy', () => {
   });
 
   it('requires package-lock entries for any newly adopted extraction package', () => {
-    for (const name of ['@mozilla/readability', 'dompurify', 'pdf-parse', 'mammoth', 'jsdom']) {
+    for (const name of ['@mozilla/readability', 'dompurify', 'pdf-parse', 'mammoth', 'jsdom', 'pg', '@types/pg']) {
       if (pkg.dependencies?.[name] || pkg.devDependencies?.[name]) {
         expect(pkg.dependencies?.[name] || pkg.devDependencies?.[name]).toMatch(/^\d/);
         expect(lock.packages[`node_modules/${name}`] || lock.dependencies?.[name]).toBeTruthy();

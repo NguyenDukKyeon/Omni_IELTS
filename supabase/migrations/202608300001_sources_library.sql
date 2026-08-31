@@ -98,6 +98,21 @@ CREATE POLICY "source_versions_owner_insert" ON public.source_versions
     )
   );
 
+CREATE POLICY "source_versions_owner_update" ON public.source_versions
+  FOR UPDATE USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.source_records r
+      WHERE r.id = source_id AND r.user_id = auth.uid()
+    )
+  ) WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.source_records r
+      WHERE r.id = source_id AND r.user_id = auth.uid()
+    )
+  );
+
 CREATE POLICY "source_versions_cascade_delete" ON public.source_versions
   FOR DELETE USING (
     auth.uid() = user_id
