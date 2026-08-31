@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SourceRecord, SourceVersion, VersionStage, SourceMediaType, SourceProcessingState, SourceProvenance } from '../../types/sources';
-import type { SourcesRepository, SourceHydrationResult } from './groundedChat';
+import type { LearnerAuthResult, SourcesRepository, SourceHydrationResult } from './groundedChat';
 
 export function resolveSourcesSupabaseConfig(env: Record<string, string | undefined>): {
   supabaseUrl: string;
@@ -14,6 +14,77 @@ export function resolveSourcesSupabaseConfig(env: Record<string, string | undefi
     supabaseAnonKey,
     configured: Boolean(supabaseUrl && supabaseAnonKey),
   };
+}
+
+const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(parts[1].length / 4) * 4, '=');
+    const json = Buffer.from(padded, 'base64').toString('utf8');
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function isServiceRoleKey(anonKey: string): boolean {
+  if (!JWT_SHAPE.test(anonKey)) return /service_role/i.test(anonKey);
+  const payload = decodeJwtPayload(anonKey);
+  return payload?.role === 'service_role' || payload?.role === 'supabase_admin';
+}
+
+function isAuthRejection(error: { status?: number; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  if (error.status === 401 || error.status === 403) return true;
+  const message = (error.message || '').toLowerCase();
+  return message.includes('invalid jwt')
+    || message.includes('invalid token')
+    || message.includes('malformed')
+    || message.includes('expired')
+    || message.includes('jwt')
+    || message.includes('unauthorized')
+    || message.includes('unauthenticated');
+}
+
+export async function verifyLearnerAccessToken(input: {
+  accessToken: string;
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  getUser?: (jwt: string) => Promise<{
+    user: { id: string } | null;
+    error: { status?: number; message?: string } | null;
+  }>;
+}): Promise<LearnerAuthResult> {
+  const accessToken = input.accessToken.trim();
+  if (!accessToken || !JWT_SHAPE.test(accessToken)) return { status: 'auth_required' };
+  if (!input.supabaseUrl.trim() || !input.supabaseAnonKey.trim()) return { status: 'unavailable' };
+  if (isServiceRoleKey(input.supabaseAnonKey)) return { status: 'unavailable' };
+
+  const getUser = input.getUser || (async (jwt: string) => {
+    const client = createClient(input.supabaseUrl, input.supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await client.auth.getUser(jwt);
+    return {
+      user: data.user ? { id: data.user.id } : null,
+      error: error ? { status: (error as { status?: number }).status, message: error.message } : null,
+    };
+  });
+
+  try {
+    const { user, error } = await getUser(accessToken);
+    if (error) return isAuthRejection(error) ? { status: 'auth_required' } : { status: 'unavailable' };
+    if (!user?.id) return { status: 'auth_required' };
+    return { status: 'ok', userId: user.id, accessToken };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isAuthRejection({ message })) return { status: 'auth_required' };
+    return { status: 'unavailable' };
+  }
 }
 
 function recordFromRow(row: Record<string, unknown>): SourceRecord {

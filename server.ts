@@ -58,6 +58,7 @@ import {
 import {
   createLearnerJwtSourcesRepository,
   resolveSourcesSupabaseConfig,
+  verifyLearnerAccessToken,
 } from "./src/lib/sources/sourcesRepository.server";
 import {
   BifrostGatewayClient,
@@ -491,6 +492,33 @@ async function callGeminiResiliently(
   });
   if (result.lane === 'web_bridge') recordAiLatency(tier, Date.now() - startedAt);
   return result.value;
+}
+
+async function executeBalancedText(input: {
+  request?: express.Request;
+  contents: string;
+  config?: Record<string, unknown>;
+  validateText?: (text: string) => boolean;
+}): Promise<{ value: string; provider: string; model: string; fallbackReason?: string }> {
+  return groundedProviderRouter.execute({
+    primary: {
+      provider: 'gemini',
+      model: AI_TASK_PROFILES.balanced.model,
+      run: async () => {
+        const ai = getGeminiClient(input.request);
+        const generated = await callOfficialProvidersResiliently(ai, {
+          contents: input.contents,
+          taskTier: 'balanced',
+          config: input.config,
+          validateText: input.validateText,
+        });
+        if (!generated.text) {
+          throw generated.error || new Error('empty balanced text response');
+        }
+        return generated.text;
+      },
+    },
+  });
 }
 
 // Health check endpoint
@@ -8507,6 +8535,11 @@ app.post('/api/sources/grounded-chat', async (req, res) => {
     authorizationHeader: req.header('authorization'),
     body: req.body,
     cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
     repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
       accessToken,
       supabaseUrl: cloud.supabaseUrl,
@@ -8516,24 +8549,16 @@ app.post('/api/sources/grounded-chat', async (req, res) => {
       if (profile.tier !== 'balanced' || profile.capability !== 'text' || tools.length > 0) {
         throw new Error('Grounded chat must use the balanced text profile without tools.');
       }
-      return groundedProviderRouter.execute({
-        primary: {
-          provider: 'gemini',
-          model: AI_TASK_PROFILES.balanced.model,
-          run: async () => {
-            const ai = getGeminiClient(req);
-            const generated = await callOfficialProvidersResiliently(ai, {
-              contents: `${prompt}\n\nQuestion: ${question}\nReturn JSON only.`,
-              taskTier: 'balanced',
-              config: { responseMimeType: 'application/json' },
-            });
-            if (!generated.text) {
-              throw generated.error || new Error('empty grounded chat response');
-            }
-            return JSON.parse(generated.text);
-          },
-        },
+      const routed = await executeBalancedText({
+        request: req,
+        contents: `${prompt}\n\nQuestion: ${question}\nReturn JSON only.`,
+        config: { responseMimeType: 'application/json' },
       });
+      const raw = routed.value;
+      return {
+        ...routed,
+        value: typeof raw === 'string' ? JSON.parse(raw) : raw,
+      };
     },
   });
   return res.status(result.status).json(result.body);
@@ -8547,6 +8572,11 @@ app.post('/api/sources/web-research', async (req, res) => {
     body: req.body,
     cloudConfigured: cloud.configured,
     searchAdapterConfigured: Boolean(braveKey),
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
     webSearch: braveKey
       ? async ({ question }) => {
           const evidence = await requestBraveForecastEvidence({ apiKey: braveKey, query: question });

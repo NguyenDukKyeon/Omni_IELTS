@@ -70,6 +70,12 @@ const handoffRecord: SourceRecord = {
   },
 };
 
+const verifiedLearner = async (accessToken: string) => ({
+  status: 'ok' as const,
+  userId: 'u1',
+  accessToken,
+});
+
 describe('Grounded Chat engine', () => {
   it('builds context from selected versions and record metadata only', () => {
     const context = buildGroundedContext([{ version: selected, record }], ['v_01']);
@@ -165,6 +171,7 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: undefined,
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => ownedRepo,
       routerExecute,
       webSearch,
@@ -184,6 +191,7 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_foreign'], question: 'What do subsidies do?' },
       cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => ownedRepo,
       routerExecute,
       webSearch: vi.fn(),
@@ -192,6 +200,7 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_missing'], question: 'What do subsidies do?' },
       cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => ownedRepo,
       routerExecute,
       webSearch: vi.fn(),
@@ -215,6 +224,7 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_yt'], question: 'Summarise the lecture.' },
       cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => handoffRepo,
       routerExecute,
       webSearch: vi.fn(),
@@ -240,6 +250,7 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => ownedRepo,
       routerExecute,
       webSearch,
@@ -266,6 +277,7 @@ describe('Grounded Chat HTTP boundary', () => {
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
       searchAdapterConfigured: true,
+      verifyAccessToken: verifiedLearner,
       webSearch,
     });
     expect(unauthenticated.status).toBe(401);
@@ -277,6 +289,7 @@ describe('Grounded Chat HTTP boundary', () => {
       body: { question: 'What is a subsidy?' },
       cloudConfigured: true,
       searchAdapterConfigured: false,
+      verifyAccessToken: verifiedLearner,
       webSearch,
     });
     expect(unavailable.body.status).toBe('unavailable');
@@ -286,6 +299,7 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => ownedRepo,
       routerExecute: vi.fn(async () => ({
         value: {
@@ -309,11 +323,173 @@ describe('Grounded Chat HTTP boundary', () => {
       authorizationHeader: 'Bearer learner-jwt',
       body: { selectedVersionIds: ['v_01'], question: 'What do subsidies do?' },
       cloudConfigured: false,
+      verifyAccessToken: verifiedLearner,
       repositoryForToken: () => ownedRepo,
       routerExecute,
       webSearch: vi.fn(),
     });
     expect(result.body.status).toBe('unavailable');
     expect(routerExecute).not.toHaveBeenCalled();
+  });
+});
+
+describe('Selected-span grounding and prompt budget', () => {
+  const twoBlockVersion: SourceVersion = {
+    ...selected,
+    plainText: 'VISIBLE_BLOCK. SECRET_PLAINTEXT_MUST_NOT_LEAK to the model.',
+    blocks: [
+      { id: 'b_001', order: 1, type: 'paragraph', text: 'VISIBLE_BLOCK.' },
+      { id: 'b_002', order: 2, type: 'paragraph', text: 'SECOND_BLOCK.' },
+    ],
+  };
+
+  it('does not leak full plainText when sourceSpan block IDs are unknown', async () => {
+    const routerExecute = vi.fn(async () => ({
+      value: {
+        groundingStatus: 'fully_grounded',
+        answer: 'leaked',
+        citations: [{ sourceVersionId: 'v_01', sourceTitle: 'Macroeconomics', blockId: 'b_001' }],
+        webCitations: [],
+      },
+    }));
+
+    const result = await executeGroundedChat({
+      selectedVersionIds: ['v_01'],
+      question: 'What leaked?',
+      versions: [twoBlockVersion],
+      records: [record],
+      routerExecute,
+      sourceSpan: { sourceId: 's_01', sourceVersionId: 'v_01', blockIds: ['b_unknown'] },
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(result.groundingStatus).toBe('unsupported_by_sources');
+    expect(JSON.stringify(result)).not.toContain('SECRET_PLAINTEXT_MUST_NOT_LEAK');
+  });
+
+  it('treats a version without its exact parent record as invalid context', async () => {
+    const otherRecord: SourceRecord = {
+      ...record,
+      id: 's_other',
+      title: 'OTHER_TITLE_MUST_NOT_BE_USED',
+      provenance: { ...record.provenance, canonicalCitation: 'LEAKED_FALLBACK_CITATION' },
+    };
+    const orphan: SourceVersion = { ...selected, sourceId: 's_missing' };
+    const routerExecute = vi.fn();
+
+    const result = await executeGroundedChat({
+      selectedVersionIds: ['v_01'],
+      question: 'What do subsidies do?',
+      versions: [orphan],
+      records: [otherRecord],
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(result.groundingStatus).toBe('unsupported_by_sources');
+    expect(JSON.stringify(result)).not.toContain('OTHER_TITLE_MUST_NOT_BE_USED');
+    expect(JSON.stringify(result)).not.toContain('LEAKED_FALLBACK_CITATION');
+  });
+
+  it('rejects a span whose sourceId or sourceVersionId is not a selected hydrated pair', async () => {
+    const routerExecute = vi.fn();
+    const mismatchedSource = await executeGroundedChat({
+      selectedVersionIds: ['v_01'],
+      question: 'What?',
+      versions: [selected],
+      records: [record],
+      routerExecute,
+      sourceSpan: { sourceId: 's_other', sourceVersionId: 'v_01', blockIds: ['b_001'] },
+    });
+    const mismatchedVersion = await executeGroundedChat({
+      selectedVersionIds: ['v_01'],
+      question: 'What?',
+      versions: [selected],
+      records: [record],
+      routerExecute,
+      sourceSpan: { sourceId: 's_01', sourceVersionId: 'v_other', blockIds: ['b_001'] },
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(mismatchedSource.groundingStatus).toBe('unsupported_by_sources');
+    expect(mismatchedVersion.groundingStatus).toBe('unsupported_by_sources');
+  });
+
+  it('sends only validated span blocks when an explicit span exists', async () => {
+    const routerExecute = vi.fn(async ({ prompt }: { prompt: string }) => {
+      expect(prompt).toContain('VISIBLE_BLOCK.');
+      expect(prompt).toContain('b_001');
+      expect(prompt).not.toContain('SECOND_BLOCK.');
+      expect(prompt).not.toContain('SECRET_PLAINTEXT_MUST_NOT_LEAK');
+      expect(prompt).not.toBe(expect.stringContaining(twoBlockVersion.plainText));
+      return {
+        value: {
+          groundingStatus: 'fully_grounded',
+          answer: 'Visible only [Source: Macroeconomics, §b_001].',
+          citations: [{ sourceVersionId: 'v_01', sourceTitle: 'Macroeconomics', blockId: 'b_001' }],
+          webCitations: [],
+        },
+      };
+    });
+
+    const result = await executeGroundedChat({
+      selectedVersionIds: ['v_01'],
+      question: 'What is visible?',
+      versions: [twoBlockVersion],
+      records: [record],
+      routerExecute,
+      sourceSpan: { sourceId: 's_01', sourceVersionId: 'v_01', blockIds: ['b_001'] },
+    });
+
+    expect(routerExecute).toHaveBeenCalledTimes(1);
+    expect(result.groundingStatus).toBe('fully_grounded');
+  });
+
+  it('restricts citations to the selected span block IDs', () => {
+    const parsed = GroundedChatResponseSchema.parse({
+      groundingStatus: 'fully_grounded',
+      answer: 'Claim [Source: Macroeconomics, §b_002]',
+      citations: [{ sourceVersionId: 'v_01', sourceTitle: 'Macroeconomics', blockId: 'b_002' }],
+      webCitations: [],
+    });
+    const result = validateGroundedCitations(
+      parsed,
+      [twoBlockVersion],
+      { sourceId: 's_01', sourceVersionId: 'v_01', blockIds: ['b_001'] },
+    );
+    expect(result.groundingStatus).toBe('unsupported_by_sources');
+    expect(result.citations).toEqual([]);
+  });
+
+  it('returns a typed select-smaller-source response instead of truncating or calling AI', async () => {
+    const hugeText = 'macroeconomic '.repeat(20_000);
+    const hugeVersion: SourceVersion = {
+      ...selected,
+      plainText: hugeText,
+      blocks: [{ id: 'b_001', order: 1, type: 'paragraph', text: hugeText }],
+      wordCount: 20_000,
+    };
+    const routerExecute = vi.fn();
+    const repo = {
+      getSelectedVersions: vi.fn(async () => ({
+        status: 'ok' as const,
+        items: [{ version: hugeVersion, record }],
+      })),
+    };
+
+    const result = await handleGroundedChatRequest({
+      authorizationHeader: 'Bearer learner-jwt',
+      body: { selectedVersionIds: ['v_01'], question: 'Summarise.' },
+      cloudConfigured: true,
+      verifyAccessToken: verifiedLearner,
+      repositoryForToken: () => repo,
+      routerExecute,
+    });
+
+    expect(routerExecute).not.toHaveBeenCalled();
+    expect(result.status).toBe(400);
+    expect(result.body.status).toBe('select_smaller_source');
+    expect(String(result.body.userMessageVi || '')).toMatch(/nguồn|đoạn/i);
+    expect(JSON.stringify(result.body)).not.toContain('macroeconomic macroeconomic');
   });
 });

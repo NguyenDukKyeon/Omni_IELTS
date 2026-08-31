@@ -56,6 +56,11 @@ export interface SourcesRepository {
   getSelectedVersions(selectedVersionIds: readonly string[]): Promise<SourceHydrationResult>;
 }
 
+export type LearnerAuthResult =
+  | { status: 'ok'; userId: string; accessToken: string }
+  | { status: 'auth_required' }
+  | { status: 'unavailable' };
+
 export type GroundedRouterExecute = (input: {
   profile: AiTaskProfile;
   tools: [];
@@ -74,6 +79,36 @@ export type SourcesHttpResult = {
 
 const UNSUPPORTED_ANSWER_VI = 'Nguồn tài liệu đã chọn không chứa thông tin để trả lời câu hỏi này. Bạn có thể chọn thêm nguồn khác hoặc kích hoạt \'Tra cứu dẫn chứng\' từ web.';
 
+/**
+ * SPEC §4.2 prompt budget: 32,000 tokens.
+ *
+ * Conservative deterministic estimate (fail closed, never silent truncation):
+ * - count Unicode code points in the prompt
+ * - treat 3 code points as 1 token (tighter than typical English BPE ~4 chars/token)
+ * - add 256 tokens of instruction/system overhead
+ *
+ * If the estimate exceeds 32,000, grounded chat returns `select_smaller_source`
+ * and does not call the model.
+ */
+export const GROUNDED_CHAT_PROMPT_TOKEN_BUDGET = 32_000;
+const PROMPT_CODE_POINTS_PER_TOKEN = 3;
+const PROMPT_INSTRUCTION_OVERHEAD_TOKENS = 256;
+
+export function estimatePromptTokens(text: string): number {
+  let codePoints = 0;
+  for (const _codePoint of text) codePoints += 1;
+  return Math.ceil(codePoints / PROMPT_CODE_POINTS_PER_TOKEN) + PROMPT_INSTRUCTION_OVERHEAD_TOKENS;
+}
+
+export class SelectSmallerSourceError extends Error {
+  readonly status = 'select_smaller_source' as const;
+
+  constructor() {
+    super('select_smaller_source');
+    this.name = 'SelectSmallerSourceError';
+  }
+}
+
 function unsupportedResponse(): GroundedChatResponse {
   return {
     groundingStatus: 'unsupported_by_sources',
@@ -89,6 +124,46 @@ function isUsableSource(item: HydratedSource): boolean {
   return !HANDOFF_STATES.has(item.record.processingState) && item.version.plainText.trim().length > 0;
 }
 
+export function hydrateSelectedSources(
+  versions: readonly SourceVersion[],
+  records: readonly SourceRecord[],
+): HydratedSource[] {
+  const recordById = new Map(records.map((record) => [record.id, record]));
+  const items: HydratedSource[] = [];
+  for (const version of versions) {
+    const record = recordById.get(version.sourceId);
+    if (!record) continue;
+    items.push({ version, record });
+  }
+  return items;
+}
+
+export function isValidSelectedSpan(
+  sourceSpan: SourceSpan | undefined,
+  selected: readonly HydratedSource[],
+): boolean {
+  if (!sourceSpan) return true;
+  const match = selected.find((item) => (
+    item.version.id === sourceSpan.sourceVersionId
+    && item.record.id === sourceSpan.sourceId
+    && item.version.sourceId === sourceSpan.sourceId
+  ));
+  if (!match) return false;
+  if (!sourceSpan.blockIds?.length) return true;
+  const blockIds = new Set(match.version.blocks.map((block) => block.id));
+  return sourceSpan.blockIds.every((blockId) => blockIds.has(blockId));
+}
+
+function blocksForPrompt(item: HydratedSource, sourceSpan?: SourceSpan): SourceVersion['blocks'] {
+  if (!sourceSpan) return item.version.blocks;
+  if (item.version.id !== sourceSpan.sourceVersionId || item.record.id !== sourceSpan.sourceId) {
+    return [];
+  }
+  if (!sourceSpan.blockIds?.length) return item.version.blocks;
+  const allowed = new Set(sourceSpan.blockIds);
+  return item.version.blocks.filter((block) => allowed.has(block.id));
+}
+
 export function buildGroundedContext(
   selected: readonly HydratedSource[],
   selectedVersionIds: readonly string[],
@@ -100,12 +175,14 @@ export function buildGroundedContext(
     'Cite block IDs that exist on those versions. Do not use web search.',
   ];
 
-  for (const item of selected) {
+  const scoped = sourceSpan
+    ? selected.filter((item) => item.version.id === sourceSpan.sourceVersionId && item.record.id === sourceSpan.sourceId)
+    : selected;
+
+  for (const item of scoped) {
     if (!allowed.has(item.version.id) || !isUsableSource(item)) continue;
-    const spanBlocks = sourceSpan?.sourceVersionId === item.version.id ? sourceSpan.blockIds : undefined;
-    const blocks = spanBlocks?.length
-      ? item.version.blocks.filter((block) => spanBlocks.includes(block.id))
-      : item.version.blocks;
+    const blocks = blocksForPrompt(item, sourceSpan);
+    if (!blocks.length) continue;
     lines.push(
       `Title: ${item.record.title}`,
       `Rights: ${item.record.provenance.rightsState}`,
@@ -115,9 +192,6 @@ export function buildGroundedContext(
     for (const block of blocks) {
       lines.push(`Block ${block.id}: ${block.text}`);
     }
-    if (!blocks.length) {
-      lines.push(item.version.plainText);
-    }
   }
   return lines.join('\n');
 }
@@ -125,6 +199,7 @@ export function buildGroundedContext(
 export function validateGroundedCitations(
   response: GroundedChatResponse,
   selectedVersions: readonly SourceVersion[],
+  sourceSpan?: SourceSpan,
 ): GroundedChatResponse {
   const selectedById = new Map(selectedVersions.map((version) => [version.id, version]));
   if (response.webCitations.length > 0) return unsupportedResponse();
@@ -133,9 +208,13 @@ export function validateGroundedCitations(
   }
   if (response.citations.length === 0) return unsupportedResponse();
 
+  const spanBlockIds = sourceSpan?.blockIds?.length ? new Set(sourceSpan.blockIds) : null;
+
   for (const citation of response.citations) {
     const version = selectedById.get(citation.sourceVersionId);
     if (!version) return unsupportedResponse();
+    if (sourceSpan && citation.sourceVersionId !== sourceSpan.sourceVersionId) return unsupportedResponse();
+    if (spanBlockIds && !spanBlockIds.has(citation.blockId)) return unsupportedResponse();
     if (!version.blocks.some((block) => block.id === citation.blockId)) return unsupportedResponse();
   }
 
@@ -154,14 +233,20 @@ export async function executeGroundedChat(input: {
   webSearch?: WebSearchFn;
   sourceSpan?: SourceSpan;
 }): Promise<GroundedChatResponse> {
-  const selected = input.versions.map((version) => ({
-    version,
-    record: input.records.find((record) => record.id === version.sourceId) || input.records[0],
-  })).filter((item): item is HydratedSource => Boolean(item.record));
-  const usable = selected.filter((item) => input.selectedVersionIds.includes(item.version.id) && isUsableSource(item));
-  if (!usable.length) return unsupportedResponse();
+  const selected = hydrateSelectedSources(input.versions, input.records)
+    .filter((item) => input.selectedVersionIds.includes(item.version.id) && isUsableSource(item));
+  if (!selected.length) return unsupportedResponse();
+  if (!isValidSelectedSpan(input.sourceSpan, selected)) return unsupportedResponse();
 
-  const prompt = buildGroundedContext(usable, input.selectedVersionIds, input.sourceSpan);
+  const prompt = buildGroundedContext(selected, input.selectedVersionIds, input.sourceSpan);
+  if (estimatePromptTokens(prompt) > GROUNDED_CHAT_PROMPT_TOKEN_BUDGET) {
+    throw new SelectSmallerSourceError();
+  }
+
+  const contextVersions = input.sourceSpan
+    ? selected.filter((item) => item.version.id === input.sourceSpan?.sourceVersionId)
+    : selected;
+
   try {
     const routed = await input.routerExecute({
       profile: AI_TASK_PROFILES.balanced,
@@ -172,8 +257,9 @@ export async function executeGroundedChat(input: {
     const raw = routed.value;
     const candidate = typeof raw === 'string' ? JSON.parse(raw) : raw;
     const parsed = GroundedChatResponseSchema.parse(candidate);
-    return validateGroundedCitations(parsed, usable.map((item) => item.version));
+    return validateGroundedCitations(parsed, contextVersions.map((item) => item.version), input.sourceSpan);
   } catch (error) {
+    if (error instanceof SelectSmallerSourceError) throw error;
     if (error instanceof z.ZodError) return unsupportedResponse();
     throw normalizeSourceError(error);
   }
@@ -224,6 +310,18 @@ function selectionUnavailableResult(): SourcesHttpResult {
   };
 }
 
+function selectSmallerSourceResult(): SourcesHttpResult {
+  return {
+    status: 400,
+    body: {
+      status: 'select_smaller_source',
+      code: 'INVALID_INPUT',
+      userMessageVi: 'Nguồn hoặc đoạn đã chọn vượt quá giới hạn 32.000 token. Hãy chọn nguồn nhỏ hơn hoặc một đoạn cụ thể.',
+      suggestedActionVi: 'Chọn ít nguồn hơn hoặc bôi một đoạn ngắn hơn, rồi hỏi lại.',
+    },
+  };
+}
+
 function providerErrorResult(error: unknown): SourcesHttpResult {
   const normalized: NormalizedSourceError = normalizeSourceError(error);
   return {
@@ -238,10 +336,26 @@ function providerErrorResult(error: unknown): SourcesHttpResult {
   };
 }
 
+async function verifyOrReject(
+  accessToken: string,
+  verifyAccessToken?: (accessToken: string) => Promise<LearnerAuthResult>,
+): Promise<SourcesHttpResult | { ok: true; userId: string; accessToken: string }> {
+  if (!verifyAccessToken) return authRequiredResult();
+  try {
+    const auth = await verifyAccessToken(accessToken);
+    if (auth.status === 'auth_required') return authRequiredResult();
+    if (auth.status !== 'ok') return unavailableResult();
+    return { ok: true, userId: auth.userId, accessToken: auth.accessToken };
+  } catch {
+    return unavailableResult();
+  }
+}
+
 export async function handleGroundedChatRequest(input: {
   authorizationHeader?: string | null;
   body: unknown;
   cloudConfigured: boolean;
+  verifyAccessToken?: (accessToken: string) => Promise<LearnerAuthResult>;
   repositoryForToken: (accessToken: string) => SourcesRepository;
   routerExecute: GroundedRouterExecute;
   webSearch?: WebSearchFn;
@@ -249,6 +363,9 @@ export async function handleGroundedChatRequest(input: {
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();
   if (!input.cloudConfigured) return unavailableResult();
+
+  const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
+  if (!('ok' in auth)) return auth;
 
   const parsed = GroundedChatRequestSchema.safeParse(input.body);
   if (!parsed.success) {
@@ -267,7 +384,7 @@ export async function handleGroundedChatRequest(input: {
 
   let hydration: SourceHydrationResult;
   try {
-    hydration = await input.repositoryForToken(accessToken).getSelectedVersions(parsed.data.selectedVersionIds);
+    hydration = await input.repositoryForToken(auth.accessToken).getSelectedVersions(parsed.data.selectedVersionIds);
   } catch {
     return unavailableResult();
   }
@@ -277,6 +394,9 @@ export async function handleGroundedChatRequest(input: {
 
   const usable = hydration.items.filter(isUsableSource);
   if (!usable.length) {
+    return { status: 200, body: unsupportedResponse() };
+  }
+  if (!isValidSelectedSpan(parsed.data.sourceSpan, usable)) {
     return { status: 200, body: unsupportedResponse() };
   }
 
@@ -292,6 +412,7 @@ export async function handleGroundedChatRequest(input: {
     });
     return { status: 200, body: result };
   } catch (error) {
+    if (error instanceof SelectSmallerSourceError) return selectSmallerSourceResult();
     return providerErrorResult(error);
   }
 }
@@ -301,11 +422,17 @@ export async function handleWebResearchRequest(input: {
   body: unknown;
   cloudConfigured: boolean;
   searchAdapterConfigured: boolean;
+  verifyAccessToken?: (accessToken: string) => Promise<LearnerAuthResult>;
   webSearch?: WebSearchFn;
 }): Promise<SourcesHttpResult> {
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();
-  if (!input.cloudConfigured || !input.searchAdapterConfigured || !input.webSearch) {
+  if (!input.cloudConfigured) return unavailableResult();
+
+  const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
+  if (!('ok' in auth)) return auth;
+
+  if (!input.searchAdapterConfigured || !input.webSearch) {
     return unavailableResult();
   }
 
