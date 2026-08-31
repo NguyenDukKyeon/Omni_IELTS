@@ -316,18 +316,19 @@ and VTT/SRT; bounded base64 with declared MIME type for PDF/DOCX; and
 metadata-only YouTube/audio/chart handoffs. The server decodes binary payloads,
 checks the declared type, byte bound, and basic PDF/DOCX signature, then calls
 the existing SSRF-safe URL extractor or supported document extractor. The
-order is feature flag, request validation, verified JWT, `source-import` quota,
-then learner-JWT/RLS persistence and extraction. A ready import persists one
+order is feature flag, request validation, verified JWT, semantic extraction
+validation, `source-import` quota, then learner-JWT/RLS persistence. A ready import persists one
 record and one immutable version; a handoff persists a record without a
 version; failures never produce a ready record and return typed retry state.
 
 `POST /api/sources/artifact-jobs` accepts exactly one `sourceVersionId`, an
 optional validated `SourceSpan`, one destination, and bounded target-band and
 custom-instruction fields. It hydrates the selected version through the
-request-scoped learner-JWT repository, consumes a separate
-`artifact-generation` quota, invokes the existing balanced text executor with
-an empty tool list and no web search, and persists only the job. It returns the
-real job state (`queued`, `processing`, `validating`, `ready`, `needs_review`,
+request-scoped learner-JWT repository, validates the exact selected
+record/version pair and supplied span, then consumes a separate
+`artifact-generation` quota. It invokes the existing balanced text executor
+with an empty tool list and no web search, and persists only the job. It returns
+the real job state (`queued`, `processing`, `validating`, `ready`, `needs_review`,
 or typed failure); destination rows are never written. The learner-scoped
 `GET /api/sources/artifact-jobs/:jobId` endpoint refreshes state without
 disclosing foreign IDs. `GET /api/sources/library` and
@@ -335,6 +336,35 @@ disclosing foreign IDs. `GET /api/sources/library` and
 paths for the flag-ON workspace. The browser wrapper obtains the current
 session token ephemerally per request; it never stores, logs, or returns the
 token to component state.
+
+### 4.1.3 Batch C.2 security and integrity correction
+
+The import endpoint is admitted by headers before any body parser. The global
+`express.json` middleware skips the import path, including its accepted
+trailing-slash form. A route-local parser is installed only after the feature
+flag, Bearer syntax, verified learner JWT, exact JSON content type, and safe
+declared `Content-Length` checks succeed. Its byte limit is derived from the
+bounded base64 field plus a fixed 16 KiB JSON envelope allowance; chunked
+requests remain bounded by that parser. No `X-Forwarded-For` value is used as
+identity or for rate limiting.
+
+Before Mammoth, DOCX central-directory metadata is checked against 512 entries,
+4 MiB per-entry uncompressed size, 16 MiB total uncompressed size, and a
+100:1 compression-ratio ceiling. Malformed, encrypted, multi-disk, ZIP64, and
+unsupported ZIP structures fail closed. PDF and DOCX parsing is isolated in a
+short-lived process with a 256 MiB V8 old-space limit and a 15 second timeout;
+PDF parsing is limited to 100 pages through public `pdf-parse` controls. Both
+extractors reject output over 200,000 Unicode code points or 2,000 blocks and
+return typed `RESOURCE_LIMIT_EXCEEDED` without truncating or creating a
+version.
+
+Source import consumes `source-import` quota only after verified identity and
+successful semantic extraction validation. Artifact generation hydrates exactly
+one RLS-visible version, requires the selected version to belong to its record
+and the record state to be exactly `ready`, validates all supplied span IDs,
+then consumes quota before job persistence or routing. Historical versions are
+allowed when they belong to that ready record, even when they are not its
+`currentVersionId`.
 
 ### 4.2 Selection & Context Formation
 

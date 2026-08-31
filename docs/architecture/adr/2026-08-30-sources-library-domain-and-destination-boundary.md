@@ -98,6 +98,36 @@ The Batch C correction supersedes the earlier implementation notes where they co
 3. Source import authenticates the verified learner before binary decoding, hashing, extraction, or quota consumption. Cheap schema and length checks remain before authentication. Semantically invalid or oversized requests consume no quota, and raw source bytes/text never enter logs or error bodies.
 4. Source import and artifact generation use distinct documented in-process quota configurations and defaults. Artifact target bands are validated at 3.0 through 9.0 in 0.5 increments by the request schema, job factory, and UI.
 
+### 4.2 Batch C.2 security and integrity correction
+
+The import route has a header-only admission boundary before any JSON body
+parser. The global Express JSON parser explicitly skips the import path,
+including its accepted trailing-slash form. The admission boundary checks the
+feature flag, Bearer syntax, verified learner JWT, JSON content type, and a
+declared `Content-Length` before the route installs its scoped parser. That
+parser is limited to `SOURCE_IMPORT_MAX_BASE64_CHARS` plus a fixed 16 KiB JSON
+envelope allowance. Requests without a declared length still receive the same
+bounded parser, so chunked bodies cannot bypass the limit. No client-provided
+forwarded IP header is used for identity or rate limiting.
+
+DOCX archives are inspected from central-directory metadata before Mammoth:
+512 entries maximum, 4 MiB uncompressed per entry, 16 MiB total uncompressed,
+and a 100:1 entry compression-ratio ceiling. Malformed, encrypted,
+multi-disk, ZIP64, and unsupported-structure archives fail closed. PDF and
+DOCX parsing runs in a short-lived child process with a 256 MiB V8 old-space
+limit and a 15 second timeout. PDF extraction is limited to the first 100
+pages and uses only public `pdf-parse` controls. Both formats reject, rather
+than truncate, output over 200,000 Unicode code points or 2,000 blocks. These
+failures use the typed `RESOURCE_LIMIT_EXCEEDED` result and never create a
+source version.
+
+Artifact generation hydrates exactly one RLS-visible version, requires
+`version.sourceId === record.id` and `record.processingState === 'ready'`, and
+validates every supplied span record/version/block ID against that pair before
+the `artifact-generation` quota, job writes, or router call. A historical
+version is valid when it belongs to that ready record; `currentVersionId` is
+not required to equal the selected version.
+
 ## 5. Consequences & Trade-offs
 
 ### Positive

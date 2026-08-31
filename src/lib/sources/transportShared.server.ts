@@ -147,4 +147,3 @@ export function applyVerifiedQuota(
   if (quota.allowed) return null;
   return quotaExceededResult(quota.retryAfterSeconds);
 }
-

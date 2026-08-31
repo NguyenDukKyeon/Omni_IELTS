@@ -1095,10 +1095,10 @@ the exact Zod `SourceImportRequestSchema`: bounded string content for text,
 URL, and VTT/SRT; bounded base64 plus declared MIME type for PDF/DOCX; and
 metadata-only YouTube/audio/chart handoffs. Binary payloads are decoded and
 signature-checked on the server before the existing extractor path runs.
-Flag validation, request validation, verified JWT, and the separate
-`source-import` quota precede RLS persistence. Ready imports persist one
-`SourceRecord` plus one immutable `SourceVersion`; handoffs persist no
-version; failures never create a ready record.
+Flag validation, request validation, verified JWT, semantic extraction
+validation, and the separate `source-import` quota precede RLS persistence.
+Ready imports persist one `SourceRecord` plus one immutable `SourceVersion`;
+handoffs persist no version; failures never create a ready record.
 
 `POST /api/sources/artifact-jobs` accepts one source version, an optional
 validated span, one destination, and bounded target-band/instruction fields.
@@ -1118,6 +1118,35 @@ rendered until a real learner-owned delete route is added.
 `src/lib/sources/transportShared.server.ts`,
 `src/lib/sources/sourcesApi.ts`, and the JWT/RLS write/read methods in
 `src/lib/sources/sourcesRepository.server.ts`.
+
+### Batch C.2: Security and integrity correction before Task 12
+
+This correction remains within the existing Batch C scope and does not start
+Task 12. The global JSON parser skips the import route, including its accepted
+trailing-slash form. A header-only admission gate checks the feature flag,
+Bearer syntax, verified learner JWT, JSON content type, and declared body size
+before a route-local parser is installed. The route-local limit is derived from
+the bounded base64 field plus a fixed 16 KiB JSON envelope allowance; chunked
+requests are still bounded. No client-provided forwarded IP header is trusted
+for identity or rate limiting.
+
+DOCX central-directory inspection runs before Mammoth with these fixed limits:
+512 entries, 4 MiB uncompressed per entry, 16 MiB total uncompressed, and
+100:1 maximum compression ratio. Malformed, encrypted, multi-disk, ZIP64, and
+unsupported structures fail closed. PDF and DOCX parsing runs in a short-lived
+child process with a 256 MiB V8 old-space limit and a 15 second timeout. PDF
+parsing is limited to 100 pages through public `pdf-parse` controls. Extracted
+binary output is bounded at 200,000 Unicode code points and 2,000 blocks;
+breaches return `RESOURCE_LIMIT_EXCEEDED`, reject rather than truncate, and
+create no version.
+
+Import quota is consumed only after verified authentication and semantic
+extraction validation. Artifact quota is consumed only after hydration proves
+exactly one RLS-visible version, `version.sourceId === record.id`, exact
+`processingState === 'ready'`, and valid supplied record/version/block span
+IDs. Historical versions remain eligible when they belong to the ready record,
+regardless of `currentVersionId`. Invalid integrity states do not consume
+quota, write jobs, or invoke the router.
 
 ---
 
