@@ -259,11 +259,11 @@ function applyControlledProvenance(
   span: SourceSpan,
 ): unknown {
   if (!payload || typeof payload !== 'object') return payload;
-  const value = { ...(payload as Record<string, unknown>), provenance };
+  const value: Record<string, unknown> = { ...(payload as Record<string, unknown>), provenance };
   if (destination === 'vocabulary_deck' && Array.isArray(value.cards)) {
     return {
       ...value,
-      cards: value.cards.map((card) => (
+      cards: (value.cards as unknown[]).map((card) => (
         card && typeof card === 'object' ? { ...card, sourceSpan: span } : card
       )),
     };
@@ -271,7 +271,7 @@ function applyControlledProvenance(
   if (destination === 'idea_bank' && Array.isArray(value.ideas)) {
     return {
       ...value,
-      ideas: value.ideas.map((idea) => (
+      ideas: (value.ideas as unknown[]).map((idea) => (
         idea && typeof idea === 'object' ? { ...idea, sourceSpan: span } : idea
       )),
     };

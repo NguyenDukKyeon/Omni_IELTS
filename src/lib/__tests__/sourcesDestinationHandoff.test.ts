@@ -330,7 +330,7 @@ describe('Handoff runtime provenance and span gates', () => {
           provenance,
         },
       },
-    } as SourceArtifactJob;
+    } as unknown as SourceArtifactJob;
 
     const handoff = prepareDestinationHandoff(job, { persistDestination });
     expect(handoff.navigable).toBe(false);
