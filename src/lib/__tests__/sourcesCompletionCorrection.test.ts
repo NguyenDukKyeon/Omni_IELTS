@@ -9,10 +9,12 @@ import {
   SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES,
   SOURCE_IMPORT_QUEUE_MAX_TEXT_CODE_POINTS,
   type ImportQueueItem,
+  createImportQueueCoordinator,
+  createImportQueueAdmissionController,
 } from '../sources/importQueue';
 import { createEditedSourceVersion, SourceVersionConflictError } from '../sources/versioning';
 import { handleSourceVersionEditRequest } from '../sources/libraryTransport.server';
-import { selectedVersionIdsForSources } from '../sources/sourceSelection';
+import { advanceSelectedVersionContext, selectedVersionIdsForSources } from '../sources/sourceSelection';
 import { executeGroundedChat } from '../sources/groundedChat';
 import { handleArtifactJobRequest } from '../sources/artifactTransport.server';
 import { createPendingArtifactHandoff, prepareDestinationHandoff } from '../sources/destinationHandoff';
@@ -43,6 +45,136 @@ function queuedItems(): ImportQueueItem[] {
 }
 
 describe('P03 Completion Correction D', () => {
+  it('advances an already-selected source to the newly saved version', () => {
+    expect(advanceSelectedVersionContext({ 'source-1': 'version-1' }, 'source-1', 'version-2')).toEqual({ 'source-1': 'version-2' });
+    expect(advanceSelectedVersionContext({}, 'source-1', 'version-2')).toEqual({});
+  });
+
+  it('keeps retries on one globally bounded coordinator and deduplicates rapid retry clicks', async () => {
+    let active = 0;
+    let peak = 0;
+    const requests: string[] = [];
+    const coordinator = createImportQueueCoordinator(async (request) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      requests.push(request.title);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      if (request.title === 'failed') throw new Error('expected fixture failure');
+      return { status: 'ready' as const };
+    });
+    const items = queuedItems();
+    coordinator.enqueue(items);
+    await coordinator.whenIdle();
+    const failed = coordinator.getSnapshot().find((item) => item.id === 'failed');
+    if (!failed) throw new Error('expected failed queue item');
+    coordinator.enqueue([{ ...failed, state: 'queued' }]);
+    coordinator.enqueue([{ ...failed, state: 'queued' }]);
+    await coordinator.whenIdle();
+    expect(peak).toBeLessThanOrEqual(SOURCE_IMPORT_QUEUE_CONCURRENCY);
+    expect(requests.filter((title) => title === 'failed')).toHaveLength(2);
+  });
+
+  it('releases a processed binary request from the coordinator snapshot when removed', async () => {
+    const coordinator = createImportQueueCoordinator(async () => ({ status: 'ready' as const }));
+    const item: ImportQueueItem = {
+      id: 'processed-binary',
+      request: { title: 'Processed PDF', type: 'pdf', declaredMimeType: 'application/pdf', originalFilename: 'processed.pdf', contentBase64: 'old-base64-payload' },
+      state: 'queued',
+      rawBinaryBytes: 16 * 1024 * 1024,
+    };
+    coordinator.enqueue([item]);
+    await coordinator.whenIdle();
+
+    expect(coordinator.remove(item.id)).toBe(true);
+    expect(coordinator.getSnapshot()).toEqual([]);
+    expect(JSON.stringify(coordinator.getSnapshot())).not.toContain('old-base64-payload');
+  });
+
+  it('allows binary capacity to be reserved again after the coordinator item is removed', async () => {
+    let currentItems: ImportQueueItem[] = [];
+    const admission = createImportQueueAdmissionController(() => currentItems);
+    const coordinator = createImportQueueCoordinator(async () => ({ status: 'ready' as const }));
+    const first: ImportQueueItem = {
+      id: 'first-binary',
+      request: { title: 'First PDF', type: 'pdf', declaredMimeType: 'application/pdf', originalFilename: 'first.pdf', contentBase64: 'first-base64-payload' },
+      state: 'queued',
+      rawBinaryBytes: SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES,
+    };
+    currentItems = [first];
+    coordinator.enqueue([first]);
+    await coordinator.whenIdle();
+    expect(coordinator.remove(first.id)).toBe(true);
+    currentItems = coordinator.getSnapshot();
+
+    const reservation = admission.reserve({ type: 'pdf', rawBinaryBytes: SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES });
+    const second: ImportQueueItem = {
+      id: 'second-binary',
+      request: { title: 'Second PDF', type: 'pdf', declaredMimeType: 'application/pdf', originalFilename: 'second.pdf', contentBase64: 'second-base64-payload' },
+      state: 'queued',
+      rawBinaryBytes: SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES,
+    };
+    currentItems = [second];
+    reservation.commit(second);
+    expect(currentItems).toEqual([second]);
+  });
+
+  it('removes queued work before it starts and never calls the import request', async () => {
+    let resolveFirst!: (response: { status: 'ready' }) => void;
+    const importRequest = vi.fn((request: ImportQueueItem['request']) => request.title === 'First source'
+      ? new Promise<{ status: 'ready' }>((resolve) => { resolveFirst = resolve; })
+      : Promise.resolve({ status: 'ready' as const }));
+    const coordinator = createImportQueueCoordinator(importRequest, undefined, 1);
+    const first: ImportQueueItem = {
+      id: 'first-queued-removal',
+      request: { title: 'First source', type: 'text', content: 'first' },
+      state: 'queued',
+    };
+    const item: ImportQueueItem = {
+      id: 'queued-removal',
+      request: { title: 'Queued source', type: 'text', content: 'queued' },
+      state: 'queued',
+    };
+    coordinator.enqueue([first, item]);
+    await vi.waitFor(() => expect(coordinator.getSnapshot().find((entry) => entry.id === first.id)?.state).toBe('processing'));
+    expect(coordinator.remove(item.id)).toBe(true);
+    resolveFirst({ status: 'ready' });
+    await coordinator.whenIdle();
+
+    expect(importRequest).toHaveBeenCalledTimes(1);
+    expect(importRequest).not.toHaveBeenCalledWith(item.request);
+    expect(coordinator.getSnapshot().map((entry) => entry.id)).toEqual([first.id]);
+  });
+
+  it('refuses to remove a processing item while its request is active', async () => {
+    let resolveRequest!: (response: { status: 'ready' }) => void;
+    const importRequest = vi.fn(() => new Promise<{ status: 'ready' }>((resolve) => { resolveRequest = resolve; }));
+    const coordinator = createImportQueueCoordinator(importRequest);
+    const item: ImportQueueItem = {
+      id: 'processing-removal',
+      request: { title: 'Processing source', type: 'text', content: 'processing' },
+      state: 'queued',
+    };
+    coordinator.enqueue([item]);
+    await vi.waitFor(() => expect(coordinator.getSnapshot().find((entry) => entry.id === item.id)?.state).toBe('processing'));
+
+    expect(coordinator.remove(item.id)).toBe(false);
+    expect(coordinator.getSnapshot()).toHaveLength(1);
+    resolveRequest({ status: 'ready' });
+    await coordinator.whenIdle();
+  });
+
+  it('reserves aggregate queue capacity synchronously before async staging', () => {
+    let items: ImportQueueItem[] = [];
+    const admission = createImportQueueAdmissionController(() => items);
+    const first = admission.reserve({ type: 'docx', rawBinaryBytes: SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES - 1 });
+    expect(() => admission.reserve({ type: 'docx', rawBinaryBytes: 2 })).toThrow(ImportQueueLimitError);
+    first.release();
+    expect(() => admission.reserve({ type: 'docx', rawBinaryBytes: SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES })).not.toThrow();
+    items = Array.from({ length: SOURCE_IMPORT_QUEUE_MAX_ITEMS }, (_, index) => ({ id: String(index), request: { title: String(index), type: 'text' as const, content: '' }, state: 'queued' as const }));
+    expect(() => admission.reserve({ type: 'text', textCodePoints: 1 })).toThrow(ImportQueueLimitError);
+  });
+
   it('processes a real bounded import queue with independent sibling states', async () => {
     const active: number[] = [];
     let maxActive = 0;

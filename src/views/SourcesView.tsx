@@ -10,7 +10,7 @@ import {
 } from '../lib/sources/sourcesApi';
 import { getSession, signInWithGoogle } from '../services/supabase';
 import { sourcesStorage } from '../services/sourcesStorage';
-import { selectedVersionIdForSource, selectedVersionIdsForSources } from '../lib/sources/sourceSelection';
+import { advanceSelectedVersionContext, selectedVersionIdForSource, selectedVersionIdsForSources } from '../lib/sources/sourceSelection';
 import type { ModuleId } from '../types';
 import type { SourceCollection, SourceRecord, SourceSpan, SourceVersion } from '../types/sources';
 import { ArtifactStudioModal } from '../components/sources/ArtifactStudioModal';
@@ -192,6 +192,7 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
     setReaderState('ready');
     setReaderError(undefined);
     setSelectedSpan(undefined);
+    setSelectedVersionIdsBySource((current) => advanceSelectedVersionContext(current, sourceRecord.id, sourceVersion.id));
   };
 
   const saveEditedVersion = async (editedText: string) => {

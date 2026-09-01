@@ -2,6 +2,17 @@ import type { SourceRecord } from '../../types/sources';
 
 export type SelectedSourceVersionIds = Readonly<Record<string, string>>;
 
+export function advanceSelectedVersionContext(
+  selectedVersionIdsBySource: SelectedSourceVersionIds,
+  sourceId: string,
+  versionId: string,
+): Record<string, string> {
+  if (!Object.prototype.hasOwnProperty.call(selectedVersionIdsBySource, sourceId)) {
+    return { ...selectedVersionIdsBySource };
+  }
+  return { ...selectedVersionIdsBySource, [sourceId]: versionId };
+}
+
 /**
  * Returns the learner's explicit version selection. A present historical value
  * is authoritative even when it is no longer visible; the caller must surface

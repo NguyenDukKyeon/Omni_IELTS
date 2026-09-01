@@ -1,11 +1,11 @@
 import { FileUp, LoaderCircle, Plus, Send, X } from 'lucide-react';
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { importSource, SourcesApiError, type SourceImportResponse } from '../../lib/sources/sourcesApi';
 import type { SourceImportRequest } from '../../lib/sources/importTransport.server';
 import {
-  assertImportQueueAdmission,
+  createImportQueueAdmissionController,
+  createImportQueueCoordinator,
   ImportQueueLimitError,
-  runImportQueue,
   SOURCE_IMPORT_QUEUE_CONCURRENCY,
   SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES,
   SOURCE_IMPORT_QUEUE_MAX_ITEMS,
@@ -100,8 +100,20 @@ export function SourceImportPanel({
   const [file, setFile] = useState<File | undefined>();
   const [formState, setFormState] = useState<ImportPanelState>('idle');
   const [errorMessage, setErrorMessage] = useState<string>();
-  const [queue, setQueue] = useState<ImportQueueItem[]>([]);
+  const [queue, setQueueState] = useState<ImportQueueItem[]>([]);
+  const queueRef = useRef<ImportQueueItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const updateQueue = (update: ImportQueueItem[] | ((current: ImportQueueItem[]) => ImportQueueItem[])) => {
+    const next = typeof update === 'function' ? update(queueRef.current) : update;
+    queueRef.current = next;
+    setQueueState(next);
+  };
+
+  const admission = useMemo(() => createImportQueueAdmissionController(() => queueRef.current), []);
+  const coordinator = useMemo(() => createImportQueueCoordinator(importSourceRequest, (nextItems) => {
+    updateQueue((current) => current.map((item) => nextItems.find((next) => next.id === item.id) || item));
+  }), [importSourceRequest]);
 
   const buildRequest = async (): Promise<SourceImportRequest> => {
     const trimmedTitle = title.trim();
@@ -121,15 +133,17 @@ export function SourceImportPanel({
   };
 
   const mergeQueue = (nextItems: ImportQueueItem[]) => {
-    setQueue((current) => current.map((item) => nextItems.find((next) => next.id === item.id) || item));
+    updateQueue((current) => current.map((item) => nextItems.find((next) => next.id === item.id) || item));
   };
 
   const processItems = async (items: ImportQueueItem[]) => {
     if (items.length === 0) return;
     setIsProcessing(true);
-    const completed = await runImportQueue(items, importSourceRequest, mergeQueue);
+    const acceptedIds = coordinator.enqueue(items);
+    await coordinator.whenIdle();
+    const completed = coordinator.getSnapshot();
     mergeQueue(completed);
-    completed.forEach((item) => {
+    completed.filter((item) => acceptedIds.includes(item.id)).forEach((item) => {
       if (item.response) onImported(item.response);
     });
     setIsProcessing(false);
@@ -140,19 +154,27 @@ export function SourceImportPanel({
     try {
       const binaryType = type === 'pdf' || type === 'docx';
       const textCodePoints = binaryType ? undefined : countCodePoints(content);
-      if (binaryType) {
-        if (!file) throw new Error('file_required');
-        assertImportQueueAdmission(queue, { type, rawBinaryBytes: file.size });
-      } else {
-        assertImportQueueAdmission(queue, { type, textCodePoints });
+      const candidate = binaryType
+        ? (() => {
+          if (!file) throw new Error('file_required');
+          return { type, rawBinaryBytes: file.size } as const;
+        })()
+        : { type, textCodePoints } as const;
+      const reservation = admission.reserve(candidate);
+      try {
+        const request = await buildRequest();
+        const item = {
+          id: queueItemId(),
+          request,
+          state: 'queued' as const,
+          ...(binaryType ? { rawBinaryBytes: file?.size || 0 } : { textCodePoints }),
+        };
+        updateQueue((current) => [...current, item]);
+        reservation.commit(item);
+      } catch (error) {
+        reservation.release();
+        throw error;
       }
-      const request = await buildRequest();
-      setQueue((current) => [...current, {
-        id: queueItemId(),
-        request,
-        state: 'queued',
-        ...(binaryType ? { rawBinaryBytes: file?.size || 0 } : { textCodePoints }),
-      }]);
       setFormState('idle');
       setErrorMessage(undefined);
       setTitle('');
@@ -171,12 +193,12 @@ export function SourceImportPanel({
 
   const retryItem = (item: ImportQueueItem) => {
     const retry = { ...item, state: 'queued' as const, errorMessage: undefined };
-    mergeQueue([retry]);
     void processItems([retry]);
   };
 
   const removeItem = (itemId: string) => {
-    setQueue((current) => current.filter((item) => item.id !== itemId || item.state === 'processing'));
+    coordinator.remove(itemId);
+    updateQueue((current) => current.filter((item) => item.id !== itemId || item.state === 'processing'));
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -251,7 +273,6 @@ export function SourceImportPanel({
             {retryableItems.length > 0 ? (
               <button type="button" disabled={isProcessing} data-ux-control="sources.import.retry" data-ux-flow="sources.import.submit" onClick={() => {
                 const retryItems = retryableItems.map((item) => ({ ...item, state: 'queued' as const, errorMessage: undefined }));
-                mergeQueue(retryItems);
                 void processItems(retryItems);
               }}>
                 Thử lại mục lỗi

@@ -45,6 +45,46 @@ export type ImportQueueAdmissionCandidate = {
 export type ImportQueueRequest = (request: SourceImportRequest) => Promise<SourceImportResponse>;
 export type ImportQueueUpdate = (items: ImportQueueItem[]) => void;
 
+export type ImportQueueReservation = {
+  commit(item: ImportQueueItem): void;
+  release(): void;
+};
+
+export function createImportQueueAdmissionController(getItems: () => readonly ImportQueueItem[]) {
+  const reservations = new Map<number, ImportQueueAdmissionCandidate>();
+  let nextReservationId = 0;
+
+  return {
+    reserve(candidate: ImportQueueAdmissionCandidate): ImportQueueReservation {
+      const reserved = [...reservations.values()];
+      const current = getItems();
+      const projected = [...current, ...reserved.map((value, index) => ({
+        id: `reservation-${index}`,
+        request: { title: '', type: value.type, content: '' } as SourceImportRequest,
+        state: 'queued' as const,
+        rawBinaryBytes: value.rawBinaryBytes,
+        textCodePoints: value.textCodePoints,
+      }))];
+      assertImportQueueAdmission(projected, candidate);
+      const id = nextReservationId++;
+      reservations.set(id, candidate);
+      let settled = false;
+      return {
+        commit(item: ImportQueueItem) {
+          if (settled) return;
+          settled = true;
+          reservations.delete(id);
+        },
+        release() {
+          if (settled) return;
+          settled = true;
+          reservations.delete(id);
+        },
+      };
+    },
+  };
+}
+
 export function assertImportQueueAdmission(
   items: readonly ImportQueueItem[],
   candidate: ImportQueueAdmissionCandidate,
@@ -129,4 +169,91 @@ export async function runImportQueue(
 
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return items;
+}
+
+export function createImportQueueCoordinator(
+  importRequest: ImportQueueRequest,
+  onUpdate: ImportQueueUpdate = () => undefined,
+  concurrency = SOURCE_IMPORT_QUEUE_CONCURRENCY,
+) {
+  const items = new Map<string, ImportQueueItem>();
+  const pending: string[] = [];
+  const waiters: Array<() => void> = [];
+  let active = 0;
+  let pumping = false;
+
+  const snapshot = () => [...items.values()].map((item) => ({ ...item }));
+  const publish = () => onUpdate(snapshot());
+  const resolveIdle = () => {
+    if (active === 0 && pending.length === 0) {
+      while (waiters.length) waiters.shift()?.();
+    }
+  };
+  const pump = async () => {
+    if (pumping) return;
+    pumping = true;
+    try {
+      while (active < Math.max(1, Math.floor(concurrency)) && pending.length > 0) {
+        const id = pending.shift();
+        const item = id ? items.get(id) : undefined;
+        if (!item || item.state !== 'queued') continue;
+        active += 1;
+        item.state = 'processing';
+        item.attempts = (item.attempts || 0) + 1;
+        item.errorMessage = undefined;
+        publish();
+        void (async () => {
+          try {
+            item.response = await importRequest(item.request);
+            item.state = stateForResponse(item.response);
+          } catch (error) {
+            Object.assign(item, stateForError(error));
+          } finally {
+            active -= 1;
+            publish();
+            void pump();
+            resolveIdle();
+          }
+        })();
+      }
+    } finally {
+      pumping = false;
+    }
+    resolveIdle();
+  };
+
+  return {
+    enqueue(inputItems: readonly ImportQueueItem[]) {
+      const accepted: string[] = [];
+      for (const input of inputItems) {
+        const existing = items.get(input.id);
+        if (existing?.state === 'processing' || existing?.state === 'queued') continue;
+        const item = { ...input };
+        items.set(item.id, item);
+        if (item.state === 'queued') {
+          pending.push(item.id);
+          accepted.push(item.id);
+        }
+      }
+      publish();
+      void pump();
+      return accepted;
+    },
+    remove(itemId: string) {
+      const item = items.get(itemId);
+      if (!item || item.state === 'processing') return false;
+      items.delete(itemId);
+      for (let index = pending.length - 1; index >= 0; index -= 1) {
+        if (pending[index] === itemId) pending.splice(index, 1);
+      }
+      publish();
+      resolveIdle();
+      return true;
+    },
+    getSnapshot: snapshot,
+    whenIdle() {
+      if (active === 0 && pending.length === 0) return Promise.resolve();
+      return new Promise<void>((resolve) => waiters.push(resolve));
+    },
+  };
 }
