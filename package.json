@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:sources:rls:db": "tsx scripts/test-sources-rls-postgres.ts",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "node scripts/test-e2e-deterministic.mjs",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
     "test:web-bridge:live": "node scripts/web-bridge-live-canary.mjs",
     "check:web-bridge:live": "npm run test:web-bridge:live",

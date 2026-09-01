@@ -10,6 +10,7 @@ import type {
   SourceProvenance,
 } from '../../types/sources';
 import type { LearnerAuthResult, SourcesRepository, SourceHydrationResult } from './groundedChat';
+import { SourceVersionConflictError, SourceVersionEditError } from './versioning';
 
 export function resolveSourcesSupabaseConfig(env: Record<string, string | undefined>): {
   supabaseUrl: string;
@@ -248,9 +249,23 @@ export type SourcesLibrarySnapshot = {
   collections: SourceCollection[];
 };
 
+export type CreateEditedVersionInput = {
+  sourceId: string;
+  baseVersionId: string;
+  editedText: string;
+  userId: string;
+};
+
+export type CreateEditedVersionResult = {
+  sourceRecord: SourceRecord;
+  sourceVersion: SourceVersion;
+};
+
 export interface SourcesPersistenceRepository extends SourcesRepository {
   listLibrary(): Promise<SourcesLibrarySnapshot>;
   getVersionById(versionId: string): Promise<SourceVersion | undefined>;
+  listVersionsBySource(sourceId: string): Promise<SourceVersion[]>;
+  createEditedVersion(input: CreateEditedVersionInput): Promise<CreateEditedVersionResult>;
   saveRecord(record: SourceRecord): Promise<SourceRecord>;
   saveVersion(version: SourceVersion, userId: string): Promise<SourceVersion>;
   updateRecord(record: SourceRecord): Promise<SourceRecord>;
@@ -333,6 +348,56 @@ export function createLearnerJwtSourcesRepository(input: {
         .maybeSingle();
       if (error) throw error;
       return data ? versionFromRow(data as Record<string, unknown>) : undefined;
+    },
+
+    async listVersionsBySource(sourceId: string): Promise<SourceVersion[]> {
+      const { data, error } = await client
+        .from('source_versions')
+        .select('id, source_id, version_number, stage, content_hash, plain_text, blocks, word_count, page_count, duration_ms, media_url, extraction_report, created_at')
+        .eq('source_id', sourceId)
+        .order('version_number', { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((row) => versionFromRow(row as Record<string, unknown>));
+    },
+
+    async createEditedVersion(input: CreateEditedVersionInput): Promise<CreateEditedVersionResult> {
+      const { data, error } = await client.rpc('append_source_edited_version', {
+        p_source_id: input.sourceId,
+        p_base_version_id: input.baseVersionId,
+        p_edited_text: input.editedText,
+      });
+      if (error) {
+        if (error.code === 'P0001' && /VERSION_CONFLICT/i.test(error.message)) {
+          throw new SourceVersionConflictError();
+        }
+        if (error.code === 'P0001' && /RESOURCE_LIMIT_EXCEEDED/i.test(error.message)) {
+          throw new SourceVersionEditError('RESOURCE_LIMIT_EXCEEDED', 'Edited source text exceeds the safe limit.');
+        }
+        if (error.code === 'P0001' && /INVALID_INPUT/i.test(error.message)) {
+          throw new SourceVersionEditError('INVALID_INPUT', 'Edited source text is invalid.');
+        }
+        throw error;
+      }
+
+      const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+      if (!row) throw new SourceVersionConflictError();
+      const sourceVersion = versionFromRow(row);
+      if (sourceVersion.sourceId !== input.sourceId || sourceVersion.stage !== 'edited') {
+        throw new SourceVersionConflictError();
+      }
+
+      const { data: recordData, error: recordError } = await client
+        .from('source_records')
+        .select('id, user_id, title, summary, media_type, collection_ids, tags, provenance, current_version_id, processing_state, last_used_at, created_at, updated_at')
+        .eq('id', input.sourceId)
+        .maybeSingle();
+      if (recordError) throw recordError;
+      if (!recordData) throw new SourceVersionConflictError();
+      const sourceRecord = recordFromRow(recordData as Record<string, unknown>);
+      if (sourceRecord.userId !== input.userId || sourceRecord.currentVersionId !== sourceVersion.id) {
+        throw new SourceVersionConflictError();
+      }
+      return { sourceRecord, sourceVersion };
     },
 
     async saveRecord(record: SourceRecord): Promise<SourceRecord> {

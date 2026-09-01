@@ -6,6 +6,8 @@ import { routePendingArtifactHandoff } from '../sources/artifactNavigation';
 import { createPendingArtifactHandoff, prepareDestinationHandoff } from '../sources/destinationHandoff';
 import { createImportJob, processImportJob } from '../sources/importJobMachine';
 import { handleArtifactJobRequest } from '../sources/artifactTransport.server';
+import { handleSourceVersionEditRequest } from '../sources/libraryTransport.server';
+import { createEditedSourceVersion, SourceVersionConflictError } from '../sources/versioning';
 import type { SourceArtifactJob, SourceRecord, SourceVersion } from '../../types/sources';
 import { UX_CONTROL_CONTRACTS } from '../uxFlowContracts';
 
@@ -88,16 +90,33 @@ describe('Task 12 deterministic Sources full-flow proof', () => {
     const sourceVersion = imported.sourceVersion;
     const sourceRecord = imported.sourceRecord;
     if (!sourceVersion || !sourceRecord) throw new Error('expected deterministic import fixture');
-    const editedVersion: SourceVersion = {
-      ...sourceVersion,
-      id: 'task12-unit-version-v2',
-      versionNumber: 2,
-      stage: 'edited',
-      contentHash: 'task12-unit-version-hash-v2',
-      plainText: `${sourceVersion.plainText} Edited conclusion.`,
+    let currentRecord = sourceRecord;
+    const versions = new Map([[sourceVersion.id, sourceVersion]]);
+    const versionRepository = {
+      createEditedVersion: vi.fn(async (input: { sourceId: string; baseVersionId: string; editedText: string; userId: string }) => {
+        if (input.userId !== currentRecord.userId || input.sourceId !== currentRecord.id || input.baseVersionId !== currentRecord.currentVersionId) throw new SourceVersionConflictError();
+        const edited = createEditedSourceVersion({ sourceId: currentRecord.id, versionNumber: versions.size + 1, editedText: input.editedText, id: 'task12-unit-version-v2', createdAt: '2026-09-01T00:01:00.000Z' });
+        versions.set(edited.id, edited);
+        currentRecord = { ...currentRecord, currentVersionId: edited.id, summary: edited.plainText.slice(0, 280), updatedAt: edited.createdAt };
+        return { sourceRecord: currentRecord, sourceVersion: edited };
+      }),
     };
+    const editResult = await handleSourceVersionEditRequest({
+      featureEnabled: true,
+      authorizationHeader: `Bearer ${ACCESS_TOKEN}`,
+      body: { sourceId: sourceRecord.id, baseVersionId: sourceVersion.id, editedText: `${sourceVersion.plainText}\n\nEdited conclusion.` },
+      cloudConfigured: true,
+      verifyAccessToken: vi.fn(async () => ({ status: 'ok' as const, userId: USER_ID, accessToken: ACCESS_TOKEN })),
+      repositoryForToken: vi.fn(() => versionRepository as never),
+    });
+    expect(editResult.status).toBe(200);
+    const editedVersion = editResult.body.sourceVersion as SourceVersion;
+    const editedRecord = editResult.body.sourceRecord as SourceRecord;
     expect(editedVersion.id).not.toBe(sourceVersion.id);
+    expect(editedVersion.stage).toBe('edited');
+    expect(editedVersion.versionNumber).toBe(2);
     expect(sourceVersion.plainText).not.toContain('Edited conclusion');
+    expect(editedRecord.provenance).toEqual(sourceRecord.provenance);
 
     const sourceSpan = { sourceId: sourceRecord.id, sourceVersionId: editedVersion.id, blockIds: [editedVersion.blocks[0].id] };
     const savedJobs: SourceArtifactJob[] = [];

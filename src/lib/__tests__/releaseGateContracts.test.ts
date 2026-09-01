@@ -108,7 +108,19 @@ describe('public beta release gate and CI contracts', () => {
       expect(scripts['test:web-bridge:live']).toBe('node scripts/web-bridge-live-canary.mjs');
       expect(scripts['check:web-bridge:live']).toBe('npm run test:web-bridge:live');
       expect(scripts['test:e2e:live']).toBe('playwright test --config=playwright.live.config.ts');
-      expect(scripts['test:e2e']).toBe('playwright test');
+      expect(scripts['test:e2e']).toBe('node scripts/test-e2e-deterministic.mjs');
+    });
+
+    it('runs the legacy flag-off E2E and the dedicated flag-on Sources E2E in separate fresh runs', () => {
+      const runner = readFileSync(resolve(root, 'scripts/test-e2e-deterministic.mjs'), 'utf8');
+      expect(runner).toContain("OMNI_RUN_SOURCES_E2E: 'false'");
+      expect(runner).toContain("OMNI_RUN_SOURCES_E2E: 'true'");
+      expect(runner).toContain("OMNI_SOURCES_LIBRARY_V2: 'false'");
+      expect(runner).toContain("OMNI_SOURCES_LIBRARY_V2: 'true'");
+      expect(runner).toContain("['e2e/sources-library.spec.ts', ...forwardedArgs]");
+      expect(runner).toContain("path.resolve(process.cwd(), 'node_modules', '@playwright', 'test', 'cli.js')");
+      expect(runner).toContain("spawnSync(process.execPath, [playwrightCli, 'test'");
+      expect(runner).toContain("OMNI_DETERMINISTIC_E2E: 'true'");
     });
   });
 

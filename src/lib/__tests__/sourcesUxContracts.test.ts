@@ -45,6 +45,13 @@ const sourceControlIds = [
   'sources.import.sign-in',
   'sources.artifact.open-modal',
   'sources.reader.select-span',
+  'sources.reader.version-history',
+  'sources.reader.version-select',
+  'sources.reader.edit-open',
+  'sources.reader.edit-form',
+  'sources.reader.edit-text',
+  'sources.reader.edit-save',
+  'sources.reader.edit-cancel',
   'sources.chat.send',
   'sources.chat.web-research',
   'sources.chat.citation-open',
@@ -81,6 +88,7 @@ const sourceControlIds = [
   'sources.collection.select',
   'sources.import.close',
   'sources.import.form',
+  'sources.import.queue-add',
   'sources.import.title',
   'sources.import.type',
   'sources.import.paste-text',
@@ -91,6 +99,8 @@ const sourceControlIds = [
   'sources.import.youtube',
   'sources.import.submit',
   'sources.import.retry',
+  'sources.import.queue-retry',
+  'sources.import.queue-remove',
 ];
 
 describe('Sources Library Explorer UX contracts', () => {

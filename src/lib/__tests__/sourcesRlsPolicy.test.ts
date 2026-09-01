@@ -4,6 +4,7 @@ import { sourcesStorage, SourceVersionConflictError } from '../../services/sourc
 import { createSourceRecord, createSourceVersion } from '../sources/sourceFactories';
 
 const sql = readFileSync('supabase/migrations/202608300001_sources_library.sql', 'utf8');
+const editSql = readFileSync('supabase/migrations/202609010001_sources_immutable_edit.sql', 'utf8');
 
 type Actor = { id: string };
 type RecordRow = { id: string; user_id: string };
@@ -137,6 +138,16 @@ describe('P03 source_versions RLS and immutability', () => {
       plainText: 'A second immutable attempt must not overwrite version 1.',
     });
     await expect(sourcesStorage.saveVersion(duplicateNumber, alice.id)).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+  });
+
+  it('defines an authenticated atomic edit operation with server-owned derived fields', () => {
+    expect(editSql).toMatch(/CREATE OR REPLACE FUNCTION public\.append_source_edited_version\(\s*p_source_id UUID,\s*p_base_version_id UUID,\s*p_edited_text TEXT/s);
+    expect(editSql).toContain("'edited'");
+    expect(editSql).toContain("digest(convert_to(v_cleaned, 'UTF8'), 'sha256')");
+    expect(editSql).toContain('FOR UPDATE');
+    expect(editSql).toContain('VERSION_CONFLICT');
+    expect(editSql).toContain('GRANT EXECUTE ON FUNCTION public.append_source_edited_version');
+    expect(editSql).not.toMatch(/p_content_hash|p_blocks|p_stage|p_version_number/i);
   });
 });
 

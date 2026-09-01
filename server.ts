@@ -68,7 +68,9 @@ import {
   handleArtifactJobStatusRequest,
 } from "./src/lib/sources/artifactTransport.server";
 import {
+  handleSourceVersionEditRequest,
   handleSourceVersionRequest,
+  handleSourceVersionsRequest,
   handleSourcesLibraryRequest,
 } from "./src/lib/sources/libraryTransport.server";
 import { injectSourcesRuntimeFlag, parseSourcesLibraryV2Env } from "./src/lib/sources/featureFlags.server";
@@ -8585,6 +8587,48 @@ app.get('/api/sources/versions/:versionId', async (req, res) => {
     featureEnabled: parseSourcesLibraryV2Env(process.env),
     authorizationHeader: req.header('authorization'),
     versionId: req.params.versionId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.get('/api/sources/sources/:sourceId/versions', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourceVersionsRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    sourceId: req.params.sourceId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.post('/api/sources/versions', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourceVersionEditRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
     cloudConfigured: cloud.configured,
     verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
       accessToken,

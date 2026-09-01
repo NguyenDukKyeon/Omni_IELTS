@@ -4,6 +4,8 @@ import pg from 'pg';
 
 const { Client } = pg;
 const MIGRATION_PATH = 'supabase/migrations/202608300001_sources_library.sql';
+const VERSION_EDIT_MIGRATION_PATH = 'supabase/migrations/202609010001_sources_immutable_edit.sql';
+const MIGRATION_PATHS = [MIGRATION_PATH, VERSION_EDIT_MIGRATION_PATH];
 export const REQUIRED_DISPOSABLE_DB_NAME = 'omni_sources_rls_test';
 export const REQUIRED_MARKER_NAME = 'OMNI_SOURCES_RLS_TEST_ENVIRONMENT';
 export const REDACTED_DISPOSABLE_DB_URL = '[redacted disposable database URL]';
@@ -219,9 +221,10 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   details.push('PASS: Auth schema, functions, and authenticated role permissions initialized');
 
   // 4. Apply migration SQL
-  const migrationSql = readFileSync(MIGRATION_PATH, 'utf8');
-  await client.query(migrationSql);
-  details.push('PASS: 202608300001_sources_library.sql applied to disposable database');
+  for (const migrationPath of MIGRATION_PATHS) {
+    await client.query(readFileSync(migrationPath, 'utf8'));
+    details.push(`PASS: ${migrationPath.split('/').at(-1)} applied to disposable database`);
+  }
 
   // 5. Seed authenticated test identities User A and User B
   await client.query(
@@ -249,12 +252,75 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
     [versionAId, recordAId, USER_A_ID, 1, 'raw', 'hash_a1', 'Renewable energy content', JSON.stringify({ extractor: 'text' })]
   );
+  await client.query(`UPDATE public.source_records SET current_version_id = $1 WHERE id = $2;`, [versionAId, recordAId]);
   await client.query(
     `INSERT INTO public.source_artifact_jobs (id, user_id, source_version_id, destination, target_band, state)
      VALUES ($1, $2, $3, $4, $5, $6);`,
     [jobAId, USER_A_ID, versionAId, 'practice', 7.5, 'ready']
   );
   await client.query('COMMIT;');
+
+  // Proof 8: User B cannot call the append-only edit operation for User A's source.
+  let crossUserEditBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [recordAId, versionAId, 'Stolen edited source content.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) crossUserEditBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!crossUserEditBlocked) {
+    throw new Error('Policy violation: User B was able to call append_source_edited_version for User A source!');
+  }
+  details.push('PASS: Proof 8: User B cannot append an edited version for User A source');
+
+  // Proof 9: User A gets a server-derived v2 while v1 remains unchanged.
+  let editedVersionRows: any[] = [];
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  editedVersionRows = (await client.query(
+    `SELECT id, source_id, version_number, stage, content_hash, plain_text FROM public.append_source_edited_version($1, $2, $3);`,
+    [recordAId, versionAId, 'Edited   renewable policy content.\n\nA second immutable paragraph.']
+  )).rows;
+  await client.query('COMMIT;');
+  if (editedVersionRows.length !== 1 || editedVersionRows[0].version_number !== 2 || editedVersionRows[0].stage !== 'edited') {
+    throw new Error('Edited source version append did not return a server-derived v2');
+  }
+  const v1Unchanged = await client.query(`SELECT plain_text FROM public.source_versions WHERE id = $1;`, [versionAId]);
+  if (v1Unchanged.rows[0]?.plain_text !== 'Renewable energy content') {
+    throw new Error('Immutable v1 content changed after edited version append');
+  }
+  details.push('PASS: Proof 9: User A append creates server-derived edited v2 and preserves v1');
+
+  // Proof 10: A stale base version is rejected after currentVersionId advanced.
+  let staleEditBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [recordAId, versionAId, 'Stale base must not overwrite current.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) staleEditBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!staleEditBlocked) {
+    throw new Error('Optimistic version conflict was not enforced for stale source edit');
+  }
+  details.push('PASS: Proof 10: Stale source edit returns VERSION_CONFLICT without overwrite');
 
   // Proof 1: User B cannot select User A source (returns 0 rows)
   await client.query('BEGIN;');
@@ -429,9 +495,9 @@ export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: st
   const isStrict = options.strict ?? (process.env.CI === 'true' || process.argv.includes('--strict'));
 
   // 1. Verify migration SQL structure and trigger rules
-  const sql = readFileSync(MIGRATION_PATH, 'utf8');
-  if (!sql.includes('prevent_source_version_mutation') || !sql.includes('active_deleting_source_id')) {
-    details.push('FAIL: Migration SQL is missing required append-only or cascade triggers');
+  const sql = MIGRATION_PATHS.map((migrationPath) => readFileSync(migrationPath, 'utf8')).join('\n');
+  if (!sql.includes('prevent_source_version_mutation') || !sql.includes('active_deleting_source_id') || !sql.includes('append_source_edited_version')) {
+    details.push('FAIL: Migration SQL is missing required append-only, cascade, or immutable-edit controls');
     return { executable: true, proven: false, status: 'failed', details };
   }
   details.push('PASS: Migration SQL contains required append-only trigger and isolated cascade controls');

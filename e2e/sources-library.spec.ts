@@ -4,10 +4,11 @@ import { resolve } from 'node:path';
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 import { navigateToModule } from './helpers/navigation';
+import { handleSourceVersionEditRequest } from '../src/lib/sources/libraryTransport.server';
+import { createEditedSourceVersion, SourceVersionConflictError } from '../src/lib/sources/versioning';
 import {
   TASK12_ACCESS_TOKEN,
   TASK12_COLLECTIONS,
-  TASK12_EDITED_VERSION,
   TASK12_FILES,
   TASK12_OTHER_VERSIONS,
   TASK12_RECORDS,
@@ -51,6 +52,7 @@ type HarnessState = {
   groundedRequests: MockRequestBody[];
   researchRequests: MockRequestBody[];
   artifactRequests: MockRequestBody[];
+  versionEditRequests: MockRequestBody[];
   calls: string[];
   supabaseRequests: number;
   releaseLibrary?: () => void;
@@ -70,6 +72,13 @@ const TASK12_SOURCE_CONTROL_IDS = [
   'sources.import.sign-in',
   'sources.artifact.open-modal',
   'sources.reader.select-span',
+  'sources.reader.version-history',
+  'sources.reader.version-select',
+  'sources.reader.edit-open',
+  'sources.reader.edit-form',
+  'sources.reader.edit-text',
+  'sources.reader.edit-save',
+  'sources.reader.edit-cancel',
   'sources.chat.send',
   'sources.chat.web-research',
   'sources.chat.citation-open',
@@ -106,6 +115,7 @@ const TASK12_SOURCE_CONTROL_IDS = [
   'sources.collection.select',
   'sources.import.close',
   'sources.import.form',
+  'sources.import.queue-add',
   'sources.import.title',
   'sources.import.type',
   'sources.import.paste-text',
@@ -116,11 +126,12 @@ const TASK12_SOURCE_CONTROL_IDS = [
   'sources.import.youtube',
   'sources.import.submit',
   'sources.import.retry',
+  'sources.import.queue-retry',
+  'sources.import.queue-remove',
 ] as const;
 
 const TASK12_VERSIONS: Record<string, SourceVersion> = {
   [TASK12_TEXT_VERSION.id]: TASK12_TEXT_VERSION,
-  [TASK12_EDITED_VERSION.id]: TASK12_EDITED_VERSION,
   ...TASK12_OTHER_VERSIONS,
 };
 
@@ -243,6 +254,7 @@ async function installTask12Harness(page: Page, options: HarnessOptions = {}): P
     groundedRequests: [],
     researchRequests: [],
     artifactRequests: [],
+    versionEditRequests: [],
     calls: [],
     supabaseRequests: 0,
   };
@@ -251,6 +263,29 @@ async function installTask12Harness(page: Page, options: HarnessOptions = {}): P
   if (state.libraryMode === 'delayed') state.releaseLibrary = releaseLibrary;
 
   const versions: Record<string, SourceVersion> = { ...TASK12_VERSIONS };
+  const records = new Map((options.records || TASK12_RECORDS).map((record) => [record.id, { ...record }]));
+  const versionRepository = {
+    async listVersionsBySource(sourceId: string) {
+      return Object.values(versions).filter((version) => version.sourceId === sourceId).sort((left, right) => left.versionNumber - right.versionNumber);
+    },
+    async createEditedVersion(input: { sourceId: string; baseVersionId: string; editedText: string; userId: string }) {
+      const record = records.get(input.sourceId);
+      const base = versions[input.baseVersionId];
+      if (!record || record.userId !== input.userId || record.currentVersionId !== input.baseVersionId || !base) throw new SourceVersionConflictError();
+      const nextNumber = Object.values(versions).filter((version) => version.sourceId === input.sourceId).reduce((max, version) => Math.max(max, version.versionNumber), 0) + 1;
+      const next = createEditedSourceVersion({
+        sourceId: input.sourceId,
+        versionNumber: nextNumber,
+        editedText: input.editedText,
+        id: `${input.sourceId}-v${nextNumber}`,
+        createdAt: '2026-09-01T00:01:00.000Z',
+      });
+      versions[next.id] = next;
+      const updatedRecord = { ...record, currentVersionId: next.id, summary: next.plainText.slice(0, 280), updatedAt: next.createdAt };
+      records.set(record.id, updatedRecord);
+      return { sourceRecord: updatedRecord, sourceVersion: next };
+    },
+  };
   await page.addInitScript(({ accessToken, userId }) => {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('omni_') || key.startsWith('sb-')) localStorage.removeItem(key);
@@ -292,7 +327,7 @@ async function installTask12Harness(page: Page, options: HarnessOptions = {}): P
         contentType: 'application/json',
         body: JSON.stringify({
           status: 'ready',
-          records: state.libraryMode === 'empty' ? [] : (options.records || TASK12_RECORDS),
+          records: state.libraryMode === 'empty' ? [] : [...records.values()],
           collections: options.collections || TASK12_COLLECTIONS,
         }),
       });
@@ -307,6 +342,28 @@ async function installTask12Harness(page: Page, options: HarnessOptions = {}): P
         return;
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ready', sourceVersion: version }) });
+      return;
+    }
+
+    if (url.pathname.startsWith('/api/sources/sources/') && url.pathname.endsWith('/versions') && request.method() === 'GET') {
+      const sourceId = decodeURIComponent(url.pathname.split('/').at(-2) || '');
+      const sourceVersions = Object.values(versions).filter((version) => version.sourceId === sourceId).sort((left, right) => left.versionNumber - right.versionNumber);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'ready', sourceVersions }) });
+      return;
+    }
+
+    if (url.pathname === '/api/sources/versions' && request.method() === 'POST') {
+      const body = request.postDataJSON() as MockRequestBody;
+      state.versionEditRequests.push(body);
+      const result = await handleSourceVersionEditRequest({
+        featureEnabled: true,
+        authorizationHeader: `Bearer ${TASK12_ACCESS_TOKEN}`,
+        body,
+        cloudConfigured: true,
+        verifyAccessToken: async () => ({ status: 'ok' as const, userId: TASK12_USER_ID, accessToken: TASK12_ACCESS_TOKEN }),
+        repositoryForToken: () => versionRepository as never,
+      });
+      await route.fulfill({ status: result.status, contentType: 'application/json', body: JSON.stringify(result.body) });
       return;
     }
 
@@ -378,28 +435,48 @@ async function openArtifactStudio(page: Page) {
 }
 
 async function openImportPanel(page: Page) {
+  if (await page.locator('.omni-source-import').count()) return;
   const open = page.locator('[data-ux-control="sources.import.open"], [data-ux-control="sources.import.empty-cta"]').first();
   await open.click();
   await expect(page.locator('[data-ux-control="sources.import.title"]')).toBeVisible();
 }
 
-async function submitTextImport(page: Page, title: string, type: 'text' | 'url' | 'vtt_srt' | 'youtube', content: string) {
+async function stageTextImport(page: Page, title: string, type: 'text' | 'url' | 'vtt_srt' | 'youtube', content: string) {
   await openImportPanel(page);
   await page.locator('[data-ux-control="sources.import.title"]').fill(title);
   await page.locator('[data-ux-control="sources.import.type"]').selectOption(type);
   const contentControl = type === 'vtt_srt' ? 'vtt' : type === 'text' ? 'paste-text' : type;
   await page.locator(`[data-ux-control="sources.import.${contentControl}"]`).fill(content);
+  await page.locator('[data-ux-control="sources.import.queue-add"]').click();
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: title })).toContainText('Đang chờ');
+}
+
+async function stageFileImport(page: Page, title: string, type: 'pdf' | 'docx', file: { name: string; mimeType: string; buffer: Buffer }) {
+  await page.locator('[data-ux-control="sources.import.title"]').fill(title);
+  await page.locator('[data-ux-control="sources.import.type"]').selectOption(type);
+  await page.locator(`[data-ux-control="sources.import.${type}"]`).setInputFiles(file);
+  await page.locator('[data-ux-control="sources.import.queue-add"]').click();
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: title })).toContainText('Đang chờ');
+}
+
+async function submitStagedQueue(page: Page, titles: string[]) {
   await page.locator('[data-ux-control="sources.import.submit"]').click();
-  await expect(page.locator('.omni-source-import')).toHaveCount(0);
+  for (const title of titles) {
+    await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: title })).not.toContainText('Đang xử lý');
+  }
+}
+
+async function submitTextImport(page: Page, title: string, type: 'text' | 'url' | 'vtt_srt' | 'youtube', content: string) {
+  await stageTextImport(page, title, type, content);
+  await submitStagedQueue(page, [title]);
+  await page.locator('[data-ux-control="sources.import.close"]').click();
 }
 
 async function submitFileImport(page: Page, title: string, type: 'pdf' | 'docx', file: { name: string; mimeType: string; buffer: Buffer }) {
   await openImportPanel(page);
-  await page.locator('[data-ux-control="sources.import.title"]').fill(title);
-  await page.locator('[data-ux-control="sources.import.type"]').selectOption(type);
-  await page.locator(`[data-ux-control="sources.import.${type}"]`).setInputFiles(file);
-  await page.locator('[data-ux-control="sources.import.submit"]').click();
-  await expect(page.locator('.omni-source-import')).toHaveCount(0);
+  await stageFileImport(page, title, type, file);
+  await submitStagedQueue(page, [title]);
+  await page.locator('[data-ux-control="sources.import.close"]').click();
 }
 
 async function sourceAxeViolations(page: Page) {
@@ -421,33 +498,50 @@ test('AC-SRC-001 library-first initial state', async ({ page }) => {
 
 test('AC-SRC-002 independent multi-format batch jobs', async ({ page }) => {
   const harness = await visitSources(page, { records: [] });
-  await submitTextImport(page, 'Text fixture', 'text', TASK12_TEXT);
-  await submitTextImport(page, 'URL fixture', 'url', 'https://fixture.invalid/renewable-policy');
-  await submitFileImport(page, 'PDF fixture', 'pdf', TASK12_FILES.pdf);
-  await submitFileImport(page, 'DOCX fixture', 'docx', TASK12_FILES.docx);
-  await submitTextImport(page, 'VTT fixture', 'vtt_srt', TASK12_VTT);
-  await submitTextImport(page, 'YouTube fixture', 'youtube', TASK12_YOUTUBE_URL);
+  const titles = ['Text fixture', 'URL fixture', 'PDF fixture', 'DOCX fixture', 'VTT fixture', 'YouTube fixture'];
+  await stageTextImport(page, titles[0], 'text', TASK12_TEXT);
+  await stageTextImport(page, titles[1], 'url', 'https://fixture.invalid/renewable-policy');
+  await stageFileImport(page, titles[2], 'pdf', TASK12_FILES.pdf);
+  await stageFileImport(page, titles[3], 'docx', TASK12_FILES.docx);
+  await stageTextImport(page, titles[4], 'vtt_srt', TASK12_VTT);
+  await stageTextImport(page, titles[5], 'youtube', TASK12_YOUTUBE_URL);
+  await expect(page.locator('.omni-source-import__queue-item')).toHaveCount(6);
+  await submitStagedQueue(page, titles);
 
   expect(harness.importRequests.map((request) => request.type)).toEqual(['text', 'url', 'pdf', 'docx', 'vtt_srt', 'youtube']);
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: 'Text fixture' })).toContainText('Sẵn sàng');
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: 'URL fixture' })).toContainText('Sẵn sàng');
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: 'PDF fixture' })).toContainText('Sẵn sàng');
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: 'DOCX fixture' })).toContainText('Sẵn sàng');
+  await expect(page.locator('.omni-source-import__queue-item').filter({ hasText: 'VTT fixture' })).toContainText('Sẵn sàng');
   await expect(page.getByText('Do module khác tiếp nhận', { exact: true })).toBeVisible();
-  await expect(page.getByText('Sẵn sàng', { exact: true }).first()).toBeVisible();
+  await expect(page.locator('.omni-source-import')).toBeVisible();
   await expect(page.locator('audio, video, canvas, iframe')).toHaveCount(0);
 });
 
 test('AC-SRC-003 immutable edited version and provenance lineage', async ({ page }) => {
   const harness = await visitSources(page);
-  await sourceControl(page, 'sources.library.open-source', TASK12_TEXT_VERSION.sourceId).press('Enter');
+  await openTextReader(page);
   await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 1');
+  await page.locator('[data-ux-control="sources.reader.version-history"]').click();
+  await expect(page.locator('[data-ux-control="sources.reader.version-select:task12-version-text-v1"]')).toBeVisible();
+  await page.locator('[data-ux-control="sources.reader.version-history"]').click();
+  await page.locator('[data-ux-control="sources.reader.edit-open"]').click();
+  await page.locator('[data-ux-control="sources.reader.edit-text"]').fill(`${TASK12_TEXT}\n\nEdited conclusion for the immutable revision.`);
+  await page.locator('[data-ux-control="sources.reader.edit-save"]').click();
+  await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 2');
+  await expect(page.locator('[data-ux-control="sources.reader.edit-open"]')).toBeVisible();
 
+  expect(harness.versionEditRequests).toHaveLength(1);
+  expect(Object.keys(harness.versionEditRequests[0]).sort()).toEqual(['baseVersionId', 'editedText', 'sourceId']);
+  expect(harness.versionEditRequests[0].baseVersionId).toBe('task12-version-text-v1');
   const lineage = await page.evaluate(async () => {
-    const [firstResponse, editedResponse] = await Promise.all([
+    const [firstResponse, editedResponse, libraryResponse] = await Promise.all([
       fetch('/api/sources/versions/task12-version-text-v1'),
-      fetch('/api/sources/versions/task12-version-text-v2'),
+      fetch('/api/sources/versions/task12-source-text-v2'),
+      fetch('/api/sources/library'),
     ]);
-    return {
-      first: await firstResponse.json(),
-      edited: await editedResponse.json(),
-    };
+    return { first: await firstResponse.json(), edited: await editedResponse.json(), library: await libraryResponse.json() };
   });
   expect(lineage.first.sourceVersion.versionNumber).toBe(1);
   expect(lineage.first.sourceVersion.stage).toBe('normalised');
@@ -455,7 +549,18 @@ test('AC-SRC-003 immutable edited version and provenance lineage', async ({ page
   expect(lineage.edited.sourceVersion.stage).toBe('edited');
   expect(lineage.edited.sourceVersion.contentHash).not.toBe(lineage.first.sourceVersion.contentHash);
   expect(lineage.first.sourceVersion.plainText).not.toContain('Edited conclusion');
+  expect(lineage.edited.sourceVersion.plainText).toContain('Edited conclusion');
   expect(lineage.edited.sourceVersion.sourceId).toBe(lineage.first.sourceVersion.sourceId);
+  const editedRecord = lineage.library.records.find((record: SourceRecord) => record.id === TASK12_TEXT_VERSION.sourceId);
+  if (!editedRecord) throw new Error('expected edited source record in deterministic library');
+  expect(editedRecord.currentVersionId).toBe('task12-source-text-v2');
+  expect(editedRecord.provenance).toEqual(TASK12_RECORDS.find((record) => record.id === TASK12_TEXT_VERSION.sourceId)?.provenance);
+  await page.locator('[data-ux-control="sources.reader.version-history"]').click();
+  await page.locator('[data-ux-control="sources.reader.version-select:task12-version-text-v1"]').click();
+  await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 1');
+  await page.locator('[data-ux-control="sources.reader.version-history"]').click();
+  await page.locator('[data-ux-control="sources.reader.version-select:task12-source-text-v2"]').click();
+  await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 2');
   expect(harness.supabaseRequests).toBe(0);
 });
 
@@ -601,6 +706,7 @@ test('AC-SRC-011 malformed PDF shows typed recovery without parser internals', a
   await page.locator('[data-ux-control="sources.import.title"]').fill('Malformed PDF fixture');
   await page.locator('[data-ux-control="sources.import.type"]').selectOption('pdf');
   await page.locator('[data-ux-control="sources.import.pdf"]').setInputFiles(TASK12_FILES.malformedPdf);
+  await page.locator('[data-ux-control="sources.import.queue-add"]').click();
   await page.locator('[data-ux-control="sources.import.submit"]').click();
   const alert = page.locator('.omni-source-import [role="alert"]');
   await expect(alert).toContainText('dán văn bản thủ công');
@@ -624,6 +730,7 @@ test('AC-SRC-012 scanned PDF is rejected without OCR or fabricated text', async 
   await page.locator('[data-ux-control="sources.import.title"]').fill('Scanned PDF fixture');
   await page.locator('[data-ux-control="sources.import.type"]').selectOption('pdf');
   await page.locator('[data-ux-control="sources.import.pdf"]').setInputFiles(TASK12_FILES.scannedPdf);
+  await page.locator('[data-ux-control="sources.import.queue-add"]').click();
   await page.locator('[data-ux-control="sources.import.submit"]').click();
   const alert = page.locator('.omni-source-import [role="alert"]');
   await expect(alert).toContainText('không có lớp chữ');

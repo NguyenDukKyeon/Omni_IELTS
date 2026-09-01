@@ -4,7 +4,9 @@ import path from 'node:path';
 
 const playwrightPort = Number(process.env.PLAYWRIGHT_PORT || 3100);
 const playwrightBaseUrl = `http://127.0.0.1:${playwrightPort}`;
-const isSourcesLibraryTask12 = process.argv.some((argument) => /(?:^|[\\/])sources-library\.spec\.ts$/.test(argument));
+const isSourcesLibraryTask12 = process.env.OMNI_RUN_SOURCES_E2E === 'true'
+  || process.argv.some((argument) => /(?:^|[\\/])sources-library\.spec\.ts$/.test(argument));
+const forceFreshDeterministicServer = process.env.OMNI_DETERMINISTIC_E2E === 'true';
 
 export default defineConfig({
   testDir: './e2e',
@@ -33,6 +35,7 @@ export default defineConfig({
     env: {
       ...process.env,
       PORT: String(playwrightPort),
+      OMNI_SOURCES_LIBRARY_V2: isSourcesLibraryTask12 ? 'true' : 'false',
       DISABLE_HMR: 'true',
       LIVE_HUB_RECEIPT_SECRET: process.env.LIVE_HUB_RECEIPT_SECRET || 'omni-e2e-live-hub-receipt-secret',
       ...(isSourcesLibraryTask12 ? {
@@ -41,7 +44,7 @@ export default defineConfig({
         VITE_SUPABASE_ANON_KEY: 'task12-test-anon-key',
       } : {}),
     },
-    reuseExistingServer: isSourcesLibraryTask12 ? false : !process.env.CI,
+    reuseExistingServer: isSourcesLibraryTask12 || forceFreshDeterministicServer ? false : !process.env.CI,
     timeout: 60_000,
   },
 });

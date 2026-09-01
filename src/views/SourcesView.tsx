@@ -1,7 +1,9 @@
 import { FilePlus2, Library, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  createEditedSourceVersion,
   getSourceVersion,
+  listSourceVersions,
   listSourcesLibrary,
   SourcesApiError,
   type SourceImportResponse,
@@ -59,6 +61,7 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [activeSourceId, setActiveSourceId] = useState<string>();
   const [readerVersion, setReaderVersion] = useState<SourceVersion>();
+  const [readerVersions, setReaderVersions] = useState<SourceVersion[]>([]);
   const [readerState, setReaderState] = useState<SourceReaderState>('unavailable');
   const [readerError, setReaderError] = useState<string>();
   const [selectedSpan, setSelectedSpan] = useState<SourceSpan>();
@@ -106,14 +109,19 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
   const loadReaderVersion = useCallback(async (source: SourceRecord) => {
     if (!source.currentVersionId || source.processingState !== 'ready') {
       setReaderVersion(undefined);
+      setReaderVersions([]);
       setReaderState('unavailable');
       return;
     }
     setReaderState('loading');
     setReaderError(undefined);
     try {
-      const response = await getSourceVersion(source.currentVersionId);
-      setReaderVersion(response.sourceVersion);
+      const response = await listSourceVersions(source.id);
+      const versions = response.sourceVersions.filter((version) => version.sourceId === source.id);
+      const current = versions.find((version) => version.id === source.currentVersionId);
+      if (!current) throw new SourcesApiError({ statusCode: 409, statusLabel: 'version_conflict', code: 'VERSION_CONFLICT', userMessageVi: 'Lịch sử phiên bản nguồn đã thay đổi.', suggestedActionVi: 'Làm mới rồi thử lại.' });
+      setReaderVersions(versions);
+      setReaderVersion(current);
       setReaderState('ready');
     } catch (error) {
       setReaderVersion(undefined);
@@ -124,6 +132,8 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
 
   const openSource = (source: SourceRecord) => {
     setActiveSourceId(source.id);
+    setReaderVersion(undefined);
+    setReaderVersions([]);
     setSelectedSpan(undefined);
     setActiveTab('reader');
     void loadReaderVersion(source);
@@ -151,9 +161,40 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
       setRecords((current) => [response.sourceRecord!, ...current.filter((record) => record.id !== response.sourceRecord!.id)]);
       setActiveSourceId(response.sourceRecord.id);
     }
-    if (response.sourceVersion) setReaderVersion(response.sourceVersion);
+    if (response.sourceVersion) {
+      setReaderVersions((current) => [response.sourceVersion!, ...current.filter((version) => version.id !== response.sourceVersion!.id)]);
+      setReaderVersion(response.sourceVersion);
+      setReaderState('ready');
+    }
     setLibraryState('ready');
-    setIsImportOpen(false);
+  };
+
+  const handleVersionCreated = (sourceRecord: SourceRecord, sourceVersion: SourceVersion) => {
+    setRecords((current) => [sourceRecord, ...current.filter((record) => record.id !== sourceRecord.id)]);
+    setActiveSourceId(sourceRecord.id);
+    setReaderVersions((current) => [sourceVersion, ...current.filter((version) => version.id !== sourceVersion.id)]
+      .sort((left, right) => left.versionNumber - right.versionNumber));
+    setReaderVersion(sourceVersion);
+    setReaderState('ready');
+    setReaderError(undefined);
+    setSelectedSpan(undefined);
+  };
+
+  const saveEditedVersion = async (editedText: string) => {
+    if (!activeSource || !readerVersion) throw new SourcesApiError({
+      statusCode: 409,
+      statusLabel: 'selection_unavailable',
+      code: 'VALIDATION_FAILED',
+      userMessageVi: 'Không dùng được phiên bản nguồn đã chọn.',
+      suggestedActionVi: 'Chọn lại nguồn sẵn sàng.',
+    });
+    const response = await createEditedSourceVersion({
+      sourceId: activeSource.id,
+      baseVersionId: readerVersion.id,
+      editedText,
+    });
+    handleVersionCreated(response.sourceRecord, response.sourceVersion);
+    return response;
   };
 
   const handleSignIn = async () => {
@@ -258,9 +299,12 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
             <SourceReader
               record={activeSource}
               version={readerVersion}
+              versions={readerVersions}
               selectedSpan={selectedSpan}
               state={readerState}
               onSpanChange={setSelectedSpan}
+              onVersionSelect={(version) => { setReaderVersion(version); setSelectedSpan(undefined); }}
+              onSaveEditedVersion={saveEditedVersion}
               onRetry={() => void loadReaderVersion(activeSource)}
             />
           ) : (

@@ -1,11 +1,17 @@
-import { FileUp, LoaderCircle, Send, X } from 'lucide-react';
+import { FileUp, LoaderCircle, Plus, Send, X } from 'lucide-react';
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { importSource, SourcesApiError, type SourceImportResponse } from '../../lib/sources/sourcesApi';
 import type { SourceImportRequest } from '../../lib/sources/importTransport.server';
+import {
+  runImportQueue,
+  SOURCE_IMPORT_QUEUE_CONCURRENCY,
+  type ImportQueueItem,
+  type ImportQueueItemState,
+} from '../../lib/sources/importQueue';
 import { SOURCE_IMPORT_MAX_BINARY_BYTES } from '../../lib/sources/importLimits';
 
 type ImportSourceType = 'text' | 'url' | 'pdf' | 'docx' | 'vtt_srt' | 'youtube';
-type ImportPanelState = 'idle' | 'loading' | 'ready' | 'handoff_required' | 'retry_wait' | 'failed' | 'auth_required' | 'unavailable';
+type ImportPanelState = 'idle' | 'failed';
 
 const TYPE_OPTIONS: Array<{ value: ImportSourceType; label: string }> = [
   { value: 'text', label: 'Văn bản / Markdown' },
@@ -25,6 +31,15 @@ const CONTENT_CONTROLS: Record<ImportSourceType, string> = {
   youtube: 'sources.import.youtube',
 };
 
+const QUEUE_STATE_LABELS: Record<ImportQueueItemState, string> = {
+  queued: 'Đang chờ',
+  processing: 'Đang xử lý',
+  ready: 'Sẵn sàng',
+  handoff_required: 'Do module khác tiếp nhận',
+  retry_wait: 'Có thể thử lại',
+  failed: 'Xử lý lỗi',
+};
+
 function fileToBase64(file: File): Promise<string> {
   return file.arrayBuffer().then((buffer) => {
     const bytes = new Uint8Array(buffer);
@@ -37,25 +52,23 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function stateForError(error: unknown): ImportPanelState {
-  if (error instanceof SourcesApiError) {
-    if (error.statusLabel === 'auth_required') return 'auth_required';
-    if (error.statusLabel === 'unavailable') return 'unavailable';
-    if (error.statusLabel === 'retry_wait' || error.statusLabel === 'quota_exceeded') return 'retry_wait';
-  }
-  return 'failed';
+function safeFormError(error: unknown): string {
+  if (error instanceof SourcesApiError && error.userMessageVi) return error.userMessageVi;
+  if (error instanceof Error && error.message === 'file_required') return 'Chọn tệp PDF hoặc DOCX trước khi thêm vào hàng đợi.';
+  return 'Nhập tên nguồn và nội dung trong giới hạn trước khi thêm vào hàng đợi.';
 }
 
-function stateMessage(state: ImportPanelState): string {
-  switch (state) {
-    case 'ready': return 'Nguồn đã được lưu cùng một phiên bản bất biến.';
-    case 'handoff_required': return 'Đã lưu tham chiếu. Module sở hữu sẽ phụ trách phát hoặc hiển thị biểu đồ.';
-    case 'auth_required': return 'Đăng nhập trước khi gửi nguồn lên bộ nhớ đám mây.';
-    case 'unavailable': return 'Dịch vụ nguồn hiện không khả dụng. Chưa tạo nguồn sẵn sàng.';
-    case 'retry_wait': return 'Bạn có thể thử lại mà không cần chọn lại tệp.';
-    case 'failed': return 'Nguồn chưa được lưu dưới dạng nội dung sẵn sàng. Kiểm tra đầu vào rồi thử lại.';
-    default: return '';
-  }
+function queueItemId(): string {
+  return globalThis.crypto?.randomUUID?.() || `source-queue-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function queueItemMessage(item: ImportQueueItem): string {
+  if (item.errorMessage) return item.errorMessage;
+  if (item.state === 'handoff_required') return 'Đã lưu tham chiếu. Module sở hữu sẽ phụ trách phát hoặc hiển thị nguồn.';
+  if (item.state === 'ready') return 'Nguồn đã được lưu cùng một phiên bản bất biến.';
+  if (item.state === 'retry_wait') return 'Có thể thử lại mà không cần chọn lại nội dung.';
+  if (item.state === 'failed') return 'Nguồn chưa được lưu dưới dạng nội dung sẵn sàng.';
+  return '';
 }
 
 export interface SourceImportPanelProps {
@@ -73,9 +86,10 @@ export function SourceImportPanel({
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [file, setFile] = useState<File | undefined>();
-  const [state, setState] = useState<ImportPanelState>('idle');
-  const [lastRequest, setLastRequest] = useState<SourceImportRequest>();
+  const [formState, setFormState] = useState<ImportPanelState>('idle');
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [queue, setQueue] = useState<ImportQueueItem[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const buildRequest = async (): Promise<SourceImportRequest> => {
     const trimmedTitle = title.trim();
@@ -94,34 +108,50 @@ export function SourceImportPanel({
     return { title: trimmedTitle, type, content: content.trim() } as SourceImportRequest;
   };
 
-  const submitRequest = async (request: SourceImportRequest) => {
-    setState('loading');
-    setErrorMessage(undefined);
-    setLastRequest(request);
+  const mergeQueue = (nextItems: ImportQueueItem[]) => {
+    setQueue((current) => current.map((item) => nextItems.find((next) => next.id === item.id) || item));
+  };
+
+  const processItems = async (items: ImportQueueItem[]) => {
+    if (items.length === 0) return;
+    setIsProcessing(true);
+    const completed = await runImportQueue(items, importSourceRequest, mergeQueue);
+    mergeQueue(completed);
+    completed.forEach((item) => {
+      if (item.response) onImported(item.response);
+    });
+    setIsProcessing(false);
+  };
+
+  const stageCurrent = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     try {
-      const response = await importSourceRequest(request);
-      setState(response.status);
-      onImported(response);
+      const request = await buildRequest();
+      setQueue((current) => [...current, { id: queueItemId(), request, state: 'queued' }]);
+      setFormState('idle');
+      setErrorMessage(undefined);
+      setTitle('');
+      setContent('');
+      setFile(undefined);
     } catch (error) {
-      setState(stateForError(error));
-      setErrorMessage(error instanceof SourcesApiError ? error.userMessageVi : undefined);
+      setFormState('failed');
+      setErrorMessage(safeFormError(error));
     }
   };
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    try {
-      await submitRequest(await buildRequest());
-    } catch (error) {
-      setState('failed');
-      setErrorMessage(error instanceof Error && error.message === 'file_required'
-        ? 'Chọn tệp PDF hoặc DOCX trước khi gửi.'
-        : 'Nhập tên nguồn và nội dung trong giới hạn trước khi gửi.');
-    }
+  const submitQueue = () => {
+    const pending = queue.filter((item) => item.state === 'queued');
+    void processItems(pending);
   };
 
-  const retry = () => {
-    if (lastRequest) void submitRequest(lastRequest);
+  const retryItem = (item: ImportQueueItem) => {
+    const retry = { ...item, state: 'queued' as const, errorMessage: undefined };
+    mergeQueue([retry]);
+    void processItems([retry]);
+  };
+
+  const removeItem = (itemId: string) => {
+    setQueue((current) => current.filter((item) => item.id !== itemId || item.state === 'processing'));
   };
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -129,58 +159,41 @@ export function SourceImportPanel({
     if (nextFile && nextFile.size > SOURCE_IMPORT_MAX_BINARY_BYTES) {
       event.target.value = '';
       setFile(undefined);
-      setState('failed');
+      setFormState('failed');
       setErrorMessage('Tệp vượt quá giới hạn 8 MB. Hãy chọn tệp nhỏ hơn.');
       return;
     }
     setFile(nextFile);
-    setState('idle');
+    setFormState('idle');
     setErrorMessage(undefined);
   };
 
   const isBinary = type === 'pdf' || type === 'docx';
+  const hasQueuedItems = queue.length > 0;
+  const hasPendingItems = queue.some((item) => item.state === 'queued');
+  const retryableItems = queue.filter((item) => item.state === 'retry_wait' || item.state === 'failed');
 
   return (
     <section className="omni-source-import" aria-labelledby="source-import-title">
       <header className="omni-source-import__header">
         <div>
           <p className="omni-source-import__label">Thêm nguồn riêng</p>
-          <h2 id="source-import-title">Thêm một nguồn</h2>
-          <p>Văn bản có giới hạn. PDF và DOCX sẽ được máy chủ kiểm tra trước khi trích xuất.</p>
+          <h2 id="source-import-title">Thêm nhiều nguồn</h2>
+          <p>Thêm vào hàng đợi trước, xử lý độc lập tối đa {SOURCE_IMPORT_QUEUE_CONCURRENCY} nguồn cùng lúc. Không tự tạo bản nháp.</p>
         </div>
-        <button
-          type="button"
-          className="omni-source-import__close"
-          aria-label="Đóng bước thêm nguồn"
-          data-ux-control="sources.import.close"
-          data-ux-flow="sources.import.submit"
-          onClick={onClose}
-        >
+        <button type="button" className="omni-source-import__close" aria-label="Đóng bước thêm nguồn" data-ux-control="sources.import.close" data-ux-flow="sources.import.submit" onClick={onClose}>
           <X aria-hidden="true" />
         </button>
       </header>
 
-      <form className="omni-source-import__form" onSubmit={submit} data-ux-control="sources.import.form" data-ux-flow="sources.import.submit">
+      <form className="omni-source-import__form" onSubmit={stageCurrent} data-ux-control="sources.import.form" data-ux-flow="sources.import.submit">
         <label>
           <span>Tên nguồn</span>
-          <input
-            type="text"
-            value={title}
-            maxLength={240}
-            required
-            data-ux-control="sources.import.title"
-            data-ux-flow="sources.import.submit"
-            onChange={(event) => setTitle(event.target.value)}
-          />
+          <input type="text" value={title} maxLength={240} required data-ux-control="sources.import.title" data-ux-flow="sources.import.submit" onChange={(event) => setTitle(event.target.value)} />
         </label>
         <label>
           <span>Loại nguồn</span>
-          <select
-            value={type}
-            data-ux-control="sources.import.type"
-            data-ux-flow="sources.import.submit"
-            onChange={(event) => { setType(event.target.value as ImportSourceType); setFile(undefined); setContent(''); }}
-          >
+          <select value={type} data-ux-control="sources.import.type" data-ux-flow="sources.import.submit" onChange={(event) => { setType(event.target.value as ImportSourceType); setFile(undefined); setContent(''); setFormState('idle'); setErrorMessage(undefined); }}>
             {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
@@ -188,54 +201,53 @@ export function SourceImportPanel({
         {isBinary ? (
           <label className="omni-source-import__file">
             <span>{type === 'pdf' ? 'Tệp PDF' : 'Tệp DOCX'}</span>
-            <input
-              type="file"
-              accept={type === 'pdf' ? 'application/pdf,.pdf' : '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
-              data-ux-control={CONTENT_CONTROLS[type]}
-              data-ux-flow="sources.import.submit"
-              onChange={onFileChange}
-            />
+            <input type="file" accept={type === 'pdf' ? 'application/pdf,.pdf' : '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'} data-ux-control={CONTENT_CONTROLS[type]} data-ux-flow="sources.import.submit" onChange={onFileChange} />
             <span className="omni-source-import__file-name">{file?.name || 'Chưa chọn tệp'}</span>
           </label>
         ) : (
           <label>
-             <span>{type === 'youtube' ? 'URL YouTube' : type === 'url' ? 'URL bài viết' : 'Nội dung có giới hạn'}</span>
-            <textarea
-              value={content}
-              maxLength={1_000_000}
-              required
-              placeholder={type === 'youtube' ? 'https://www.youtube.com/watch?v=…' : 'Dán nội dung nguồn tại đây…'}
-              data-ux-control={CONTENT_CONTROLS[type]}
-              data-ux-flow="sources.import.submit"
-              onChange={(event) => setContent(event.target.value)}
-            />
+            <span>{type === 'youtube' ? 'URL YouTube' : type === 'url' ? 'URL bài viết' : 'Nội dung có giới hạn'}</span>
+            <textarea value={content} maxLength={1_000_000} required placeholder={type === 'youtube' ? 'https://www.youtube.com/watch?v=…' : 'Dán nội dung nguồn tại đây…'} data-ux-control={CONTENT_CONTROLS[type]} data-ux-flow="sources.import.submit" onChange={(event) => setContent(event.target.value)} />
           </label>
         )}
 
-        {state !== 'idle' && state !== 'loading' ? (
-          <div className={`omni-source-import__state omni-source-import__state--${state}`} role={state === 'failed' || state === 'retry_wait' ? 'alert' : 'status'}>
-            <p>{errorMessage || stateMessage(state)}</p>
-            {(state === 'retry_wait' || state === 'unavailable') && lastRequest ? (
-              <button type="button" data-ux-control="sources.import.retry" data-ux-flow="sources.import.submit" onClick={retry}>
-                Thử lại
+        {formState === 'failed' && errorMessage ? <div className="omni-source-import__state omni-source-import__state--failed" role="alert"><p>{errorMessage}</p></div> : null}
+
+        <button type="submit" className="omni-source-import__submit" data-ux-control="sources.import.queue-add" data-ux-flow="sources.import.submit"><Plus aria-hidden="true" /> Thêm vào hàng đợi</button>
+      </form>
+
+      {hasQueuedItems ? (
+        <section className="omni-source-import__queue" aria-labelledby="source-import-queue-title" aria-live="polite">
+          <div className="omni-source-import__queue-heading">
+            <div><h3 id="source-import-queue-title">Hàng đợi nguồn</h3><p>{queue.length} mục · mỗi mục có trạng thái riêng</p></div>
+            <button type="button" className="omni-source-import__queue-submit" disabled={!hasPendingItems || isProcessing} data-ux-control="sources.import.submit" data-ux-flow="sources.import.submit" onClick={submitQueue}>
+              {isProcessing ? <LoaderCircle aria-hidden="true" /> : <Send aria-hidden="true" />} Gửi hàng đợi
+            </button>
+            {retryableItems.length > 0 ? (
+              <button type="button" disabled={isProcessing} data-ux-control="sources.import.retry" data-ux-flow="sources.import.submit" onClick={() => {
+                const retryItems = retryableItems.map((item) => ({ ...item, state: 'queued' as const, errorMessage: undefined }));
+                mergeQueue(retryItems);
+                void processItems(retryItems);
+              }}>
+                Thử lại mục lỗi
               </button>
             ) : null}
           </div>
-        ) : null}
-        {state === 'loading' ? <p className="omni-source-import__loading" role="status"><LoaderCircle aria-hidden="true" /> Đang gửi nguồn để kiểm tra…</p> : null}
+          <ul className="omni-source-import__queue-list">
+            {queue.map((item) => (
+              <li className={`omni-source-import__queue-item omni-source-import__queue-item--${item.state}`} key={item.id} role={item.state === 'failed' || item.state === 'retry_wait' ? 'alert' : 'status'}>
+                <div><strong>{item.request.title}</strong><span>{item.request.type.toUpperCase()} · {QUEUE_STATE_LABELS[item.state]}</span>{queueItemMessage(item) ? <small>{queueItemMessage(item)}</small> : null}</div>
+                <div className="omni-source-import__queue-actions">
+                  {(item.state === 'retry_wait' || item.state === 'failed') ? <button type="button" data-ux-control={`sources.import.queue-retry:${item.id}`} data-ux-flow="sources.import.submit" onClick={() => retryItem(item)}>Thử lại</button> : null}
+                  {item.state !== 'processing' ? <button type="button" aria-label={`Xoá ${item.request.title} khỏi hàng đợi`} data-ux-control={`sources.import.queue-remove:${item.id}`} data-ux-flow="sources.import.submit" onClick={() => removeItem(item.id)}>Xoá</button> : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-        <button
-          type="submit"
-          className="omni-source-import__submit"
-          disabled={state === 'loading'}
-          data-ux-control="sources.import.submit"
-          data-ux-flow="sources.import.submit"
-        >
-          {state === 'loading' ? <LoaderCircle aria-hidden="true" /> : <Send aria-hidden="true" />}
-          Gửi nguồn
-        </button>
-      </form>
-      <p className="omni-source-import__footnote"><FileUp aria-hidden="true" /> Thêm nguồn lên đám mây cần phiên đăng nhập đã xác thực.</p>
+      <p className="omni-source-import__footnote"><FileUp aria-hidden="true" /> Thêm nguồn lên đám mây cần phiên đăng nhập đã xác thực. Bạn có thể đóng panel sau khi hàng đợi hoàn tất.</p>
     </section>
   );
 }

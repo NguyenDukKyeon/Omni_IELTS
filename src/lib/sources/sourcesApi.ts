@@ -19,6 +19,7 @@ export type SourcesApiStatus =
   | 'quota_exceeded'
   | 'retry_wait'
   | 'failed'
+  | 'version_conflict'
   | 'ready'
   | 'handoff_required'
   | 'queued'
@@ -61,6 +62,23 @@ export type SourcesLibraryResponse = {
 
 export type SourceVersionResponse = {
   status: 'ready';
+  sourceVersion: SourceVersion;
+};
+
+export type SourceVersionsResponse = {
+  status: 'ready';
+  sourceVersions: SourceVersion[];
+};
+
+export type SourceVersionEditRequest = {
+  sourceId: string;
+  baseVersionId: string;
+  editedText: string;
+};
+
+export type SourceVersionEditResponse = {
+  status: 'ready';
+  sourceRecord: SourceRecord;
   sourceVersion: SourceVersion;
 };
 
@@ -192,6 +210,17 @@ export function listSourcesLibrary(): Promise<SourcesLibraryResponse> {
 
 export function getSourceVersion(versionId: string): Promise<SourceVersionResponse> {
   return requestJson<SourceVersionResponse>(`/api/sources/versions/${encodeURIComponent(versionId)}`);
+}
+
+export function listSourceVersions(sourceId: string): Promise<SourceVersionsResponse> {
+  return requestJson<SourceVersionsResponse>(`/api/sources/sources/${encodeURIComponent(sourceId)}/versions`);
+}
+
+export function createEditedSourceVersion(request: SourceVersionEditRequest): Promise<SourceVersionEditResponse> {
+  return requestJson<SourceVersionEditResponse>('/api/sources/versions', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 export function importSource(request: SourceImportRequest): Promise<SourceImportResponse> {

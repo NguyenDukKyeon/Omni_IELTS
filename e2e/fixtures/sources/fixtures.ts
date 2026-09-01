@@ -155,16 +155,6 @@ export const TASK12_TEXT_VERSION: SourceVersion = {
   createdAt: TASK12_TIMESTAMP,
 };
 
-export const TASK12_EDITED_VERSION: SourceVersion = {
-  ...TASK12_TEXT_VERSION,
-  id: 'task12-version-text-v2',
-  versionNumber: 2,
-  stage: 'edited',
-  contentHash: 'task12-hash-text-v2',
-  plainText: `${TASK12_TEXT}\n\nEdited conclusion keeps the citation boundary explicit.`,
-  blocks: blocksFor([...TASK12_TEXT.split('\n\n'), 'Edited conclusion keeps the citation boundary explicit.']),
-};
-
 export const TASK12_OTHER_VERSIONS: Record<string, SourceVersion> = {
   'task12-version-pdf': {
     id: 'task12-version-pdf', sourceId: 'task12-source-pdf', versionNumber: 1, stage: 'normalised', contentHash: 'task12-hash-pdf',
@@ -224,7 +214,6 @@ export const TASK12_COLLECTIONS: SourceCollection[] = [{
 
 export function task12VersionFor(sourceVersionId: string): SourceVersion | undefined {
   if (sourceVersionId === TASK12_TEXT_VERSION.id) return TASK12_TEXT_VERSION;
-  if (sourceVersionId === TASK12_EDITED_VERSION.id) return TASK12_EDITED_VERSION;
   return TASK12_OTHER_VERSIONS[sourceVersionId];
 }
 

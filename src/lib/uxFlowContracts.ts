@@ -77,6 +77,12 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     errorStates: ['auth_required', 'invalid_input', 'extraction_failed', 'handoff_required'], evidence: ['src/lib/__tests__/sourcesUxContracts.test.ts'],
   },
   {
+    id: 'sources.import.batch', module: 'sources', owner: 'SourceImportPanel',
+    precondition: 'The Sources import panel is visible', trigger: 'Learner stages, submits, retries, or removes one queued source item',
+    expectedTransition: 'draft -> queued -> processing -> item result while sibling items retain independent state', sideEffect: 'Use the single-source import route with a fixed bounded concurrency of two',
+    errorStates: ['invalid_input', 'import_failed', 'retry_wait', 'handoff_required'], evidence: ['e2e/sources-library.spec.ts', 'src/lib/__tests__/sourcesCompletionCorrection.test.ts'],
+  },
+  {
     id: 'sources.selection.toggle', module: 'sources', owner: 'SourcesLibraryExplorer',
     precondition: 'A source card is visible', trigger: 'Learner selects or deselects a source',
     expectedTransition: 'unselected <-> selected', sideEffect: 'Update selected source versions for grounded work',
@@ -117,6 +123,24 @@ export const UX_FLOW_CONTRACTS: UxFlowContract[] = [
     precondition: 'A validated source version is visible', trigger: 'Learner selects a block or text span',
     expectedTransition: 'no span -> exact source span selected|selected span replaced', sideEffect: 'Update sourceVersionId and validated block IDs sent to grounded work',
     errorStates: ['unsupported_by_sources'], evidence: ['src/lib/__tests__/sourcesGroundedChatUi.test.ts'],
+  },
+  {
+    id: 'sources.reader.version-history', module: 'sources', owner: 'SourceReader',
+    precondition: 'A source reader has at least one validated version', trigger: 'Learner opens or closes source version history',
+    expectedTransition: 'history closed <-> history open', sideEffect: 'Update local reader presentation state',
+    errorStates: ['unavailable'], evidence: ['e2e/sources-library.spec.ts', 'src/lib/__tests__/sourcesCompletionCorrection.test.ts'],
+  },
+  {
+    id: 'sources.reader.version-select', module: 'sources', owner: 'SourceReader',
+    precondition: 'Source version history is open', trigger: 'Learner selects an immutable source version',
+    expectedTransition: 'version n -> selected version n', sideEffect: 'Update the reader span context without mutating the selected version',
+    errorStates: ['selection_unavailable'], evidence: ['e2e/sources-library.spec.ts', 'src/lib/__tests__/sourcesCompletionCorrection.test.ts'],
+  },
+  {
+    id: 'sources.reader.edit', module: 'sources', owner: 'SourceReader',
+    precondition: 'The current ready source version is visible', trigger: 'Learner edits and explicitly saves a new source version',
+    expectedTransition: 'current version -> edit form -> immutable edited version|typed conflict', sideEffect: 'Append one version and atomically advance currentVersionId; create no learning evidence',
+    errorStates: ['version_conflict', 'invalid_input', 'unavailable'], evidence: ['e2e/sources-library.spec.ts', 'src/lib/__tests__/sourcesCompletionCorrection.test.ts'],
   },
   {
     id: 'sources.artifact.generate', module: 'sources', owner: 'ArtifactStudioModal',
@@ -415,6 +439,13 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   sourcesControl('sources.import.sign-in', 'sources.import.submit', 'SourcesLibraryExplorer', 'Open learner sign-in before private source import', 'guest source library visible', 'Google sign-in flow opened'),
   sourcesControl('sources.artifact.open-modal', 'sources.artifact.open-modal', 'SourceCard', 'Open Artifact Studio for this source version', 'ready source card visible', 'artifact studio open'),
   sourcesControl('sources.reader.select-span', 'sources.reader.select-span', 'SourceReader', 'Select a validated source block or span', 'reader visible', 'exact source span selected'),
+  sourcesControl('sources.reader.version-history', 'sources.reader.version-history', 'SourceReader', 'Open or close immutable source version history', 'reader with version history available', 'version history open or closed'),
+  sourcesControl('sources.reader.version-select', 'sources.reader.version-select', 'SourceReader', 'Select an immutable source version', 'version history open', 'selected source version rendered'),
+  sourcesControl('sources.reader.edit-open', 'sources.reader.edit', 'SourceReader', 'Open the edit-as-new-version form', 'current ready version visible', 'edit form visible'),
+  sourcesControl('sources.reader.edit-form', 'sources.reader.edit', 'SourceReader', 'Submit the edit-as-new-version form', 'edit form visible', 'immutable version request sent'),
+  sourcesControl('sources.reader.edit-text', 'sources.reader.edit', 'SourceReader', 'Edit bounded source text', 'edit form visible', 'edited text changed'),
+  sourcesControl('sources.reader.edit-save', 'sources.reader.edit', 'SourceReader', 'Save edited text as a new version', 'valid edited text entered', 'version history shows a new edited version or typed conflict'),
+  sourcesControl('sources.reader.edit-cancel', 'sources.reader.edit', 'SourceReader', 'Cancel source editing', 'edit form visible', 'original version remains selected'),
   sourcesControl('sources.chat.send', 'sources.chat.send', 'SourceGroundedChat', 'Send a grounded question', 'usable source selected and question entered', 'cited response or typed refusal'),
   sourcesControl('sources.chat.web-research', 'sources.chat.web-research', 'SourceGroundedChat', 'Request web evidence explicitly', 'question entered', 'web citations or typed failure'),
   sourcesControl('sources.chat.citation-open', 'sources.chat.citation-open', 'SourceGroundedChat', 'Open a cited source block', 'cited response visible', 'citation drawer open'),
@@ -451,6 +482,7 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   sourcesControl('sources.collection.select', 'sources.library.filter', 'CollectionDrawer', 'Filter by a collection', 'collection drawer visible', 'selected collection sources visible'),
   sourcesControl('sources.import.close', 'sources.import.submit', 'SourceImportPanel', 'Close the source import panel', 'import panel visible', 'import panel closed'),
   sourcesControl('sources.import.form', 'sources.import.submit', 'SourceImportPanel', 'Submit the source import form', 'bounded source input visible', 'queued server request'),
+  sourcesControl('sources.import.queue-add', 'sources.import.batch', 'SourceImportPanel', 'Stage one source item in the bounded queue', 'bounded source input visible', 'queue item visible as queued'),
   sourcesControl('sources.import.title', 'sources.import.submit', 'SourceImportPanel', 'Set the source title', 'import form visible', 'source title edited'),
   sourcesControl('sources.import.type', 'sources.import.submit', 'SourceImportPanel', 'Choose the source type', 'import form visible', 'matching input control visible'),
   sourcesControl('sources.import.paste-text', 'sources.import.submit', 'SourceImportPanel', 'Paste bounded source text', 'text import selected', 'text content edited'),
@@ -461,6 +493,8 @@ export const UX_CONTROL_CONTRACTS: UxControlContract[] = [
   sourcesControl('sources.import.youtube', 'sources.import.submit', 'SourceImportPanel', 'Enter a YouTube URL for handoff', 'YouTube handoff selected', 'handoff URL edited'),
   sourcesControl('sources.import.submit', 'sources.import.submit', 'SourceImportPanel', 'Send a source for server validation', 'bounded source input valid', 'queued or typed import result'),
   sourcesControl('sources.import.retry', 'sources.import.submit', 'SourceImportPanel', 'Retry a source import', 'retryable import error visible', 'server request retried'),
+  sourcesControl('sources.import.queue-retry', 'sources.import.batch', 'SourceImportPanel', 'Retry one failed queued source item', 'failed or retry-wait queue item visible', 'only the selected queue item returns to processing'),
+  sourcesControl('sources.import.queue-remove', 'sources.import.batch', 'SourceImportPanel', 'Remove one queued source item', 'non-processing queue item visible', 'selected queue item removed while siblings remain'),
 ];
 
 export function validateUxFlowContracts(contracts: UxFlowContract[]) {
