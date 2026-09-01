@@ -3,8 +3,13 @@ import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { importSource, SourcesApiError, type SourceImportResponse } from '../../lib/sources/sourcesApi';
 import type { SourceImportRequest } from '../../lib/sources/importTransport.server';
 import {
+  assertImportQueueAdmission,
+  ImportQueueLimitError,
   runImportQueue,
   SOURCE_IMPORT_QUEUE_CONCURRENCY,
+  SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES,
+  SOURCE_IMPORT_QUEUE_MAX_ITEMS,
+  SOURCE_IMPORT_QUEUE_MAX_TEXT_CODE_POINTS,
   type ImportQueueItem,
   type ImportQueueItemState,
 } from '../../lib/sources/importQueue';
@@ -52,7 +57,14 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function countCodePoints(value: string): number {
+  let count = 0;
+  for (const _codePoint of value) count += 1;
+  return count;
+}
+
 function safeFormError(error: unknown): string {
+  if (error instanceof ImportQueueLimitError) return error.userMessageVi;
   if (error instanceof SourcesApiError && error.userMessageVi) return error.userMessageVi;
   if (error instanceof Error && error.message === 'file_required') return 'Chọn tệp PDF hoặc DOCX trước khi thêm vào hàng đợi.';
   return 'Nhập tên nguồn và nội dung trong giới hạn trước khi thêm vào hàng đợi.';
@@ -126,8 +138,21 @@ export function SourceImportPanel({
   const stageCurrent = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     try {
+      const binaryType = type === 'pdf' || type === 'docx';
+      const textCodePoints = binaryType ? undefined : countCodePoints(content);
+      if (binaryType) {
+        if (!file) throw new Error('file_required');
+        assertImportQueueAdmission(queue, { type, rawBinaryBytes: file.size });
+      } else {
+        assertImportQueueAdmission(queue, { type, textCodePoints });
+      }
       const request = await buildRequest();
-      setQueue((current) => [...current, { id: queueItemId(), request, state: 'queued' }]);
+      setQueue((current) => [...current, {
+        id: queueItemId(),
+        request,
+        state: 'queued',
+        ...(binaryType ? { rawBinaryBytes: file?.size || 0 } : { textCodePoints }),
+      }]);
       setFormState('idle');
       setErrorMessage(undefined);
       setTitle('');
@@ -179,7 +204,7 @@ export function SourceImportPanel({
         <div>
           <p className="omni-source-import__label">Thêm nguồn riêng</p>
           <h2 id="source-import-title">Thêm nhiều nguồn</h2>
-          <p>Thêm vào hàng đợi trước, xử lý độc lập tối đa {SOURCE_IMPORT_QUEUE_CONCURRENCY} nguồn cùng lúc. Không tự tạo bản nháp.</p>
+          <p>Tối đa {SOURCE_IMPORT_QUEUE_MAX_ITEMS} mục, tổng tệp {SOURCE_IMPORT_QUEUE_MAX_BINARY_BYTES / (1024 * 1024)} MB và tổng văn bản {SOURCE_IMPORT_QUEUE_MAX_TEXT_CODE_POINTS.toLocaleString('vi-VN')} ký tự Unicode; xử lý độc lập tối đa {SOURCE_IMPORT_QUEUE_CONCURRENCY} nguồn cùng lúc. Không tự tạo bản nháp.</p>
         </div>
         <button type="button" className="omni-source-import__close" aria-label="Đóng bước thêm nguồn" data-ux-control="sources.import.close" data-ux-flow="sources.import.submit" onClick={onClose}>
           <X aria-hidden="true" />

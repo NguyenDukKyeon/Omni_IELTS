@@ -75,7 +75,7 @@ function stateMessage(state: ArtifactStudioPresentationState): string {
 }
 
 function isUsableSpan(source: SourceRecord | undefined, version: SourceVersion | undefined, span: SourceSpan | undefined): boolean {
-  if (!source || !version || source.processingState !== 'ready' || source.currentVersionId !== version.id || version.sourceId !== source.id) return false;
+  if (!source || !version || source.processingState !== 'ready' || version.sourceId !== source.id) return false;
   if (!span) return version.blocks.some((block) => block.text.trim().length > 0);
   if (span.sourceId !== source.id || span.sourceVersionId !== version.id) return false;
   const blockIds = new Set(version.blocks.map((block) => block.id));

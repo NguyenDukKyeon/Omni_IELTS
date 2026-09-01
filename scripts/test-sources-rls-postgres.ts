@@ -5,7 +5,8 @@ import pg from 'pg';
 const { Client } = pg;
 const MIGRATION_PATH = 'supabase/migrations/202608300001_sources_library.sql';
 const VERSION_EDIT_MIGRATION_PATH = 'supabase/migrations/202609010001_sources_immutable_edit.sql';
-const MIGRATION_PATHS = [MIGRATION_PATH, VERSION_EDIT_MIGRATION_PATH];
+const VERSION_EDIT_INVOKER_MIGRATION_PATH = 'supabase/migrations/202609010002_sources_immutable_edit_invoker.sql';
+const MIGRATION_PATHS = [MIGRATION_PATH, VERSION_EDIT_MIGRATION_PATH, VERSION_EDIT_INVOKER_MIGRATION_PATH];
 export const REQUIRED_DISPOSABLE_DB_NAME = 'omni_sources_rls_test';
 export const REQUIRED_MARKER_NAME = 'OMNI_SOURCES_RLS_TEST_ENVIRONMENT';
 export const REDACTED_DISPOSABLE_DB_URL = '[redacted disposable database URL]';
@@ -496,7 +497,7 @@ export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: st
 
   // 1. Verify migration SQL structure and trigger rules
   const sql = MIGRATION_PATHS.map((migrationPath) => readFileSync(migrationPath, 'utf8')).join('\n');
-  if (!sql.includes('prevent_source_version_mutation') || !sql.includes('active_deleting_source_id') || !sql.includes('append_source_edited_version')) {
+  if (!sql.includes('prevent_source_version_mutation') || !sql.includes('active_deleting_source_id') || !sql.includes('append_source_edited_version') || !sql.includes('SECURITY INVOKER')) {
     details.push('FAIL: Migration SQL is missing required append-only, cascade, or immutable-edit controls');
     return { executable: true, proven: false, status: 'failed', details };
   }

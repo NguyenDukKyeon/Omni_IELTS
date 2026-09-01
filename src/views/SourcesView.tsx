@@ -10,6 +10,7 @@ import {
 } from '../lib/sources/sourcesApi';
 import { getSession, signInWithGoogle } from '../services/supabase';
 import { sourcesStorage } from '../services/sourcesStorage';
+import { selectedVersionIdForSource, selectedVersionIdsForSources } from '../lib/sources/sourceSelection';
 import type { ModuleId } from '../types';
 import type { SourceCollection, SourceRecord, SourceSpan, SourceVersion } from '../types/sources';
 import { ArtifactStudioModal } from '../components/sources/ArtifactStudioModal';
@@ -59,6 +60,7 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
   const [libraryError, setLibraryError] = useState<string>();
   const [isGuest, setIsGuest] = useState(false);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [selectedVersionIdsBySource, setSelectedVersionIdsBySource] = useState<Record<string, string>>({});
   const [activeSourceId, setActiveSourceId] = useState<string>();
   const [readerVersion, setReaderVersion] = useState<SourceVersion>();
   const [readerVersions, setReaderVersions] = useState<SourceVersion[]>([]);
@@ -76,10 +78,8 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
     [activeSourceId, records],
   );
   const selectedVersionIds = useMemo(
-    () => records
-      .filter((record) => selectedSourceIds.includes(record.id) && record.processingState === 'ready' && record.currentVersionId)
-      .map((record) => record.currentVersionId),
-    [records, selectedSourceIds],
+    () => selectedVersionIdsForSources(records, selectedSourceIds, selectedVersionIdsBySource),
+    [records, selectedSourceIds, selectedVersionIdsBySource],
   );
 
   const loadLibrary = useCallback(async () => {
@@ -118,17 +118,18 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
     try {
       const response = await listSourceVersions(source.id);
       const versions = response.sourceVersions.filter((version) => version.sourceId === source.id);
-      const current = versions.find((version) => version.id === source.currentVersionId);
-      if (!current) throw new SourcesApiError({ statusCode: 409, statusLabel: 'version_conflict', code: 'VERSION_CONFLICT', userMessageVi: 'Lịch sử phiên bản nguồn đã thay đổi.', suggestedActionVi: 'Làm mới rồi thử lại.' });
+      const selectedVersionId = selectedVersionIdForSource(source, selectedVersionIdsBySource);
+      const selectedVersion = versions.find((version) => version.id === selectedVersionId);
+      if (!selectedVersion) throw new SourcesApiError({ statusCode: 409, statusLabel: 'selection_unavailable', code: 'VALIDATION_FAILED', userMessageVi: 'Phiên bản nguồn đã chọn hiện không khả dụng.', suggestedActionVi: 'Làm mới thư viện rồi chọn lại một phiên bản.' });
       setReaderVersions(versions);
-      setReaderVersion(current);
+      setReaderVersion(selectedVersion);
       setReaderState('ready');
     } catch (error) {
       setReaderVersion(undefined);
       setReaderState(readerStateForError(error));
       setReaderError(error instanceof SourcesApiError ? error.userMessageVi : undefined);
     }
-  }, []);
+  }, [selectedVersionIdsBySource]);
 
   const openSource = (source: SourceRecord) => {
     setActiveSourceId(source.id);
@@ -143,17 +144,30 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
     setArtifactSource(source);
     setArtifactVersion(undefined);
     setIsArtifactOpen(true);
-    const knownVersion = source.currentVersionId === readerVersion?.id && readerVersion.sourceId === source.id
+    const selectedVersionId = selectedVersionIdForSource(source, selectedVersionIdsBySource);
+    const knownVersion = selectedVersionId === readerVersion?.id && readerVersion.sourceId === source.id
       ? readerVersion
       : undefined;
     if (knownVersion) {
       setArtifactVersion(knownVersion);
       return;
     }
-    if (!source.currentVersionId) return;
-    void getSourceVersion(source.currentVersionId)
+    if (!selectedVersionId) return;
+    void getSourceVersion(selectedVersionId)
       .then((response) => setArtifactVersion(response.sourceVersion))
       .catch(() => setArtifactVersion(undefined));
+  };
+
+  const handleSourceToggle = (source: SourceRecord, selected: boolean) => {
+    setSelectedVersionIdsBySource((current) => {
+      if (selected) {
+        if (Object.prototype.hasOwnProperty.call(current, source.id)) return current;
+        return source.currentVersionId ? { ...current, [source.id]: source.currentVersionId } : current;
+      }
+      const next = { ...current };
+      delete next[source.id];
+      return next;
+    });
   };
 
   const handleImport = (response: SourceImportResponse) => {
@@ -241,7 +255,7 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
 
   const contextLabel = selectedVersionIds.length === 0
     ? 'Chưa chọn phiên bản nguồn sẵn sàng'
-    : `Ngữ cảnh: đã chọn ${selectedVersionIds.length} phiên bản nguồn`;
+    : `Ngữ cảnh: đã chọn ${selectedVersionIds.length} phiên bản nguồn${records.some((record) => selectedSourceIds.includes(record.id) && selectedVersionIdForSource(record, selectedVersionIdsBySource) !== record.currentVersionId) ? ' · có phiên bản lịch sử' : ''}`;
   const guestEmpty = isGuest && records.length === 0;
   const canImport = !isGuest && (libraryState === 'empty' || libraryState === 'ready');
 
@@ -284,6 +298,7 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
             isGuest={isGuest}
             selectedSourceIds={selectedSourceIds}
             onSelectedSourceIdsChange={setSelectedSourceIds}
+            onToggleSource={handleSourceToggle}
             onOpenSource={openSource}
             onCreateArtifact={openArtifact}
             onCreateCollection={handleCreateCollection}
@@ -303,7 +318,11 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
               selectedSpan={selectedSpan}
               state={readerState}
               onSpanChange={setSelectedSpan}
-              onVersionSelect={(version) => { setReaderVersion(version); setSelectedSpan(undefined); }}
+              onVersionSelect={(version) => {
+                setReaderVersion(version);
+                setSelectedSpan(undefined);
+                setSelectedVersionIdsBySource((current) => ({ ...current, [activeSource.id]: version.id }));
+              }}
               onSaveEditedVersion={saveEditedVersion}
               onRetry={() => void loadReaderVersion(activeSource)}
             />
@@ -330,7 +349,7 @@ export function SourcesView({ onNavigate, onOpenArtifact }: SourcesViewProps) {
               <div className="omni-sources-create-context__source">
                 <strong>{activeSource.title}</strong>
                 <span>{activeSource.processingState === 'ready' ? 'Phiên bản nguồn sẵn sàng' : 'Chưa có phiên bản sẵn sàng'}</span>
-                <span>{selectedSpan?.sourceVersionId === activeSource.currentVersionId ? 'Đang dùng phạm vi đã chọn' : 'Có thể dùng toàn bộ phiên bản khi sẵn sàng'}</span>
+                <span>{selectedSpan?.sourceVersionId === selectedVersionIdForSource(activeSource, selectedVersionIdsBySource) ? 'Đang dùng phạm vi đã chọn' : 'Có thể dùng toàn bộ phiên bản khi sẵn sàng'}</span>
               </div>
             ) : (
               <div className="omni-sources-view__empty-pane" role="status">

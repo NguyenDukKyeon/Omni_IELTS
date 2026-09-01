@@ -5,6 +5,7 @@ import { createSourceRecord, createSourceVersion } from '../sources/sourceFactor
 
 const sql = readFileSync('supabase/migrations/202608300001_sources_library.sql', 'utf8');
 const editSql = readFileSync('supabase/migrations/202609010001_sources_immutable_edit.sql', 'utf8');
+const editInvokerSql = readFileSync('supabase/migrations/202609010002_sources_immutable_edit_invoker.sql', 'utf8');
 
 type Actor = { id: string };
 type RecordRow = { id: string; user_id: string };
@@ -145,6 +146,8 @@ describe('P03 source_versions RLS and immutability', () => {
     expect(editSql).toContain("'edited'");
     expect(editSql).toContain("digest(convert_to(v_cleaned, 'UTF8'), 'sha256')");
     expect(editSql).toContain('FOR UPDATE');
+    expect(editInvokerSql).toContain('SECURITY INVOKER');
+    expect(editInvokerSql).toContain('SET search_path = public, extensions');
     expect(editSql).toContain('VERSION_CONFLICT');
     expect(editSql).toContain('GRANT EXECUTE ON FUNCTION public.append_source_edited_version');
     expect(editSql).not.toMatch(/p_content_hash|p_blocks|p_stage|p_version_number/i);

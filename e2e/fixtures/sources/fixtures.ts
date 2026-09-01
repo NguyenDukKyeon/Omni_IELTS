@@ -144,8 +144,8 @@ function blocksFor(texts: string[], prefix = 'b'): SourceBlock[] {
 }
 
 export const TASK12_TEXT_VERSION: SourceVersion = {
-  id: 'task12-version-text-v1',
-  sourceId: 'task12-source-text',
+  id: '00000000-0000-4000-8000-000000000002',
+  sourceId: '00000000-0000-4000-8000-000000000001',
   versionNumber: 1,
   stage: 'normalised',
   contentHash: 'task12-hash-text-v1',
@@ -154,6 +154,8 @@ export const TASK12_TEXT_VERSION: SourceVersion = {
   wordCount: TASK12_TEXT.split(/\s+/).length,
   createdAt: TASK12_TIMESTAMP,
 };
+
+export const TASK12_TEXT_EDITED_VERSION_ID = '00000000-0000-4000-8000-000000000003';
 
 export const TASK12_OTHER_VERSIONS: Record<string, SourceVersion> = {
   'task12-version-pdf': {
@@ -193,7 +195,7 @@ function sourceRecord(input: Pick<SourceRecord, 'id' | 'title' | 'type' | 'proce
 }
 
 export const TASK12_RECORDS: SourceRecord[] = [
-  sourceRecord({ id: 'task12-source-text', title: 'Renewable policy brief', summary: TASK12_TEXT, type: 'text', currentVersionId: TASK12_TEXT_VERSION.id, processingState: 'ready', collectionIds: ['task12-collection'], tags: ['policy', 'renewable'], provenance: baseProvenance }),
+  sourceRecord({ id: TASK12_TEXT_VERSION.sourceId, title: 'Renewable policy brief', summary: TASK12_TEXT, type: 'text', currentVersionId: TASK12_TEXT_VERSION.id, processingState: 'ready', collectionIds: ['task12-collection'], tags: ['policy', 'renewable'], provenance: baseProvenance }),
   sourceRecord({ id: 'task12-source-pdf', title: 'Urban heat islands PDF', summary: 'Two-page text-layer PDF fixture.', type: 'pdf', currentVersionId: 'task12-version-pdf', processingState: 'ready', collectionIds: ['task12-collection'], tags: ['cities'], provenance: { ...baseProvenance, originType: 'user_upload', originalFilename: TASK12_FILES.pdf.name, rawContentHash: 'task12-hash-pdf', canonicalCitation: 'Urban heat islands PDF fixture' } }),
   sourceRecord({ id: 'task12-source-docx', title: 'Renewable policy DOCX', summary: 'DOCX heading and table fixture.', type: 'docx', currentVersionId: 'task12-version-docx', processingState: 'ready', collectionIds: ['task12-collection'], tags: ['report'], provenance: { ...baseProvenance, originType: 'user_upload', originalFilename: TASK12_FILES.docx.name, rawContentHash: 'task12-hash-docx', canonicalCitation: 'Renewable policy DOCX fixture' } }),
   sourceRecord({ id: 'task12-source-url', title: 'Renewable policy URL', summary: 'Local article HTML fixture.', type: 'url', currentVersionId: 'task12-version-url', processingState: 'ready', collectionIds: ['task12-collection'], tags: ['article'], provenance: { ...baseProvenance, originType: 'web_fetch', originalUrl: 'https://fixture.invalid/renewable-policy', rawContentHash: 'task12-hash-url', canonicalCitation: 'Renewable policy URL fixture' } }),
@@ -208,7 +210,7 @@ export const TASK12_RECORDS: SourceRecord[] = [
 
 export const TASK12_COLLECTIONS: SourceCollection[] = [{
   id: 'task12-collection', userId: TASK12_USER_ID, name: 'Policy fixtures', color: 'vermilion', icon: 'folder',
-  sourceIds: ['task12-source-text', 'task12-source-pdf', 'task12-source-docx', 'task12-source-url'],
+  sourceIds: [TASK12_TEXT_VERSION.sourceId, 'task12-source-pdf', 'task12-source-docx', 'task12-source-url'],
   createdAt: TASK12_TIMESTAMP, updatedAt: TASK12_TIMESTAMP, lastUsedAt: TASK12_TIMESTAMP,
 }];
 

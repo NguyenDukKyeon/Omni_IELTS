@@ -13,6 +13,7 @@ import {
   TASK12_OTHER_VERSIONS,
   TASK12_RECORDS,
   TASK12_TEXT,
+  TASK12_TEXT_EDITED_VERSION_ID,
   TASK12_TEXT_VERSION,
   TASK12_USER_ID,
   TASK12_VTT,
@@ -277,7 +278,7 @@ async function installTask12Harness(page: Page, options: HarnessOptions = {}): P
         sourceId: input.sourceId,
         versionNumber: nextNumber,
         editedText: input.editedText,
-        id: `${input.sourceId}-v${nextNumber}`,
+        id: nextNumber === 2 ? TASK12_TEXT_EDITED_VERSION_ID : `00000000-0000-4000-8000-${String(nextNumber).padStart(12, '0')}`,
         createdAt: '2026-09-01T00:01:00.000Z',
       });
       versions[next.id] = next;
@@ -428,6 +429,19 @@ async function openTextReader(page: Page) {
   await expect(page.locator(`[data-ux-control="sources.reader.select-span:${TASK12_TEXT_VERSION.sourceId}-b_001"]`)).toBeVisible();
 }
 
+async function createEditedTextVersion(page: Page) {
+  await page.locator('[data-ux-control="sources.reader.edit-open"]').click();
+  await page.locator('[data-ux-control="sources.reader.edit-text"]').fill(`${TASK12_TEXT}\n\nEdited conclusion for the immutable revision.`);
+  await page.locator('[data-ux-control="sources.reader.edit-save"]').click();
+  await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 2');
+}
+
+async function selectTextVersion(page: Page, versionId: string) {
+  await page.locator('[data-ux-control="sources.reader.version-history"]').click();
+  await page.locator(`[data-ux-control="sources.reader.version-select:${versionId}"]`).click();
+  await expect(page.locator('.omni-source-reader__type')).toContainText(versionId === TASK12_TEXT_VERSION.id ? 'phiên bản 1' : 'phiên bản 2');
+}
+
 async function openArtifactStudio(page: Page) {
   await sourceControl(page, 'sources.artifact.open-modal', TASK12_TEXT_VERSION.sourceId).click();
   await expect(page.getByRole('dialog', { name: 'Tạo một bản nháp từ nguồn này' })).toBeVisible();
@@ -524,25 +538,22 @@ test('AC-SRC-003 immutable edited version and provenance lineage', async ({ page
   await openTextReader(page);
   await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 1');
   await page.locator('[data-ux-control="sources.reader.version-history"]').click();
-  await expect(page.locator('[data-ux-control="sources.reader.version-select:task12-version-text-v1"]')).toBeVisible();
+  await expect(page.locator(`[data-ux-control="sources.reader.version-select:${TASK12_TEXT_VERSION.id}"]`)).toBeVisible();
   await page.locator('[data-ux-control="sources.reader.version-history"]').click();
-  await page.locator('[data-ux-control="sources.reader.edit-open"]').click();
-  await page.locator('[data-ux-control="sources.reader.edit-text"]').fill(`${TASK12_TEXT}\n\nEdited conclusion for the immutable revision.`);
-  await page.locator('[data-ux-control="sources.reader.edit-save"]').click();
-  await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 2');
+  await createEditedTextVersion(page);
   await expect(page.locator('[data-ux-control="sources.reader.edit-open"]')).toBeVisible();
 
   expect(harness.versionEditRequests).toHaveLength(1);
   expect(Object.keys(harness.versionEditRequests[0]).sort()).toEqual(['baseVersionId', 'editedText', 'sourceId']);
-  expect(harness.versionEditRequests[0].baseVersionId).toBe('task12-version-text-v1');
-  const lineage = await page.evaluate(async () => {
+  expect(harness.versionEditRequests[0].baseVersionId).toBe(TASK12_TEXT_VERSION.id);
+  const lineage = await page.evaluate(async ({ firstVersionId, editedVersionId }) => {
     const [firstResponse, editedResponse, libraryResponse] = await Promise.all([
-      fetch('/api/sources/versions/task12-version-text-v1'),
-      fetch('/api/sources/versions/task12-source-text-v2'),
+      fetch(`/api/sources/versions/${firstVersionId}`),
+      fetch(`/api/sources/versions/${editedVersionId}`),
       fetch('/api/sources/library'),
     ]);
     return { first: await firstResponse.json(), edited: await editedResponse.json(), library: await libraryResponse.json() };
-  });
+  }, { firstVersionId: TASK12_TEXT_VERSION.id, editedVersionId: TASK12_TEXT_EDITED_VERSION_ID });
   expect(lineage.first.sourceVersion.versionNumber).toBe(1);
   expect(lineage.first.sourceVersion.stage).toBe('normalised');
   expect(lineage.edited.sourceVersion.versionNumber).toBe(2);
@@ -553,13 +564,13 @@ test('AC-SRC-003 immutable edited version and provenance lineage', async ({ page
   expect(lineage.edited.sourceVersion.sourceId).toBe(lineage.first.sourceVersion.sourceId);
   const editedRecord = lineage.library.records.find((record: SourceRecord) => record.id === TASK12_TEXT_VERSION.sourceId);
   if (!editedRecord) throw new Error('expected edited source record in deterministic library');
-  expect(editedRecord.currentVersionId).toBe('task12-source-text-v2');
+  expect(editedRecord.currentVersionId).toBe(TASK12_TEXT_EDITED_VERSION_ID);
   expect(editedRecord.provenance).toEqual(TASK12_RECORDS.find((record) => record.id === TASK12_TEXT_VERSION.sourceId)?.provenance);
   await page.locator('[data-ux-control="sources.reader.version-history"]').click();
-  await page.locator('[data-ux-control="sources.reader.version-select:task12-version-text-v1"]').click();
+  await page.locator(`[data-ux-control="sources.reader.version-select:${TASK12_TEXT_VERSION.id}"]`).click();
   await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 1');
   await page.locator('[data-ux-control="sources.reader.version-history"]').click();
-  await page.locator('[data-ux-control="sources.reader.version-select:task12-source-text-v2"]').click();
+  await page.locator(`[data-ux-control="sources.reader.version-select:${TASK12_TEXT_EDITED_VERSION_ID}"]`).click();
   await expect(page.locator('.omni-source-reader__type')).toContainText('phiên bản 2');
   expect(harness.supabaseRequests).toBe(0);
 });
@@ -568,11 +579,14 @@ test('AC-SRC-004 selected-source chat citations and truthful unsupported state',
   const harness = await visitSources(page);
   await sourceControl(page, 'sources.library.select-toggle', TASK12_TEXT_VERSION.sourceId).click();
   await openTextReader(page);
+  await createEditedTextVersion(page);
+  await selectTextVersion(page, TASK12_TEXT_VERSION.id);
   await page.locator(`[data-ux-control="sources.reader.select-span:${TASK12_TEXT_VERSION.sourceId}-b_001"]`).click();
   await page.locator('[data-ux-control="sources.chat.question-input"]').fill('What does the selected source say about transition risk?');
   await page.locator('[data-ux-control="sources.chat.send"]').click();
   await expect(page.getByText('Câu trả lời dựa trên nguồn đã chọn')).toBeVisible();
   await expect(page.locator('[data-ux-control^="sources.chat.citation-open:"]')).toBeVisible();
+  expect(harness.groundedRequests[0]?.selectedVersionIds).toEqual([TASK12_TEXT_VERSION.id]);
   expect((harness.groundedRequests[0].sourceSpan as MockRequestBody).blockIds).toEqual(['b_001']);
 
   await page.locator('[data-ux-control^="sources.chat.citation-open:"]').press('Enter');
@@ -585,18 +599,18 @@ test('AC-SRC-004 selected-source chat citations and truthful unsupported state',
   await expect(page.getByText(/unsupported_by_sources/)).toBeVisible();
   expect(harness.researchRequests).toHaveLength(0);
 
-  const invalidSpan = await page.evaluate(async () => {
+  const invalidSpan = await page.evaluate(async ({ sourceId, versionId }) => {
     const response = await fetch('/api/sources/grounded-chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        selectedVersionIds: ['task12-version-text-v1'],
+        selectedVersionIds: [versionId],
         question: 'A valid shape with an invalid block should refuse.',
-        sourceSpan: { sourceId: 'task12-source-text', sourceVersionId: 'task12-version-text-v1', blockIds: ['missing-block'] },
+        sourceSpan: { sourceId, sourceVersionId: versionId, blockIds: ['missing-block'] },
       }),
     });
     return response.json();
-  });
+  }, { sourceId: TASK12_TEXT_VERSION.sourceId, versionId: TASK12_TEXT_VERSION.id });
   expect(invalidSpan.groundingStatus).toBe('unsupported_by_sources');
   expect(harness.researchRequests).toHaveLength(0);
 });
@@ -664,6 +678,13 @@ test('AC-SRC-008 ready drafts stay in Sources until explicit action and both CTA
 
 test('AC-SRC-009 explicit Open artifact sends a typed pending handoff to the owner', async ({ page }) => {
   const harness = await visitSources(page);
+  await sourceControl(page, 'sources.library.select-toggle', TASK12_TEXT_VERSION.sourceId).click();
+  await openTextReader(page);
+  await createEditedTextVersion(page);
+  await selectTextVersion(page, TASK12_TEXT_VERSION.id);
+  await page.locator(`[data-ux-control="sources.reader.select-span:${TASK12_TEXT_VERSION.sourceId}-b_001"]`).click();
+  const libraryTab = page.locator('[data-ux-control="sources.view.tab-library"]');
+  if (await libraryTab.isVisible()) await libraryTab.click();
   await openArtifactStudio(page);
   await page.locator('[data-ux-control="sources.artifact.destination-practice"]').click();
   await page.locator('[data-ux-control="sources.artifact.generate"]').click();
@@ -673,6 +694,8 @@ test('AC-SRC-009 explicit Open artifact sends a typed pending handoff to the own
   await expect(page.getByText('1 khối đã chọn')).toBeVisible();
   expect(new URL(page.url()).pathname).toBe('/');
   expect(harness.calls.some((call) => /practice|vocabulary|mock/.test(call))).toBe(false);
+  expect(harness.artifactRequests[0]?.sourceVersionId).toBe(TASK12_TEXT_VERSION.id);
+  expect((harness.artifactRequests[0]?.sourceSpan as MockRequestBody).sourceVersionId).toBe(TASK12_TEXT_VERSION.id);
   expect(harness.supabaseRequests).toBe(0);
 });
 
@@ -820,10 +843,10 @@ test('AC-SRC-016 keyboard path and axe audit cover the Sources workspace', async
 
   await sourceControl(page, 'sources.library.open-source', TASK12_TEXT_VERSION.sourceId).focus();
   await page.keyboard.press('Enter');
-  await expect(page.locator('[data-ux-control="sources.reader.select-span:task12-source-text-b_001"]')).toBeVisible();
-  await page.locator('[data-ux-control="sources.reader.select-span:task12-source-text-b_001"]').focus();
+  await expect(page.locator(`[data-ux-control="sources.reader.select-span:${TASK12_TEXT_VERSION.sourceId}-b_001"]`)).toBeVisible();
+  await page.locator(`[data-ux-control="sources.reader.select-span:${TASK12_TEXT_VERSION.sourceId}-b_001"]`).focus();
   await page.keyboard.press('Enter');
-  await expect(page.locator('[data-ux-control="sources.reader.select-span:task12-source-text-b_001"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(`[data-ux-control="sources.reader.select-span:${TASK12_TEXT_VERSION.sourceId}-b_001"]`)).toHaveAttribute('aria-pressed', 'true');
 
   const question = page.locator('[data-ux-control="sources.chat.question-input"]');
   await question.fill('What does the source say about transparent outcomes?');

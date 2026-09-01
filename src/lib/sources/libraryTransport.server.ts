@@ -6,11 +6,13 @@ import {
   authRequiredResult,
   extractBearerToken,
   featureDisabledResult,
+  invalidRequestResult,
   selectionUnavailableResult,
   typedFailureResult,
   type SourcesTransportResult,
   unavailableResult,
   verifyOrReject,
+  type VerifiedLearner,
 } from './transportShared.server';
 
 type LibraryHandlerInput = {
@@ -19,14 +21,25 @@ type LibraryHandlerInput = {
   cloudConfigured: boolean;
   verifyAccessToken?: (accessToken: string) => Promise<LearnerAuthResult>;
   repositoryForToken: (accessToken: string) => SourcesPersistenceRepository;
+  verifiedLearner?: VerifiedLearner;
 };
 
 const SOURCE_ID_SCHEMA = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
+const SOURCE_VERSION_EDIT_ID_SCHEMA = z.string().uuid();
+
+function hasAtMostCodePoints(value: string, maximum: number): boolean {
+  let count = 0;
+  for (const _codePoint of value) {
+    count += 1;
+    if (count > maximum) return false;
+  }
+  return true;
+}
 
 export const SourceVersionEditRequestSchema = z.object({
-  sourceId: SOURCE_ID_SCHEMA,
-  baseVersionId: SOURCE_ID_SCHEMA,
-  editedText: z.string().min(1).max(SOURCE_VERSION_MAX_TEXT_CODE_POINTS),
+  sourceId: SOURCE_VERSION_EDIT_ID_SCHEMA,
+  baseVersionId: SOURCE_VERSION_EDIT_ID_SCHEMA,
+  editedText: z.string().min(1).refine((value) => hasAtMostCodePoints(value, SOURCE_VERSION_MAX_TEXT_CODE_POINTS), { message: 'edited_text_limit' }),
 }).strict();
 
 export type SourceVersionEditRequest = z.infer<typeof SourceVersionEditRequestSchema>;
@@ -119,11 +132,13 @@ export async function handleSourceVersionEditRequest(
 ): Promise<SourcesTransportResult> {
   if (input.featureEnabled !== true) return featureDisabledResult();
   const parsed = SourceVersionEditRequestSchema.safeParse(input.body);
-  if (!parsed.success) return selectionUnavailableResult();
+  if (!parsed.success) return invalidRequestResult();
   const accessToken = extractBearerToken(input.authorizationHeader);
   if (!accessToken) return authRequiredResult();
   if (!input.cloudConfigured) return unavailableResult();
-  const auth = await verifyOrReject(accessToken, input.verifyAccessToken);
+  const auth = input.verifiedLearner
+    ? { ok: true as const, learner: input.verifiedLearner }
+    : await verifyOrReject(accessToken, input.verifyAccessToken);
   if (!('ok' in auth)) return auth;
 
   try {

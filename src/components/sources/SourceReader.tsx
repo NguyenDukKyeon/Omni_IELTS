@@ -123,7 +123,7 @@ export function SourceReader({
     <section className="omni-source-reader" aria-labelledby="source-reader-title">
       <header className="omni-source-reader__header">
         <div>
-          <p className="omni-source-reader__type">{record.type.toUpperCase()} · phiên bản {version?.versionNumber ?? '—'}</p>
+          <p className="omni-source-reader__type">{record.type.toUpperCase()} · phiên bản {version?.versionNumber ?? '—'} · {isCurrentVersion ? 'phiên bản hiện tại' : 'phiên bản lịch sử · chỉ đọc'}</p>
           <h2 id="source-reader-title">{record.title}</h2>
         </div>
         <MousePointer2 aria-hidden="true" className="omni-source-reader__header-icon" />

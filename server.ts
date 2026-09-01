@@ -62,6 +62,8 @@ import {
   createSourceImportAdmissionGate,
   createSourceImportJsonParser,
   createSourceImportParserErrorHandler,
+  createSourceVersionEditAdmissionGate,
+  createSourceVersionEditJsonParser,
 } from "./src/lib/sources/importRouteGate.server";
 import {
   handleArtifactJobRequest,
@@ -8623,26 +8625,43 @@ app.get('/api/sources/sources/:sourceId/versions', async (req, res) => {
   return writeSourcesTransportResult(res, result);
 });
 
-app.post('/api/sources/versions', async (req, res) => {
-  const cloud = sourcesCloudConfig();
-  const result = await handleSourceVersionEditRequest({
-    featureEnabled: parseSourcesLibraryV2Env(process.env),
-    authorizationHeader: req.header('authorization'),
-    body: req.body,
-    cloudConfigured: cloud.configured,
-    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
-      accessToken,
-      supabaseUrl: cloud.supabaseUrl,
-      supabaseAnonKey: cloud.supabaseAnonKey,
-    }),
-    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
-      accessToken,
-      supabaseUrl: cloud.supabaseUrl,
-      supabaseAnonKey: cloud.supabaseAnonKey,
-    }),
-  });
-  return writeSourcesTransportResult(res, result);
-});
+app.post('/api/sources/versions',
+  (req, res, next) => {
+    const cloud = sourcesCloudConfig();
+    return createSourceVersionEditAdmissionGate({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      cloudConfigured: cloud.configured,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+    })(req, res, next);
+  },
+  createSourceVersionEditJsonParser(),
+  createSourceImportParserErrorHandler(),
+  async (req, res) => {
+    const cloud = sourcesCloudConfig();
+    const result = await handleSourceVersionEditRequest({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      authorizationHeader: req.header('authorization'),
+      body: req.body,
+      cloudConfigured: cloud.configured,
+      verifiedLearner: res.locals.sourcesVerifiedLearner,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+      repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+    });
+    return writeSourcesTransportResult(res, result);
+  },
+);
 
 app.post('/api/sources/import',
   (req, res, next) => {
