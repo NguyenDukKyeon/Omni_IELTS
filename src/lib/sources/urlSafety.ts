@@ -10,6 +10,7 @@ export const URL_MAX_REDIRECTS = 3;
 const ALLOWED_CONTENT_TYPES = new Set(['text/html', 'application/xhtml+xml']);
 
 const reserved = new BlockList();
+const embeddedIpv4Ipv6Ranges = new BlockList();
 // IPv4
 reserved.addSubnet('0.0.0.0', 8, 'ipv4');
 reserved.addSubnet('10.0.0.0', 8, 'ipv4');
@@ -34,6 +35,14 @@ reserved.addSubnet('fc00::', 7, 'ipv6');
 reserved.addSubnet('fe80::', 10, 'ipv6');
 reserved.addSubnet('ff00::', 8, 'ipv6');
 reserved.addSubnet('2001:db8::', 32, 'ipv6');
+// IPv4-embedded IPv6 ranges must be rejected after URL normalization.
+// URL converts dotted IPv4 tails to hexadecimal, so these checks cannot rely
+// only on dotted-text extraction.
+// Keep this list separate because Node treats IPv4-mapped IPv6 subnets as
+// matching IPv4 checks when they share a BlockList with IPv4 reservations.
+embeddedIpv4Ipv6Ranges.addSubnet('::', 96, 'ipv6');
+embeddedIpv4Ipv6Ranges.addSubnet('::ffff:0:0', 96, 'ipv6');
+embeddedIpv4Ipv6Ranges.addSubnet('64:ff9b::', 96, 'ipv6');
 
 const BLOCKED_HOSTS = new Set([
   'localhost',
@@ -169,7 +178,7 @@ export function isNonPublicIp(address: string): boolean {
   }
 
   if (isIP(host) === 6) {
-    return reserved.check(host, 'ipv6');
+    return reserved.check(host, 'ipv6') || embeddedIpv4Ipv6Ranges.check(host, 'ipv6');
   }
 
   return false;
@@ -477,4 +486,13 @@ export async function fetchPublicHtml(
   }
 
   return fail('URL_UNREACHABLE');
+}
+
+export function fetchLegacyUrlHtml(
+  rawUrl: string,
+  deps: UrlFetchDeps = {},
+): Promise<PublicHtmlResult> {
+  const trimmed = rawUrl.trim();
+  const targetUrl = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+  return fetchPublicHtml(targetUrl, deps);
 }

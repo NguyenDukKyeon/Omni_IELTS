@@ -57,6 +57,7 @@ import {
   handleWebResearchRequest,
 } from "./src/lib/sources/groundedChat";
 import { handleSourceImportRequest } from "./src/lib/sources/importTransport.server";
+import { fetchLegacyUrlHtml } from "./src/lib/sources/urlSafety";
 import {
   createJsonParserExcludingSourceImport,
   createSourceImportAdmissionGate,
@@ -882,18 +883,15 @@ app.post("/api/fetch-url", async (req, res) => {
     }
 
     const targetUrl = url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`;
-    const response = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OmniIELTS/1.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    const fetched = await fetchLegacyUrlHtml(targetUrl);
+    if (!fetched.ok || !fetched.html) {
+      if (fetched.code === "RIGHTS_REJECTED") {
+        return res.status(403).json({ error: "URL này không được phép truy cập từ OMNI." });
       }
-    });
-
-    if (!response.ok) {
-      return res.status(400).json({ error: `Không thể tải trang (HTTP ${response.status}). Vui lòng kiểm tra lại đường dẫn hoặc dán trực tiếp nội dung văn bản.` });
+      return res.status(400).json({ error: "Không thể tải trang. Vui lòng kiểm tra lại đường dẫn hoặc dán trực tiếp nội dung văn bản." });
     }
 
-    const html = await response.text();
+    const html = fetched.html;
     const cleanText = extractCleanTextFromHtml(html);
 
     // Extract title from <title> or <h1>

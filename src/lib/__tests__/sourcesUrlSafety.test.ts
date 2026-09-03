@@ -2,7 +2,7 @@ import http from 'node:http';
 import { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { extractUrl } from '../sources/extractors/urlExtractor';
-import { fetchPublicHtml } from '../sources/urlSafety';
+import { fetchLegacyUrlHtml, fetchPublicHtml } from '../sources/urlSafety';
 
 const PUBLIC_IPV4 = '93.184.216.34';
 const ARTICLE_HTML = `<!DOCTYPE html><html><head><title>Climate Policy</title></head>
@@ -10,6 +10,17 @@ const ARTICLE_HTML = `<!DOCTYPE html><html><head><title>Climate Policy</title></
 <p>The transition toward renewable energy represents a monumental macroeconomic shift in fiscal planning.</p>
 <p>Governments now treat capital expenditure in clean technology as a core stability claim for the decade.</p>
 </article></body></html>`;
+
+const IPV4_EMBEDDED_IPV6_UNSAFE_URLS = [
+  'http://[::127.0.0.1]/compat',
+  'http://[::7f00:1]/compat',
+  'http://[::0.0.0.2]/',
+  'http://[::ffff:127.0.0.1]/mapped',
+  'http://[::ffff:7f00:1]/mapped',
+  'http://[64:ff9b::127.0.0.1]/nat64',
+  'http://[64:ff9b::7f00:1]/nat64',
+  'http://[2002:7f00:1::]/6to4',
+] as const;
 
 function htmlResponse(body = ARTICLE_HTML, extras: { status?: number; headers?: Record<string, string> } = {}) {
   return new Response(body, {
@@ -69,6 +80,78 @@ describe('P03 URL extraction SSRF controls', () => {
     expect(serialized).not.toContain('127.0.0.1');
     expect(serialized).not.toContain('ECONNREFUSED');
     expect(serialized).not.toMatch(/HTTP\s*\d{3}/);
+  });
+
+  it.each(IPV4_EMBEDDED_IPV6_UNSAFE_URLS)(
+    'rejects normalized IPv4-embedded IPv6 URL %s before any network sink',
+    async (target) => {
+      const globalFetch = vi.fn();
+      vi.stubGlobal('fetch', globalFetch);
+      const lookup = vi.fn(async () => [PUBLIC_IPV4]);
+      const request = vi.fn(async () => {
+        throw new Error(`request must not run for ${target}`);
+      });
+
+      const result = await extractUrl(
+        { type: 'url', content: target, title: 'Unsafe embedded IPv4' },
+        { lookup, request },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('RIGHTS_REJECTED');
+      expect(lookup).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+      expect(globalFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(IPV4_EMBEDDED_IPV6_UNSAFE_URLS)(
+    'rejects legacy URL fetch for normalized IPv4-embedded IPv6 URL %s before any network sink',
+    async (target) => {
+      const globalFetch = vi.fn();
+      vi.stubGlobal('fetch', globalFetch);
+      const lookup = vi.fn(async () => [PUBLIC_IPV4]);
+      const request = vi.fn(async () => {
+        throw new Error(`request must not run for ${target}`);
+      });
+
+      const result = await fetchLegacyUrlHtml(target, { lookup, request });
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe('RIGHTS_REJECTED');
+      expect(lookup).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+      expect(globalFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a public native IPv6 literal valid without DNS or live network access', async () => {
+    const target = 'http://[2001:4860:4860::8888]/public';
+    const globalFetch = vi.fn();
+    vi.stubGlobal('fetch', globalFetch);
+    const lookup = vi.fn(async () => {
+      throw new Error('DNS lookup must not run for a native IPv6 literal');
+    });
+    const request = vi.fn(async (url: URL, pinnedIp: string) => {
+      expect(url.hostname).toBe('[2001:4860:4860::8888]');
+      expect(pinnedIp).toBe('2001:4860:4860::8888');
+      return {
+        statusCode: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: new TextEncoder().encode(ARTICLE_HTML),
+        finalUrl: url.href,
+      };
+    });
+
+    const result = await extractUrl(
+      { type: 'url', content: target, title: 'Public IPv6' },
+      { lookup, request },
+    );
+
+    expect(result.success).toBe(true);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(globalFetch).not.toHaveBeenCalled();
   });
 
   it('proves DNS rebinding cannot route an audited public hostname to a later private address', async () => {
