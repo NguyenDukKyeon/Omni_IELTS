@@ -27,7 +27,7 @@ A rigorous architectural decision is required to formalize the lifecycle of tran
 
 - **Pedagogical Integrity (`GUARD-001`, `PRD-008`)**: Never fabricate transcripts, pronunciation scores, or IELTS band equivalents. Missing prerequisites (e.g. absent microphone or missing caption) must yield an explicit, honest `unavailable` status.
 - **Microphone Independence for Dictation (`PRD-008`)**: Dictation must test listening comprehension and spelling without requiring audio recording permissions. Denying or missing microphone access must never impede Dictation.
-- **Source-to-Media Provenance (`CAP-MED-IMPORT`, `CAP-SRC-VERSION`)**: Media consumes sources; Sources keeps provenance. Media must reference upstream `sourceRecordId` via a P04-owned `MediaHandoffReference`. Because P03 intentionally creates no `SourceVersion` for `handoff_required` items, `sourceVersionId` is absent at handoff and P04 creates its own `MediaTranscriptVersion`.
+- **Source-to-Media Provenance (`CAP-MED-IMPORT`, `CAP-SRC-VERSION`)**: Media consumes sources; Sources keeps provenance. The browser may provide only `sourceRecordId`; Media resolves it under the verified learner session and P03 RLS. Because P03 intentionally creates no `SourceVersion` for `handoff_required` items, no P03 source version is present at handoff and P04 creates its own `MediaTranscriptVersion` only after successful processing.
 - **Zero Direct Mastery Policy**: Media Room is a practice and retrieval environment, not a mastery arbiter. All learning evidence must be emitted as immutable envelopes to Review & Progress (`P05`).
 - **Centralized AI Execution (`CAP-GLB-AI-ROUTER`)**: All machine learning operations are routed through the central AI router with strict schema verification and circuit breaking, avoiding direct provider client SDKs inside Media.
 - **Biometric Audio Privacy (`sensitive_audio`)**: Learner voice recordings must not be permanently stored in cloud databases. Local playback must use sandboxed client storage (`IndexedDB`) with explicit learner consent.
@@ -44,27 +44,33 @@ A rigorous architectural decision is required to formalize the lifecycle of tran
    - Learner edits do not mutate the existing version; they write a new version with `versionNumber = N + 1`, `stage = 'user_edited'`, and `normalizerVersion = 'user-edited-v1'`.
 3. **Deterministic Segment Identification**: Each `MediaTranscriptSegment` receives a deterministic ID computed from its contents and timestamps (`seg_<hash(text + startMs)>`). When a transcript is edited, unchanged segments retain their deterministic ID, preserving historical links to past attempts.
 4. **Provenance Tracking**:
-   - If the lesson was initiated from the Sources Library, `MediaLesson.sourceRecordId` points to the originating P03 record. `MediaLesson.sourceVersionId` is absent initially because P03 creates no `SourceVersion` for `handoff_required` media.
+   - If the lesson was initiated from the Sources Library, `MediaLesson.sourceRecordId` points to the server-resolved P03 record. `MediaLesson.sourceVersionId` is absent initially because P03 creates no `SourceVersion` for `handoff_required` media.
    - If imported directly into Media, provenance records the original external URL or audio file SHA-256 hash.
 
 ### 3.2 Handoff Boundaries: P03 â†’ P04 and P04 â†’ Evidence/Review
 
 1. **P03 â†’ P04 Handoff Contract**:
    - P03 extractors handle text, PDF, DOCX, and standalone VTT/SRT files. For YouTube URLs and raw audio files, P03 emits a `SourceRecord` with `processing_state = 'handoff_required'` without creating a `SourceVersion`. P03 does NOT export a `PendingMediaHandoff` type.
-   - At the navigation boundary, P04 defines and ingests a `MediaHandoffReference` derived from the P03 `SourceRecord`:
+   - The browser navigation payload is limited to an identifier. It cannot supply a user, URL, citation, provenance, binary or source version:
      ```typescript
-     export interface MediaHandoffReference {
+     export interface MediaHandoffRequest {
        sourceRecordId: string;
-       userId: string;
+     }
+
+     export interface ResolvedMediaHandoffReference {
+       sourceRecordId: string;
+       authenticatedUserId: string;
        title: string;
        mediaType: 'youtube' | 'audio';
-       mediaUrl: string;
-       sourceVersionId?: string; // Optional: absent on initial handoff from P03
-       provenanceCitation?: string;
-       retrievalDate?: string;
+       originalUrl?: string;
+       originalFilename?: string;
+       provenanceCitation: string;
+       retrievalDate: string;
      }
      ```
-   - Media Room ingests this reference, creates the `MediaLesson`, and initiates caption extraction or transcription. P04 creates its own first `MediaTranscriptVersion`. P03 never invokes yt-dlp, media player APIs, or audio transcription.
+   - After feature-flag and JWT admission, the Media server performs a learner-scoped P03 RLS lookup and accepts only a learner-owned `handoff_required` record whose owning module is `media`. Missing, foreign, wrong-owner, and wrong-state records return the same non-disclosing `handoff_unavailable` response.
+   - A resolved YouTube record may provide `provenance.originalUrl`, allowing P04 to create a MediaLesson and begin caption processing. A resolved P03 audio record has metadata/hash/filename but no playable URL, binary or P03 SourceVersion; P04 returns `requires_original_audio` and asks the learner to upload or reselect the original audio. It must not create a player, waveform, transcription job, or fabricated reference.
+   - P04 creates its own first `MediaTranscriptVersion` only after successful caption parsing or direct P04 audio transcription. P03 never invokes yt-dlp, media player APIs, or audio transcription.
 2. **P04 â†’ Review & Evidence Boundary**:
    - Media Room emits zero `MasteryUpdate`, zero direct XP increments, and zero direct flashcard mutations.
    - When a Dictation attempt contains incorrect or missing words, Media formats a canonical `MistakeEvidence` record (`taxonomy: 'listening_spelling'`, `evidenceClass: 'assisted_practice'`) and dispatches it to the global Evidence bus.

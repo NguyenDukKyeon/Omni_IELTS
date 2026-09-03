@@ -31,7 +31,7 @@
 ```text
 src/
 â”œâ”€â”€ types/
-â”‚   â””â”€â”€ media.ts                               # Domain entities, attempt types, player contracts, MediaHandoffReference
+â”‚   â””â”€â”€ media.ts                               # Domain entities, attempts, MediaHandoffRequest and server-only resolved handoff contracts
 â”œâ”€â”€ lib/
 â”‚   â””â”€â”€ media/
 â”‚       â”œâ”€â”€ transcriptValidator.ts             # Monotonicity, coverage ratio, subtitle parse validation
@@ -39,7 +39,8 @@ src/
 â”‚       â”œâ”€â”€ contentHash.ts                     # Deterministic SHA-256 segment & transcript hashing
 â”‚       â”œâ”€â”€ mediaJobMachine.ts                 # Ingestion state machine (probing -> ready/degraded/failed)
 â”‚       â”œâ”€â”€ mediaFeatureFlags.server.ts        # OMNI_MEDIA_ROOM_V2 parse & express injection
-â”‚       â”œâ”€â”€ mediaTransport.server.ts           # Route admission, rate limiting, token validation
+â”‚       â”œâ”€â”€ mediaTransport.server.ts           # Route admission, rate limiting, token validation and handoff resolution endpoint
+â”‚       â”œâ”€â”€ mediaHandoffRepository.server.ts   # Learner-scoped P03 record hydration and trusted handoff resolution
 â”‚       â”œâ”€â”€ youtubeAdapter.server.ts           # yt-dlp sandboxed execution & caption parsing
 â”‚       â”œâ”€â”€ audioTranscribeAdapter.server.ts   # Central AI router runner for media_transcription_v1
 â”‚       â”œâ”€â”€ shadowingEvalAdapter.server.ts     # Central AI router runner for media_shadowing_eval_v1
@@ -48,7 +49,7 @@ src/
 â”‚       â”œâ”€â”€ evidenceAdapter.ts                 # Formats canonical MistakeEvidence for Review
 â”‚       â”œâ”€â”€ vadAdapter.ts                      # Client-side @ricky0123/vad-web speech telemetry
 â”‚       â”œâ”€â”€ audioArtifactStore.ts              # Local IndexedDB audio persistence (idb-media://)
-â”‚       â””â”€â”€ handoffConsumer.ts                 # Intake for P04-owned MediaHandoffReference from P03
+â”‚       â””â”€â”€ handoffConsumer.ts                 # Browser-side sourceRecordId request construction only
 â”œâ”€â”€ services/
 â”‚   â””â”€â”€ mediaRoomService.ts                    # Client API transport for Media Room v2
 â”œâ”€â”€ components/
@@ -108,7 +109,7 @@ e2e/
 
 **Interfaces:**
 - Consumes: None
-- Produces: `MediaLesson`, `MediaHandoffReference`, `MediaTranscriptVersion`, `MediaTranscriptSegment`, `ShadowingAttempt`, `DictationAttempt`, `MediaResumeState`, `MediaImportJob`
+- Produces: `MediaLesson`, `MediaHandoffRequest`, `ResolvedMediaHandoffReference`, `MediaTranscriptVersion`, `MediaTranscriptSegment`, `ShadowingAttempt`, `DictationAttempt`, `MediaResumeState`, `MediaImportJob`
 
 - [ ] **Step 1: Write failing type validation test**
 
@@ -118,7 +119,8 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   MediaLessonSchema,
-  MediaHandoffReferenceSchema,
+  MediaHandoffRequestSchema,
+  ResolvedMediaHandoffReferenceSchema,
   MediaTranscriptVersionSchema,
   MediaTranscriptSegmentSchema,
   ShadowingAttemptSchema,
@@ -145,15 +147,29 @@ describe('Media Domain Contracts', () => {
     expect(MediaLessonSchema.parse(validLesson)).toEqual(validLesson);
   });
 
-  it('validates a P04-owned MediaHandoffReference intake structure', () => {
-    const handoffRef = {
+  it('accepts only sourceRecordId from browser navigation and rejects forged handoff fields', () => {
+    const handoffRequest = {
       sourceRecordId: '7ba7b810-9dad-11d1-80b4-00c04fd430c8',
+    };
+    expect(MediaHandoffRequestSchema.parse(handoffRequest)).toEqual(handoffRequest);
+    expect(() => MediaHandoffRequestSchema.parse({
+      ...handoffRequest,
       userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      mediaUrl: 'https://attacker.invalid/audio.mp3',
+    })).toThrow();
+  });
+
+  it('validates only a server-resolved handoff reference with authenticated ownership', () => {
+    const resolved = {
+      sourceRecordId: '7ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      authenticatedUserId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
       title: 'IELTS Lecture',
       mediaType: 'youtube' as const,
-      mediaUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
+      originalUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
+      provenanceCitation: 'IELTS Lecture',
+      retrievalDate: '2026-09-04T00:00:00.000Z',
     };
-    expect(MediaHandoffReferenceSchema.parse(handoffRef)).toEqual(handoffRef);
+    expect(ResolvedMediaHandoffReferenceSchema.parse(resolved)).toEqual(resolved);
   });
 
   it('rejects a MediaTranscriptSegment containing mutable attempt properties', () => {
@@ -197,7 +213,7 @@ export const MediaLessonSchema = z.object({
   durationMs: z.number().int().nonnegative(),
   currentVersionId: z.string().uuid().optional(),
   sourceRecordId: z.string().uuid().optional(),
-  sourceVersionId: z.string().uuid().optional(), // Optional: absent on initial handoff from P03
+  sourceVersionId: z.string().uuid().optional(), // Never populated from a P03 media handoff
   processingState: MediaProcessingStateSchema,
   transcriptState: z.enum(['ready', 'unavailable_transcript', 'coverage_insufficient', 'needs_review']).optional(),
   createdAt: z.string().datetime(),
@@ -205,16 +221,20 @@ export const MediaLessonSchema = z.object({
   lastPracticedAt: z.string().datetime().optional(),
 });
 
-export const MediaHandoffReferenceSchema = z.object({
+export const MediaHandoffRequestSchema = z.object({
   sourceRecordId: z.string().uuid(),
-  userId: z.string().uuid(),
+}).strict();
+
+export const ResolvedMediaHandoffReferenceSchema = z.object({
+  sourceRecordId: z.string().uuid(),
+  authenticatedUserId: z.string().uuid(),
   title: z.string().min(1),
   mediaType: z.enum(['youtube', 'audio']),
-  mediaUrl: z.string().url(),
-  sourceVersionId: z.string().uuid().optional(),
-  provenanceCitation: z.string().optional(),
-  retrievalDate: z.string().datetime().optional(),
-});
+  originalUrl: z.string().url().optional(),
+  originalFilename: z.string().min(1).optional(),
+  provenanceCitation: z.string().min(1),
+  retrievalDate: z.string().datetime(),
+}).strict();
 
 export const MediaTranscriptSegmentSchema = z.object({
   id: z.string().min(1),
@@ -288,7 +308,8 @@ export const MediaResumeStateSchema = z.object({
 });
 
 export type MediaLesson = z.infer<typeof MediaLessonSchema>;
-export type MediaHandoffReference = z.infer<typeof MediaHandoffReferenceSchema>;
+export type MediaHandoffRequest = z.infer<typeof MediaHandoffRequestSchema>;
+export type ResolvedMediaHandoffReference = z.infer<typeof ResolvedMediaHandoffReferenceSchema>;
 export type MediaTranscriptSegment = z.infer<typeof MediaTranscriptSegmentSchema>;
 export type MediaTranscriptVersion = z.infer<typeof MediaTranscriptVersionSchema>;
 export type ShadowingAttempt = z.infer<typeof ShadowingAttemptSchema>;
@@ -743,12 +764,13 @@ git commit -m "feat(media): create media room database schema and RLS policies m
 **Files:**
 - Create: `src/lib/media/mediaFeatureFlags.server.ts`
 - Create: `src/lib/media/mediaTransport.server.ts`
+- Create: `src/lib/media/mediaHandoffRepository.server.ts`
 - Modify: `server.ts`
 - Test: `src/lib/__tests__/mediaTransport.test.ts`
 
 **Interfaces:**
 - Consumes: Express `Request`, `Response`, authenticated session token
-- Produces: `verifyLearnerToken`, `consumeMediaQuota`, `parseMediaRoomV2Env`
+- Produces: `verifyLearnerToken`, `consumeMediaQuota`, `parseMediaRoomV2Env`, `resolveMediaHandoffForLearner`
 
 - [ ] **Step 1: Write failing route admission and quota test**
 
@@ -757,6 +779,10 @@ git commit -m "feat(media): create media room database schema and RLS policies m
 import { describe, it, expect } from 'vitest';
 import { parseMediaRoomV2Env } from '../media/mediaFeatureFlags.server';
 import { consumeMediaQuota } from '../media/mediaTransport.server';
+import {
+  resolveMediaHandoffForLearner,
+  type P03HandoffRecord,
+} from '../media/mediaHandoffRepository.server';
 
 describe('Media Transport and Admission', () => {
   it('parses OMNI_MEDIA_ROOM_V2 environment variable correctly', () => {
@@ -776,8 +802,94 @@ describe('Media Transport and Admission', () => {
     expect(blocked.allowed).toBe(false);
     expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
   });
+
+  it('resolves only an owned YouTube handoff after verified P03 RLS hydration', async () => {
+    const repository = {
+      findHandoffRecord: async () => ({
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        title: 'Urban planning lecture',
+        type: 'youtube' as const,
+        processingState: 'handoff_required' as const,
+        provenance: {
+          owningModule: 'media' as const,
+          originalUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
+          canonicalCitation: 'Urban planning lecture',
+          retrievalDate: '2026-09-04T00:00:00.000Z',
+        },
+      }),
+    };
+    const result = await resolveMediaHandoffForLearner(
+      { sourceRecordId: '550e8400-e29b-41d4-a716-446655440000' },
+      '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      repository,
+    );
+    expect(result.status).toBe('resolved');
+    expect(result.handoff?.originalUrl).toContain('youtube.com');
+  });
+
+  const invalidRecords: Array<P03HandoffRecord | null> = [
+    null,
+    {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      userId: '11111111-1111-1111-1111-111111111111',
+      title: 'Foreign lecture',
+      type: 'youtube', processingState: 'handoff_required',
+      provenance: { owningModule: 'media', originalUrl: 'https://youtube.com/watch?v=abc', canonicalCitation: 'x', retrievalDate: '2026-09-04T00:00:00.000Z' },
+    },
+    {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      title: 'Wrong owner lecture',
+      type: 'youtube', processingState: 'handoff_required',
+      provenance: { owningModule: 'mock', originalUrl: 'https://youtube.com/watch?v=abc', canonicalCitation: 'x', retrievalDate: '2026-09-04T00:00:00.000Z' },
+    },
+    {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      title: 'Ready lecture',
+      type: 'youtube', processingState: 'ready',
+      provenance: { owningModule: 'media', originalUrl: 'https://youtube.com/watch?v=abc', canonicalCitation: 'x', retrievalDate: '2026-09-04T00:00:00.000Z' },
+    },
+  ];
+
+  it.each(invalidRecords)('returns one non-disclosing result for unavailable or invalid handoffs', async (record) => {
+    const repository = { findHandoffRecord: async () => record };
+    const result = await resolveMediaHandoffForLearner(
+      { sourceRecordId: '550e8400-e29b-41d4-a716-446655440000' },
+      '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      repository,
+    );
+    expect(result).toEqual({ status: 'handoff_unavailable' });
+  });
+
+  it('requires direct audio upload when an owned P03 audio handoff has no playable artifact', async () => {
+    const repository = {
+      findHandoffRecord: async () => ({
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        title: 'Learner recording',
+        type: 'audio' as const,
+        processingState: 'handoff_required' as const,
+        provenance: {
+          owningModule: 'media' as const,
+          originalFilename: 'recording.m4a',
+          canonicalCitation: 'Learner recording',
+          retrievalDate: '2026-09-04T00:00:00.000Z',
+        },
+      }),
+    };
+    const result = await resolveMediaHandoffForLearner(
+      { sourceRecordId: '550e8400-e29b-41d4-a716-446655440000' },
+      '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      repository,
+    );
+    expect(result).toEqual({ status: 'requires_original_audio' });
+  });
 });
 ```
+
+The route-level fixture injects `startMediaJob`, `requestTranscription`, and `buildPlayerPayload` spies. Every `handoff_unavailable` and `requires_original_audio` result must leave all three at zero calls. Only a resolved YouTube handoff may proceed to a caption job.
 
 - [ ] **Step 2: Run test to verify it fails**
 Run: `npm test src/lib/__tests__/mediaTransport.test.ts`
@@ -823,13 +935,73 @@ export function consumeMediaQuota(
 }
 ```
 
+Add `src/lib/media/mediaHandoffRepository.server.ts` as a server-only boundary:
+
+```typescript
+import type { MediaHandoffRequest, ResolvedMediaHandoffReference } from '../../types/media';
+
+export type P03HandoffRecord = {
+  id: string;
+  userId: string;
+  title: string;
+  type: 'youtube' | 'audio';
+  processingState: 'handoff_required' | string;
+  provenance: {
+    owningModule?: 'media' | 'mock' | 'sources';
+    originalUrl?: string;
+    originalFilename?: string;
+    canonicalCitation: string;
+    retrievalDate: string;
+  };
+};
+
+type P03HandoffRepository = {
+  findHandoffRecord(sourceRecordId: string): Promise<P03HandoffRecord | null>;
+};
+
+export type MediaHandoffResolution =
+  | { status: 'resolved'; handoff: ResolvedMediaHandoffReference }
+  | { status: 'requires_original_audio' }
+  | { status: 'handoff_unavailable' };
+
+export async function resolveMediaHandoffForLearner(
+  request: MediaHandoffRequest,
+  authenticatedUserId: string,
+  repository: P03HandoffRepository,
+): Promise<MediaHandoffResolution> {
+  const record = await repository.findHandoffRecord(request.sourceRecordId);
+  if (
+    !record
+    || record.userId !== authenticatedUserId
+    || record.processingState !== 'handoff_required'
+    || record.provenance.owningModule !== 'media'
+  ) return { status: 'handoff_unavailable' };
+
+  if (record.type === 'audio') return { status: 'requires_original_audio' };
+  if (!record.provenance.originalUrl) return { status: 'handoff_unavailable' };
+
+  return {
+    status: 'resolved',
+    handoff: {
+      sourceRecordId: record.id,
+      authenticatedUserId,
+      title: record.title,
+      mediaType: 'youtube',
+      originalUrl: record.provenance.originalUrl,
+      provenanceCitation: record.provenance.canonicalCitation,
+      retrievalDate: record.provenance.retrievalDate,
+    },
+  };
+}
+```
+
 - [ ] **Step 4: Run test to verify it passes**
 Run: `npm test src/lib/__tests__/mediaTransport.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 ```bash
-git add src/lib/media/mediaFeatureFlags.server.ts src/lib/media/mediaTransport.server.ts src/lib/__tests__/mediaTransport.test.ts
+git add src/lib/media/mediaFeatureFlags.server.ts src/lib/media/mediaTransport.server.ts src/lib/media/mediaHandoffRepository.server.ts src/lib/__tests__/mediaTransport.test.ts
 git commit -m "feat(media): implement server route admission, feature flag, and quota management"
 ```
 
@@ -899,7 +1071,7 @@ git commit -m "feat(media): implement central AI router execution port and error
 
 ---
 
-### Task 7: Client Media Room API Service and P03 Handoff Consumer
+### Task 7: Client Media Room API Service and Trusted P03 Handoff Request
 
 **Files:**
 - Create: `src/services/mediaRoomService.ts`
@@ -907,32 +1079,32 @@ git commit -m "feat(media): implement central AI router execution port and error
 - Test: `src/lib/__tests__/mediaHandoffBoundary.test.ts`
 
 **Interfaces:**
-- Consumes: P04-owned `MediaHandoffReference`, Supabase client session
-- Produces: `importYouTubeUrl`, `uploadAudioLesson`, `saveTranscriptVersion`, `consumeMediaHandoffReference`
+- Consumes: browser `MediaHandoffRequest`, authenticated Media handoff-resolution endpoint, Supabase client session
+- Produces: `importYouTubeUrl`, `uploadAudioLesson`, `saveTranscriptVersion`, `createMediaHandoffRequest`, `resolveMediaHandoff`
 
 - [ ] **Step 1: Write failing handoff consumer test**
 
 ```typescript
 // src/lib/__tests__/mediaHandoffBoundary.test.ts
 import { describe, it, expect } from 'vitest';
-import { consumeMediaHandoffReference } from '../media/handoffConsumer';
-import type { MediaHandoffReference } from '../../types/media';
+import { createMediaHandoffRequest } from '../media/handoffConsumer';
+import { MediaHandoffRequestSchema } from '../../types/media';
 
-describe('P03 to P04 Handoff Consumer', () => {
-  it('converts a P04-owned MediaHandoffReference into a MediaLesson draft without requiring sourceVersionId', () => {
-    const handoff: MediaHandoffReference = {
-      sourceRecordId: '550e8400-e29b-41d4-a716-446655440000',
-      userId: 'user_uuid_123',
-      mediaType: 'youtube' as const,
-      mediaUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
-      title: 'Authentic TED Talk on Urban Design',
-      // sourceVersionId is intentionally absent because P03 creates no SourceVersion for handoff_required
-    };
-    const draft = consumeMediaHandoffReference(handoff);
-    expect(draft.sourceRecordId).toBe(handoff.sourceRecordId);
-    expect(draft.sourceVersionId).toBeUndefined();
-    expect(draft.mediaUrl).toBe(handoff.mediaUrl);
-    expect(draft.processingState).toBe('queued');
+describe('P03 to P04 Handoff Client Boundary', () => {
+  it('sends only sourceRecordId to the server resolver', () => {
+    const request = createMediaHandoffRequest('550e8400-e29b-41d4-a716-446655440000');
+    expect(request).toEqual({ sourceRecordId: '550e8400-e29b-41d4-a716-446655440000' });
+    expect(() => MediaHandoffRequestSchema.parse({
+      ...request,
+      userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      mediaUrl: 'https://attacker.invalid/audio.mp3',
+    })).toThrow();
+  });
+
+  it('offers direct P04 upload when the server returns requires_original_audio', () => {
+    const result = { status: 'requires_original_audio' as const };
+    expect(result.status).toBe('requires_original_audio');
+    // UI recovery opens the direct P04 audio uploader; it mounts no player, waveform, or transcription job.
   });
 });
 ```
@@ -945,21 +1117,33 @@ Expected: FAIL with "Cannot find module '../media/handoffConsumer'"
 
 ```typescript
 // src/lib/media/handoffConsumer.ts
-import type { MediaLesson, MediaHandoffReference } from '../../types/media';
+import type { MediaHandoffRequest } from '../../types/media';
 
-export function consumeMediaHandoffReference(
-  handoff: MediaHandoffReference,
-): Partial<MediaLesson> {
-  return {
-    userId: handoff.userId,
-    title: handoff.title,
-    mediaType: handoff.mediaType,
-    mediaUrl: handoff.mediaUrl,
-    sourceRecordId: handoff.sourceRecordId,
-    sourceVersionId: handoff.sourceVersionId, // Undefined initially from P03 handoff
-    processingState: 'queued',
-    durationMs: 0,
-  };
+export function createMediaHandoffRequest(sourceRecordId: string): MediaHandoffRequest {
+  return { sourceRecordId };
+}
+
+// src/services/mediaRoomService.ts
+type AuthenticatedMediaRequest = (
+  path: string,
+  init: RequestInit,
+) => Promise<Response>;
+
+type MediaHandoffClientResponse =
+  | { status: 'resolved'; lessonId: string }
+  | { status: 'requires_original_audio' }
+  | { status: 'handoff_unavailable' };
+
+export async function resolveMediaHandoff(
+  sourceRecordId: string,
+  authenticatedRequest: AuthenticatedMediaRequest,
+): Promise<MediaHandoffClientResponse> {
+  const response = await authenticatedRequest('/api/media/handoffs/resolve', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(createMediaHandoffRequest(sourceRecordId)),
+  });
+  return response.json() as Promise<MediaHandoffClientResponse>;
 }
 ```
 
@@ -969,8 +1153,8 @@ Expected: PASS
 
 - [ ] **Step 5: Commit**
 ```bash
-git add src/lib/media/handoffConsumer.ts src/lib/__tests__/mediaHandoffBoundary.test.ts
-git commit -m "feat(media): implement P03 media handoff consumer and client API service"
+git add src/lib/media/handoffConsumer.ts src/services/mediaRoomService.ts src/lib/__tests__/mediaHandoffBoundary.test.ts
+git commit -m "feat(media): implement trusted P03 media handoff request and client recovery"
 ```
 
 ---

@@ -16,12 +16,12 @@
 
 This document defines the complete product and engineering specification for the **OMNI Media Learning Room (P04)**. It redesigns the legacy prototype media views (`MediaLabView`, `ShadowingStudio`, `DictationStudio`) into a unified, **Guided-first Media Learning Room** that enables IELTS learners to develop listening comprehension, connected speech prosody, and spelling accuracy from authentic audio and video sources.
 
-P04 consumes media references handed off from Sources (P03) via a P04-owned `MediaHandoffReference` or directly imported by the learner, manages the complete immutable transcript lifecycle, controls original media playback with sub-second segment synchronization, drives Guided and Independent Shadowing and Dictation practice, enforces strict learner audio privacy, routes all AI execution through the central AI router (`CAP-GLB-AI-ROUTER`), and emits canonical `MistakeEvidence` to the Review module without fabricating transcripts, scores, or mastery.
+P04 consumes media references handed off from Sources (P03) through a browser `MediaHandoffRequest` that contains only a `sourceRecordId`. The Media server resolves that request under the verified learner session and P03 RLS before using any provenance or playable reference. P04 also supports media imported directly by the learner, manages the complete immutable transcript lifecycle, controls original media playback with sub-second segment synchronization, drives Guided and Independent Shadowing and Dictation practice, enforces strict learner audio privacy, routes all AI execution through the central AI router (`CAP-GLB-AI-ROUTER`), and emits canonical `MistakeEvidence` to the Review module without fabricating transcripts, scores, or mastery.
 
 ### 1.2 Core Architectural Principles
 
 1. **Guided-First Pedagogical Loop**: The default learning mode is scaffolded segment-by-segment progression: listen to original authentic audio â†’ shadow or dictate â†’ inspect honest formative feedback and word-level diffs â†’ retry or progress.
-2. **Media Consumes Sources; Sources Keep Provenance**: When media originates in the Sources Library (P03), Media receives a P04-owned `MediaHandoffReference` pointing to `sourceRecordId`. P03 deliberately does NOT create a `SourceVersion` for media handoffs (`processing_state = 'handoff_required'`); `sourceVersionId` is therefore absent at initial handoff. Media owns caption retrieval, transcription, segmentation, and playback, creating its own normalized `MediaTranscriptVersion`. Sources retains citation and library provenance.
+2. **Media Consumes Sources; Sources Keep Provenance**: When media originates in the Sources Library (P03), the browser sends only `sourceRecordId`. Before creating a lesson, the Media server checks the feature flag and verified learner session, hydrates that record through learner-scoped P03 RLS, and accepts only a `handoff_required` record owned by `media`. P03 deliberately does NOT create a `SourceVersion` for media handoffs; Media never invents one. A hydrated YouTube record may supply its stored original URL. A hydrated audio record may have only metadata and therefore requires the learner to reselect or upload the original audio. Media owns caption retrieval, transcription, segmentation, and playback, creating its own normalized `MediaTranscriptVersion`. Sources retains citation and library provenance.
 3. **Immutable Transcript Versions & Fine-Grained Alignment**: Transcripts are versioned (`raw_caption`, `ai_transcription`, `user_edited`, `normalised`). Transcript segments have immutable boundaries and stable identifiers (`seg_<hash>`), strictly separated from transient learner attempt states.
 4. **Honest Availability Over Speculative Scoring**:
    - Pronunciation and prosody scoring require real microphone audio and valid Voice Activity Detection (VAD) / speech timestamps. If the microphone is absent or permission is denied, acoustic scoring is explicitly `unavailable`; the system never scores pronunciation from speech-to-text text or transcript alone (`GUARD-001`).
@@ -39,7 +39,7 @@ P04 consumes media references handed off from Sources (P03) via a P04-owned `Med
 |---|---|---|---|
 | YouTube URL | Caption extraction, yt-dlp job coordination, streaming player iframe integration | Direct downloading of copyrighted video files for long-term server hosting; bypassing PO-token provider boundary | P04 (ingestion) / YouTube Provider |
 | Audio Files (MP3, WAV, M4A) | Audio decoding, waveform generation via Wavesurfer, AI transcription via `CAP-MED-TRANSCRIPT`, segment alignment | Inventing transcripts when audio is corrupt or transcription fails | P04 / Central AI Router |
-| Source Provenance | Consuming handoff from P03 via `MediaHandoffReference` (linking `sourceRecordId`; `sourceVersionId` absent/optional). Media creates its own `MediaTranscriptVersion`. | Owning `SourceRecord`, `SourceVersion`, collections, or library search | Sources (`P03`) |
+| Source Provenance | Browser sends `sourceRecordId` only; Media server resolves the P03 record under verified learner RLS. A YouTube record may yield its stored original URL. An audio record without an approved playable reference yields `requires_original_audio`. Media creates its own `MediaTranscriptVersion`. | Trusting browser-provided user, URL, citation, provenance, or source version; owning `SourceRecord`, `SourceVersion`, collections, or library search | Sources (`P03`) |
 | Academic Task 1 Charts | Routing chart requests to Academic Mock | Parsing or rendering Task 1 charts | Mock (`P07`) |
 | Practice Persisted Items | Emitting completed listening/spelling/prosody evidence | Creating four-skill practice units, reading passages, or questions | Practice (`P06`) |
 | Mistake Lifecycle & Mastery | Emitting canonical `MistakeEvidence` with `provenance.module = 'media'` | Incrementing learner XP, mutating SRS stages, updating target bands | Review & Progress (`P05`) |
@@ -54,7 +54,7 @@ P04 consumes media references handed off from Sources (P03) via a P04-owned `Med
 | Baseline ID | Capability Name | Mechanism | Primary Guard / Metric | Spec Section |
 |---|---|---|---|---|
 | `PRD-008` | Media Learning Loop | Guided Shadowing and Dictation from original audio/video | `GUARD-001`, `METRIC-003` | Sections 4, 5 |
-| `CAP-MED-IMPORT` | Media Lesson Import | yt-dlp caption fetch, audio upload, P03 handoff intake via `MediaHandoffReference` | `METRIC-006` | Section 4.1 |
+| `CAP-MED-IMPORT` | Media Lesson Import | yt-dlp caption fetch, direct audio upload, authenticated P03 handoff resolution from `sourceRecordId` | `METRIC-006` | Section 4.1 |
 | `CAP-MED-TRANSCRIPT` | Complete Transcript Versions | Timed segmentation, versioning, coverage validation | `GUARD-001` | Section 3.2, 4.1 |
 | `CAP-MED-PLAYER` | Original Media Player | YouTube & Wavesurfer players, sub-second loop, A-B loop | `METRIC-005` | Section 4.2 |
 | `CAP-MED-SHADOWING` | Shadowing with Acoustic Input | Real mic capture, client VAD telemetry, acoustic evaluation via central AI router | `METRIC-003`, `GUARD-001` | Section 4.3, 6.3 |
@@ -70,8 +70,8 @@ The following table defines the normative acceptance criteria for P04. These ide
 
 | ID | Category | Scenario / Trigger | Expected Truthful Behavior |
 |---|---|---|---|
-| `AC-MED-001` | Handoff | P03 YouTube handoff received | System ingests P04-owned `MediaHandoffReference` with `sourceRecordId` and `mediaUrl` (`sourceVersionId` absent), creates `MediaLesson`, initiates caption check, displays YouTube player without re-extracting text in Sources. |
-| `AC-MED-002` | Handoff | P03 Audio handoff received | System ingests P04-owned `MediaHandoffReference` referencing `sourceRecordId` (`sourceVersionId` absent), loads audio waveform, triggers `CAP-MED-TRANSCRIPT` to create P04's own `MediaTranscriptVersion`. |
+| `AC-MED-001` | Handoff | P03 YouTube handoff received | Browser sends only `sourceRecordId`. The authenticated Media server RLS-hydrates a learner-owned `handoff_required` P03 record, derives its stored original URL and provenance, creates a MediaLesson without a P03 SourceVersion, then initiates caption check. Browser-supplied user, URL, citation and provenance are ignored. |
+| `AC-MED-002` | Handoff | P03 Audio handoff received | The authenticated Media server recognizes that the P03 audio handoff has no P03 SourceVersion, playable URL or audio binary. It returns typed `requires_original_audio` with an upload/reselect recovery action. It does not mount a player, initialize waveform, invoke transcription, create a media job, or fabricate a media reference. |
 | `AC-MED-003` | Import | Direct YouTube URL import with valid English captions | `MediaImportJob` executes `probing` â†’ `captions` â†’ `normalizing` â†’ `validating` â†’ `ready`. Transcript coverage â‰¥ 65% of media duration. |
 | `AC-MED-004` | Import | Direct YouTube URL import with NO captions | Job transitions to `degraded` with transcript capability `unavailable_transcript`. Player loads authentic YouTube video/audio for original listening; Dictation and transcript-aligned Shadowing are disabled with an honest explanatory message. Never fabricates transcript, never calls fallback TTS, never generates fake pronunciation score. |
 | `AC-MED-005` | Import | Audio file upload (MP3/WAV/M4A â‰¤ 14MB) | Audio decoded, waveform initialized, AI transcription via router parses speech into sentences with `startMs`, `endMs`, `confidence`. |
@@ -125,7 +125,7 @@ The data architecture separates static, immutable media and transcript assets fr
 
 ```mermaid
 erDiagram
-    SourceRecord ||--o| MediaLesson : "referenced via MediaHandoffReference"
+    SourceRecord ||--o| MediaLesson : "server-resolved after RLS handoff"
     MediaLesson ||--|{ MediaTranscriptVersion : "has versions"
     MediaTranscriptVersion ||--|{ MediaTranscriptSegment : "contains"
     MediaLesson ||--o{ ShadowingAttempt : "recorded against"
@@ -167,7 +167,7 @@ export interface MediaLesson {
   durationMs: number;
   currentVersionId?: string; // Optional: absent before first transcript version is ready
   sourceRecordId?: string; // Points to P03 SourceRecord when originating from Sources library
-  sourceVersionId?: string; // Optional: absent on initial handoff because P03 creates no SourceVersion for handoff_required
+  sourceVersionId?: string; // Only populated by an explicit future cross-module version contract; absent for P03 media handoffs
   processingState: MediaProcessingState;
   transcriptState?: 'ready' | 'unavailable_transcript' | 'coverage_insufficient' | 'needs_review';
   createdAt: string;
@@ -175,19 +175,21 @@ export interface MediaLesson {
   lastPracticedAt?: string;
 }
 
-/**
- * P04-owned intake reference derived from P03 SourceRecord at the navigation boundary.
- * P03 does NOT export this interface and does NOT create a SourceVersion for handoffs.
- */
-export interface MediaHandoffReference {
+/** Browser navigation input. It carries no user, URL, provenance, binary, or source-version data. */
+export interface MediaHandoffRequest {
   sourceRecordId: string;
-  userId: string;
+}
+
+/** Server-only result after verified JWT and learner-scoped P03 RLS hydration. */
+export interface ResolvedMediaHandoffReference {
+  sourceRecordId: string;
+  authenticatedUserId: string;
   title: string;
   mediaType: 'youtube' | 'audio';
-  mediaUrl: string;
-  sourceVersionId?: string; // Optional: absent on initial handoff from P03
-  provenanceCitation?: string;
-  retrievalDate?: string;
+  originalUrl?: string;
+  originalFilename?: string;
+  provenanceCitation: string;
+  retrievalDate: string;
 }
 
 export type TranscriptStage = 'raw_caption' | 'ai_transcription' | 'user_edited' | 'normalised';
@@ -674,10 +676,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_resume_states TO authentica
 All Media server endpoints enforce:
 1. **Feature Flag Admission**: Checks `parseMediaRoomV2Env(process.env)`. If disabled, returns HTTP 403 `feature_disabled`.
 2. **Authenticated Session Token Verification**: Verifies the Supabase JWT from the authorization header. Unauthenticated requests receive HTTP 401 `UNAUTHORIZED`.
-3. **Dedicated In-Memory Quotas**:
+3. **Trusted P03 Handoff Resolution**: A browser handoff request accepts only a UUID `sourceRecordId`. After feature-flag and JWT admission, the server rehydrates that record through the learner-scoped P03 repository and accepts only a learner-owned `handoff_required` record whose owning module is `media`. Missing, foreign, wrong-owner, or wrong-state records return one non-disclosing `handoff_unavailable` result with no provider, player, media-job, or transcript call. The server derives title, type, provenance and any YouTube URL from the hydrated record; it ignores browser-provided user IDs, URLs, citations, provenance and source versions. A P03 audio record that lacks an approved playable artifact returns `requires_original_audio` and requires a direct P04 upload or reselection.
+4. **Dedicated In-Memory Quotas**:
    - `media-import`: 10 requests per 15-minute sliding window per learner ID.
    - `audio-evaluation`: 20 requests per 10-minute sliding window per learner ID.
-4. **Body Limits**: Audio uploads capped at 14 MiB. Base64 strings are decoded in memory streams and never written to disk.
+5. **Body Limits**: Audio uploads capped at 14 MiB. Base64 strings are decoded in memory streams and never written to disk.
 
 ### 9.2 Central AI Router Execution Port (`CAP-GLB-AI-ROUTER`)
 
