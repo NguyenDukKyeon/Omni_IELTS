@@ -1,12 +1,12 @@
 ﻿# OMNI Media Learning Room Implementation Plan (P04)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the unified Guided-first Media Learning Room (P04) with full transcript lifecycle, authentic YouTube/audio playback, Shadowing with real microphone VAD telemetry, Dictation with word-level diff, zero direct mastery/XP, and canonical MistakeEvidence handoff to Review.
+**Goal:** Build the unified Guided-first Media Learning Room (P04) with full transcript lifecycle, authentic YouTube/audio playback, Shadowing with real microphone VAD telemetry, Dictation with word-level diff, zero direct mastery/XP, central AI router integration, and canonical MistakeEvidence handoff to Review.
 
-**Architecture:** Domain contracts strictly separate immutable `MediaTranscriptVersion` from transient `MediaAttempt`s. Server routes manage authenticated yt-dlp probing, caption extraction, and Gemini 2.5 audio evaluation behind deploy flag `OMNI_MEDIA_ROOM_V2`. Client player integrates YouTube IFrame API and Wavesurfer Audio into a unified controller supporting Guided and Independent learning modes, local IndexedDB audio caching, and WCAG 2.2 AA accessibility.
+**Architecture:** Domain contracts strictly separate immutable `MediaTranscriptVersion` from transient `MediaAttempt`s. Server routes manage authenticated yt-dlp probing, caption extraction, and central AI router execution (`CAP-GLB-AI-ROUTER`) behind deploy flag `OMNI_MEDIA_ROOM_V2`. Client player integrates YouTube IFrame API and Wavesurfer Audio into a unified controller supporting Guided and Independent learning modes, local IndexedDB audio caching, and WCAG 2.2 AA accessibility.
 
-**Tech Stack:** React 19, TypeScript 5.8, Express 4, Supabase RLS (PostgreSQL), Wavesurfer.js 7.12, @ricky0123/vad-web 0.0.30, jsdiff 7.0.0, Lucide React, Vitest 3, Playwright 1.62.
+**Tech Stack:** React 19, TypeScript 5.8, Express 4, Supabase RLS (PostgreSQL), Wavesurfer.js 7.12, @ricky0123/vad-web 0.0.30, diff@7.0.0 (jsdiff library), Lucide React, Vitest 3, Playwright 1.62.
 
 **Spec:** `docs/superpowers/specs/2026-09-04-omni-media-learning-room-design.md`
 **ADR:** `docs/architecture/adr/2026-09-04-media-learning-room-transcript-and-evidence-boundary.md`
@@ -16,7 +16,10 @@
 - **Predecessor Gate**: P04 implementation code is strictly BLOCKED until PR #16 (`origin/feature/p03-sources-library`) is merged into `origin/main` and this plan is approved by the Product Owner. Open PR #16 must never be treated as merged.
 - **Zero Hallucinated Scoring (`GUARD-001`)**: Never fabricate transcripts, pronunciation scores, or IELTS band equivalents. Missing microphone or absent caption yields an explicit, honest `unavailable` status.
 - **Dictation Microphone Independence (`PRD-008`)**: Dictation requires zero microphone permission. Missing or denied microphone access must never impede Dictation.
+- **Truthful No-Caption Media Availability**: A YouTube item without captions allows authentic original video/audio playback for listening, while marking transcript capability as `unavailable_transcript` in a `degraded` learning room state. Dictation and transcript-aligned Shadowing are disabled.
+- **Malformed Subtitles Rejection**: Corrupt or non-monotonic subtitle timestamps produce typed `SUBTITLE_PARSE_ERROR` or `needs_review`; zero fake timings or fallback segmenting.
 - **Zero Direct Mastery Policy**: Media Room emits zero direct `MasteryUpdate`, zero XP points, and zero direct flashcards. Mistakes emit canonical `MistakeEvidence` to Review (`P05`).
+- **Central AI Router Execution**: Cloud machine learning calls route exclusively through `CAP-GLB-AI-ROUTER` under task profiles `media_transcription_v1` and `media_shadowing_eval_v1`. Media constructs zero direct provider SDK clients.
 - **Biometric Audio Privacy**: Learner voice recordings are ephemeral by default. Local persistence uses IndexedDB (`idb-media://`) on opt-in consent; raw audio is never stored in Supabase tables.
 - **Feature Flag**: All v2 functionality operates behind `OMNI_MEDIA_ROOM_V2=true|false`. Default is false; rollback is flag off in one deploy without database down-migrations.
 - **Strict Testing**: Every task must follow strict TDD (RED -> GREEN -> REFACTOR -> COMMIT) with concrete test code, exact file paths, and verifiable assertions.
@@ -28,24 +31,24 @@
 ```text
 src/
 â”œâ”€â”€ types/
-â”‚   â””â”€â”€ media.ts                               # Domain entities, attempt types, player contracts
+â”‚   â””â”€â”€ media.ts                               # Domain entities, attempt types, player contracts, MediaHandoffReference
 â”œâ”€â”€ lib/
 â”‚   â””â”€â”€ media/
-â”‚       â”œâ”€â”€ transcriptValidator.ts             # Monotonicity, coverage ratio, segment validation
+â”‚       â”œâ”€â”€ transcriptValidator.ts             # Monotonicity, coverage ratio, subtitle parse validation
 â”‚       â”œâ”€â”€ transcriptNormalizer.ts            # Rolling caption de-duplication, sentence chunking
 â”‚       â”œâ”€â”€ contentHash.ts                     # Deterministic SHA-256 segment & transcript hashing
-â”‚       â”œâ”€â”€ mediaJobMachine.ts                 # Ingestion state machine (probing -> ready/failed)
+â”‚       â”œâ”€â”€ mediaJobMachine.ts                 # Ingestion state machine (probing -> ready/degraded/failed)
 â”‚       â”œâ”€â”€ mediaFeatureFlags.server.ts        # OMNI_MEDIA_ROOM_V2 parse & express injection
-â”‚       â”œâ”€â”€ mediaTransport.server.ts           # Route admission, rate limiting, JWT validation
+â”‚       â”œâ”€â”€ mediaTransport.server.ts           # Route admission, rate limiting, token validation
 â”‚       â”œâ”€â”€ youtubeAdapter.server.ts           # yt-dlp sandboxed execution & caption parsing
-â”‚       â”œâ”€â”€ audioTranscribeAdapter.server.ts   # Gemini 2.5 audio transcription runner
-â”‚       â”œâ”€â”€ shadowingEvalAdapter.server.ts     # Gemini acoustic evaluation & schema validation
+â”‚       â”œâ”€â”€ audioTranscribeAdapter.server.ts   # Central AI router runner for media_transcription_v1
+â”‚       â”œâ”€â”€ shadowingEvalAdapter.server.ts     # Central AI router runner for media_shadowing_eval_v1
 â”‚       â”œâ”€â”€ errorScrub.server.ts               # Path, token, and secret sanitization
-â”‚       â”œâ”€â”€ diffAdapter.ts                     # Word-level diff adapter (jsdiff / wordDiff)
+â”‚       â”œâ”€â”€ diffAdapter.ts                     # Word-level diff adapter (diff@7.0.0 / wordDiff fallback)
 â”‚       â”œâ”€â”€ evidenceAdapter.ts                 # Formats canonical MistakeEvidence for Review
 â”‚       â”œâ”€â”€ vadAdapter.ts                      # Client-side @ricky0123/vad-web speech telemetry
 â”‚       â”œâ”€â”€ audioArtifactStore.ts              # Local IndexedDB audio persistence (idb-media://)
-â”‚       â””â”€â”€ handoffConsumer.ts                 # Intake for P03 PendingMediaHandoff
+â”‚       â””â”€â”€ handoffConsumer.ts                 # Intake for P04-owned MediaHandoffReference from P03
 â”œâ”€â”€ services/
 â”‚   â””â”€â”€ mediaRoomService.ts                    # Client API transport for Media Room v2
 â”œâ”€â”€ components/
@@ -74,11 +77,11 @@ e2e/
 ### Task 0: Dependency and Package Reuse Audit
 
 **Files:**
-- Modify: `package.json` (specification of exact pin only; no installation during planning)
+- Plan Specification: Document exact pin, license, adapter, and removal boundary.
 
 **Interfaces:**
 - Consumes: Existing dependencies (`wavesurfer.js`, `@ricky0123/vad-web`, `zod`, `xstate`, `react`, `express`)
-- Produces: Package audit report and `diff` package specification with license and fallback boundaries.
+- Produces: Package audit report and `diff@7.0.0` (jsdiff library) specification with license and fallback boundaries.
 
 - [ ] **Step 1: Audit existing package capabilities in repository**
   Inspect existing dependencies in `package.json`:
@@ -87,7 +90,8 @@ e2e/
   - `youtube-transcript`: `^1.3.1` is already present for basic YouTube caption extraction.
   - `zod`: `^4.4.3` is already present for schema validation.
   - `xstate`: `^5.32.5` is already present for state machine definitions.
-  - Word diff: Current repository uses bespoke Levenshtein implementation in `src/lib/wordDiff.ts`. For production word-level diff, `diff` (`jsdiff` npm package version `7.0.0`, license BSD-3-Clause) will be adopted behind `src/lib/media/diffAdapter.ts` with complete fallback to `src/lib/wordDiff.ts`.
+  - Word diff: Current repository uses bespoke Levenshtein implementation in `src/lib/wordDiff.ts`. For production word-level diff, `diff@7.0.0` (commonly referred to as jsdiff library, license BSD-3-Clause) will be adopted behind `src/lib/media/diffAdapter.ts` with complete fallback to `src/lib/wordDiff.ts`.
+  - Note: This PR is docs-only; no edits to `package.json` or `npm install` are run during this batch.
 
 - [ ] **Step 2: Document isolation and removal plan**
   - Adapter location: `src/lib/media/diffAdapter.ts`.
@@ -104,7 +108,7 @@ e2e/
 
 **Interfaces:**
 - Consumes: None
-- Produces: `MediaLesson`, `MediaTranscriptVersion`, `MediaTranscriptSegment`, `ShadowingAttempt`, `DictationAttempt`, `MediaResumeState`, `MediaImportJob`
+- Produces: `MediaLesson`, `MediaHandoffReference`, `MediaTranscriptVersion`, `MediaTranscriptSegment`, `ShadowingAttempt`, `DictationAttempt`, `MediaResumeState`, `MediaImportJob`
 
 - [ ] **Step 1: Write failing type validation test**
 
@@ -114,6 +118,7 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   MediaLessonSchema,
+  MediaHandoffReferenceSchema,
   MediaTranscriptVersionSchema,
   MediaTranscriptSegmentSchema,
   ShadowingAttemptSchema,
@@ -122,7 +127,7 @@ import {
 } from '../../types/media';
 
 describe('Media Domain Contracts', () => {
-  it('validates a well-formed MediaLesson object', () => {
+  it('validates a well-formed MediaLesson object with optional sourceVersionId', () => {
     const validLesson = {
       id: '550e8400-e29b-41d4-a716-446655440000',
       userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
@@ -131,12 +136,24 @@ describe('Media Domain Contracts', () => {
       mediaUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
       youtubeId: 'wr6fQ4KpbRM',
       durationMs: 180000,
-      currentVersionId: '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+      sourceRecordId: '7ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      // sourceVersionId is intentionally absent because P03 creates no SourceVersion for handoff_required
       processingState: 'ready' as const,
       createdAt: '2026-09-04T00:00:00.000Z',
       updatedAt: '2026-09-04T00:00:00.000Z',
     };
     expect(MediaLessonSchema.parse(validLesson)).toEqual(validLesson);
+  });
+
+  it('validates a P04-owned MediaHandoffReference intake structure', () => {
+    const handoffRef = {
+      sourceRecordId: '7ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      title: 'IELTS Lecture',
+      mediaType: 'youtube' as const,
+      mediaUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
+    };
+    expect(MediaHandoffReferenceSchema.parse(handoffRef)).toEqual(handoffRef);
   });
 
   it('rejects a MediaTranscriptSegment containing mutable attempt properties', () => {
@@ -178,13 +195,25 @@ export const MediaLessonSchema = z.object({
   youtubeId: z.string().optional(),
   channelTitle: z.string().optional(),
   durationMs: z.number().int().nonnegative(),
-  currentVersionId: z.string().uuid(),
+  currentVersionId: z.string().uuid().optional(),
   sourceRecordId: z.string().uuid().optional(),
-  sourceVersionId: z.string().uuid().optional(),
+  sourceVersionId: z.string().uuid().optional(), // Optional: absent on initial handoff from P03
   processingState: MediaProcessingStateSchema,
+  transcriptState: z.enum(['ready', 'unavailable_transcript', 'coverage_insufficient', 'needs_review']).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   lastPracticedAt: z.string().datetime().optional(),
+});
+
+export const MediaHandoffReferenceSchema = z.object({
+  sourceRecordId: z.string().uuid(),
+  userId: z.string().uuid(),
+  title: z.string().min(1),
+  mediaType: z.enum(['youtube', 'audio']),
+  mediaUrl: z.string().url(),
+  sourceVersionId: z.string().uuid().optional(),
+  provenanceCitation: z.string().optional(),
+  retrievalDate: z.string().datetime().optional(),
 });
 
 export const MediaTranscriptSegmentSchema = z.object({
@@ -259,6 +288,7 @@ export const MediaResumeStateSchema = z.object({
 });
 
 export type MediaLesson = z.infer<typeof MediaLessonSchema>;
+export type MediaHandoffReference = z.infer<typeof MediaHandoffReferenceSchema>;
 export type MediaTranscriptSegment = z.infer<typeof MediaTranscriptSegmentSchema>;
 export type MediaTranscriptVersion = z.infer<typeof MediaTranscriptVersionSchema>;
 export type ShadowingAttempt = z.infer<typeof ShadowingAttemptSchema>;
@@ -288,14 +318,14 @@ git commit -m "feat(media): define domain entities and schema validation contrac
 
 **Interfaces:**
 - Consumes: `MediaTranscriptSegment` from `src/types/media.ts`
-- Produces: `validateTranscriptCoverage`, `normalizeRollingCaptions`, `computeTranscriptHash`
+- Produces: `validateTranscriptCoverage`, `parseSubtitleCues`, `normalizeRollingCaptions`, `computeTranscriptHash`
 
 - [ ] **Step 1: Write failing validation and normalization test**
 
 ```typescript
 // src/lib/__tests__/mediaTranscriptValidation.test.ts
 import { describe, it, expect } from 'vitest';
-import { validateTranscriptCoverage } from '../media/transcriptValidator';
+import { validateTranscriptCoverage, parseSubtitleCues } from '../media/transcriptValidator';
 import { normalizeRollingCaptions } from '../media/transcriptNormalizer';
 import { computeTranscriptHash } from '../media/contentHash';
 
@@ -310,14 +340,12 @@ describe('Transcript Validation and Normalization', () => {
     expect(result.coverageRatio).toBe(0.1);
   });
 
-  it('detects timestamp overlap violations', () => {
-    const segments = [
-      { id: 'seg_1', index: 0, startMs: 0, endMs: 5000, text: 'First sentence.', confidence: 'high' as const },
-      { id: 'seg_2', index: 1, startMs: 3000, endMs: 8000, text: 'Overlapping sentence.', confidence: 'high' as const },
-    ];
-    const result = validateTranscriptCoverage(segments, 10000);
-    expect(result.valid).toBe(false);
-    expect(result.issue).toBe('timestamps_invalid');
+  it('rejects malformed subtitle timestamps with typed SUBTITLE_PARSE_ERROR instead of inventing fallback timings', () => {
+    const malformedSrt = `1\ncorrupt_time --> bad_time\nBroken subtitle text.`;
+    const result = parseSubtitleCues(malformedSrt, 'srt');
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('SUBTITLE_PARSE_ERROR');
+    expect(result.cues).toHaveLength(0);
   });
 
   it('normalizes rolling YouTube captions into non-overlapping sentence units', () => {
@@ -375,6 +403,49 @@ export interface TranscriptValidationResult {
   valid: boolean;
   coverageRatio: number;
   issue?: 'empty' | 'timestamps_invalid' | 'coverage_insufficient';
+}
+
+export interface SubtitleParseResult {
+  success: boolean;
+  code?: 'SUBTITLE_PARSE_ERROR';
+  cues: Array<{ startMs: number; endMs: number; text: string }>;
+  messageVi?: string;
+}
+
+export function parseSubtitleCues(rawText: string, format: 'vtt' | 'srt'): SubtitleParseResult {
+  const lines = rawText.trim().split(/\r?\n/);
+  const cues: Array<{ startMs: number; endMs: number; text: string }> = [];
+  const timeRegex = format === 'vtt'
+    ? /(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})/
+    : /(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/;
+
+  let hasTimingLine = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.includes('-->')) {
+      hasTimingLine = true;
+      const match = line.match(timeRegex);
+      if (!match) {
+        return {
+          success: false,
+          code: 'SUBTITLE_PARSE_ERROR',
+          cues: [],
+          messageVi: 'Äá»‹nh dáº¡ng timestamp trong phá»¥ Ä‘á» khÃ´ng há»£p lá»‡. Vui lÃ²ng kiá»ƒm tra file VTT/SRT.',
+        };
+      }
+    }
+  }
+
+  if (!hasTimingLine) {
+    return {
+      success: false,
+      code: 'SUBTITLE_PARSE_ERROR',
+      cues: [],
+      messageVi: 'KhÃ´ng tÃ¬m tháº¥y dÃ²ng timestamp há»£p lá»‡ trong file phá»¥ Ä‘á».',
+    };
+  }
+
+  return { success: true, cues };
 }
 
 export function validateTranscriptCoverage(
@@ -457,7 +528,7 @@ git commit -m "feat(media): implement transcript validation, normalization, and 
 
 **Interfaces:**
 - Consumes: `MediaProcessingState` from `src/types/media.ts`
-- Produces: `createMediaJobActor`, `MediaJobContext`, `MediaJobEvent`
+- Produces: `createMediaJobMachine`, `MediaJobContext`, `MediaJobEvent`
 
 - [ ] **Step 1: Write failing state machine test**
 
@@ -485,16 +556,17 @@ describe('Media Ingestion State Machine', () => {
     expect(actor.getSnapshot().value).toBe('ready');
   });
 
-  it('transitions to failed with error category when captions are unavailable', () => {
+  it('transitions to degraded when YouTube has no captions while media is playable', () => {
     const machine = createMediaJobMachine();
     const actor = createActor(machine).start();
 
     actor.send({ type: 'START_PROBING' });
     actor.send({ type: 'PROBE_YOUTUBE_SUCCESS' });
-    actor.send({ type: 'CAPTIONS_FAILED', category: 'provider_blocked', message: 'No subtitles found.' });
+    actor.send({ type: 'CAPTIONS_NOT_FOUND', message: 'No English subtitles available.' });
 
-    expect(actor.getSnapshot().value).toBe('failed');
-    expect(actor.getSnapshot().context.failureCategory).toBe('provider_blocked');
+    expect(actor.getSnapshot().value).toBe('degraded');
+    expect(actor.getSnapshot().context.transcriptState).toBe('unavailable_transcript');
+    expect(actor.getSnapshot().context.mediaPlayable).toBe(true);
   });
 });
 ```
@@ -508,11 +580,12 @@ Expected: FAIL with "Cannot find module '../media/mediaJobMachine'"
 ```typescript
 // src/lib/media/mediaJobMachine.ts
 import { setup, assign } from 'xstate';
-import type { MediaProcessingState } from '../../types/media';
 
 export interface MediaJobContext {
   failureCategory?: string;
   failureMessage?: string;
+  transcriptState?: 'ready' | 'unavailable_transcript' | 'coverage_insufficient' | 'needs_review';
+  mediaPlayable?: boolean;
   coverageRatio?: number;
   segmentsCount?: number;
 }
@@ -522,11 +595,13 @@ export type MediaJobEvent =
   | { type: 'PROBE_YOUTUBE_SUCCESS' }
   | { type: 'PROBE_AUDIO_SUCCESS' }
   | { type: 'CAPTIONS_FETCHED'; segmentsCount: number }
+  | { type: 'CAPTIONS_NOT_FOUND'; message: string }
   | { type: 'CAPTIONS_FAILED'; category: string; message: string }
   | { type: 'AUDIO_TRANSCRIBED'; segmentsCount: number }
   | { type: 'TRANSCRIPTION_FAILED'; category: string; message: string }
   | { type: 'NORMALIZED' }
   | { type: 'VALIDATION_PASSED'; coverageRatio: number }
+  | { type: 'VALIDATION_DEGRADED'; issue: 'coverage_insufficient' }
   | { type: 'VALIDATION_FAILED'; category: string; message: string };
 
 export function createMediaJobMachine() {
@@ -554,6 +629,14 @@ export function createMediaJobMachine() {
           CAPTIONS_FETCHED: {
             target: 'normalizing',
             actions: assign({ segmentsCount: ({ event }) => event.segmentsCount }),
+          },
+          CAPTIONS_NOT_FOUND: {
+            target: 'degraded',
+            actions: assign({
+              transcriptState: () => 'unavailable_transcript',
+              mediaPlayable: () => true,
+              failureMessage: ({ event }) => event.message,
+            }),
           },
           CAPTIONS_FAILED: {
             target: 'failed',
@@ -586,7 +669,14 @@ export function createMediaJobMachine() {
         on: {
           VALIDATION_PASSED: {
             target: 'ready',
-            actions: assign({ coverageRatio: ({ event }) => event.coverageRatio }),
+            actions: assign({
+              coverageRatio: ({ event }) => event.coverageRatio,
+              transcriptState: () => 'ready',
+            }),
+          },
+          VALIDATION_DEGRADED: {
+            target: 'degraded',
+            actions: assign({ transcriptState: () => 'coverage_insufficient' }),
           },
           VALIDATION_FAILED: {
             target: 'failed',
@@ -598,6 +688,7 @@ export function createMediaJobMachine() {
         },
       },
       ready: { type: 'final' },
+      degraded: { type: 'final' },
       failed: { type: 'final' },
     },
   });
@@ -656,7 +747,7 @@ git commit -m "feat(media): create media room database schema and RLS policies m
 - Test: `src/lib/__tests__/mediaTransport.test.ts`
 
 **Interfaces:**
-- Consumes: Express `Request`, `Response`, JWT Bearer token
+- Consumes: Express `Request`, `Response`, authenticated session token
 - Produces: `verifyLearnerToken`, `consumeMediaQuota`, `parseMediaRoomV2Env`
 
 - [ ] **Step 1: Write failing route admission and quota test**
@@ -744,7 +835,7 @@ git commit -m "feat(media): implement server route admission, feature flag, and 
 
 ---
 
-### Task 6: Server Provider Adapters (YouTube, Transcription, Evaluation, Error Scrubbing)
+### Task 6: Central AI Router Execution Port and Error Scrubbing
 
 **Files:**
 - Create: `src/lib/media/youtubeAdapter.server.ts`
@@ -754,10 +845,10 @@ git commit -m "feat(media): implement server route admission, feature flag, and 
 - Test: `src/lib/__tests__/mediaServerAdapters.test.ts`
 
 **Interfaces:**
-- Consumes: Google GenAI client, sandboxed yt-dlp arguments
+- Consumes: Central AI router execution port (`CAP-GLB-AI-ROUTER`), sandboxed yt-dlp arguments
 - Produces: `fetchYouTubeCaptions`, `transcribeAudioFile`, `evaluateShadowingAcoustic`, `scrubMediaError`
 
-- [ ] **Step 1: Write failing error scrub and evaluation schema test**
+- [ ] **Step 1: Write failing error scrub and central router schema test**
 
 ```typescript
 // src/lib/__tests__/mediaServerAdapters.test.ts
@@ -765,11 +856,11 @@ import { describe, it, expect } from 'vitest';
 import { scrubMediaError } from '../media/errorScrub.server';
 
 describe('Media Server Adapters and Scrubbing', () => {
-  it('scrubs file system paths, command flags, and secrets from error messages', () => {
-    const rawError = 'Command failed: /tmp/bin/yt-dlp --secret AIzaSyFakeSecret_12345 --proxy http://user:pass@127.0.0.1';
+  it('scrubs file system paths, command flags, and sensitive tokens from error messages', () => {
+    const rawError = 'Command failed: /tmp/bin/yt-dlp --token SENSITIVE_PROVIDER_TOKEN --proxy http://user:pass@127.0.0.1';
     const scrubbed = scrubMediaError(rawError);
     expect(scrubbed).not.toContain('/tmp/bin/');
-    expect(scrubbed).not.toContain('AIzaSy');
+    expect(scrubbed).not.toContain('SENSITIVE_PROVIDER_TOKEN');
     expect(scrubbed).not.toContain('user:pass');
     expect(scrubbed).toContain('KhÃ´ng thá»ƒ xá»­ lÃ½ media tá»« nguá»“n yÃªu cáº§u.');
   });
@@ -780,7 +871,7 @@ describe('Media Server Adapters and Scrubbing', () => {
 Run: `npm test src/lib/__tests__/mediaServerAdapters.test.ts`
 Expected: FAIL with "Cannot find module '../media/errorScrub.server'"
 
-- [ ] **Step 3: Implement scrubMediaError and adapters**
+- [ ] **Step 3: Implement scrubMediaError and router-backed adapters**
 
 ```typescript
 // src/lib/media/errorScrub.server.ts
@@ -803,7 +894,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 ```bash
 git add src/lib/media/errorScrub.server.ts src/lib/__tests__/mediaServerAdapters.test.ts
-git commit -m "feat(media): implement server provider error scrubbing and adapters"
+git commit -m "feat(media): implement central AI router execution port and error scrubbing"
 ```
 
 ---
@@ -816,26 +907,30 @@ git commit -m "feat(media): implement server provider error scrubbing and adapte
 - Test: `src/lib/__tests__/mediaHandoffBoundary.test.ts`
 
 **Interfaces:**
-- Consumes: `PendingMediaHandoff`, Supabase client session
-- Produces: `importYouTubeUrl`, `uploadAudioLesson`, `saveTranscriptVersion`, `consumePendingMediaHandoff`
+- Consumes: P04-owned `MediaHandoffReference`, Supabase client session
+- Produces: `importYouTubeUrl`, `uploadAudioLesson`, `saveTranscriptVersion`, `consumeMediaHandoffReference`
 
 - [ ] **Step 1: Write failing handoff consumer test**
 
 ```typescript
 // src/lib/__tests__/mediaHandoffBoundary.test.ts
 import { describe, it, expect } from 'vitest';
-import { consumePendingMediaHandoff } from '../media/handoffConsumer';
+import { consumeMediaHandoffReference } from '../media/handoffConsumer';
+import type { MediaHandoffReference } from '../../types/media';
 
 describe('P03 to P04 Handoff Consumer', () => {
-  it('converts a valid PendingMediaHandoff into a MediaLesson draft', () => {
-    const handoff = {
+  it('converts a P04-owned MediaHandoffReference into a MediaLesson draft without requiring sourceVersionId', () => {
+    const handoff: MediaHandoffReference = {
       sourceRecordId: '550e8400-e29b-41d4-a716-446655440000',
+      userId: 'user_uuid_123',
       mediaType: 'youtube' as const,
       mediaUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
       title: 'Authentic TED Talk on Urban Design',
+      // sourceVersionId is intentionally absent because P03 creates no SourceVersion for handoff_required
     };
-    const draft = consumePendingMediaHandoff(handoff, 'user_uuid_123');
+    const draft = consumeMediaHandoffReference(handoff);
     expect(draft.sourceRecordId).toBe(handoff.sourceRecordId);
+    expect(draft.sourceVersionId).toBeUndefined();
     expect(draft.mediaUrl).toBe(handoff.mediaUrl);
     expect(draft.processingState).toBe('queued');
   });
@@ -850,27 +945,18 @@ Expected: FAIL with "Cannot find module '../media/handoffConsumer'"
 
 ```typescript
 // src/lib/media/handoffConsumer.ts
-import { MediaLesson } from '../../types/media';
+import type { MediaLesson, MediaHandoffReference } from '../../types/media';
 
-export interface PendingMediaHandoff {
-  sourceRecordId: string;
-  sourceVersionId?: string;
-  mediaType: 'youtube' | 'audio';
-  mediaUrl: string;
-  title: string;
-}
-
-export function consumePendingMediaHandoff(
-  handoff: PendingMediaHandoff,
-  userId: string,
+export function consumeMediaHandoffReference(
+  handoff: MediaHandoffReference,
 ): Partial<MediaLesson> {
   return {
-    userId,
+    userId: handoff.userId,
     title: handoff.title,
     mediaType: handoff.mediaType,
     mediaUrl: handoff.mediaUrl,
     sourceRecordId: handoff.sourceRecordId,
-    sourceVersionId: handoff.sourceVersionId,
+    sourceVersionId: handoff.sourceVersionId, // Undefined initially from P03 handoff
     processingState: 'queued',
     durationMs: 0,
   };
@@ -907,7 +993,7 @@ Run: `npm test src/lib/__tests__/unifiedMediaPlayer.test.tsx`
 Expected: FAIL
 
 - [ ] **Step 3: Implement UnifiedMediaPlayer component**
-Integrate YouTube IFrame API and Wavesurfer Audio under a single unified handle with RAF time synchronizer.
+Integrate YouTube IFrame API and Wavesurfer Audio under a single unified handle with RAF time synchronizer. Support degraded playback when captions are absent.
 
 - [ ] **Step 4: Run test to verify it passes**
 Run: `npm test src/lib/__tests__/unifiedMediaPlayer.test.tsx`
@@ -1000,6 +1086,7 @@ export interface WordDiffResult {
 }
 
 export function calculateWordDiff(expectedText: string, userText: string): WordDiffResult {
+  // Uses diff@7.0.0 (jsdiff library) pattern with fallback to local wordDiff
   const result = diffWords(expectedText, userText);
   return {
     tokens: result.tokens,
@@ -1086,7 +1173,7 @@ describe('Media Evidence Adapter', () => {
       mistakeIds: [],
       createdAt: '2026-09-04T00:00:00.000Z',
     };
-    const mistakes = formatDictationMistakes(attempt, 'IELTS Lecture', 'ver_123');
+    const mistakes = formatDictationMistakes(attempt, 'IELTS Lecture');
     expect(mistakes).toHaveLength(1);
     expect(mistakes[0].provenance.module).toBe('media');
     expect(mistakes[0].taxonomy).toBe('listening_spelling');
@@ -1240,7 +1327,7 @@ git commit -m "feat(media): build unified guided-first media learning room view 
 - Produces: Deterministic E2E verification of AC-MED-001 through AC-MED-025.
 
 - [ ] **Step 1: Write Playwright E2E tests for all 25 acceptance criteria**
-Cover: YouTube captioned import, audio upload, VTT parse, missing mic unavailable state, Dictation zero-mic flow, word diffing, reload resume, and keyboard navigation.
+Cover: YouTube captioned import, YouTube uncaptioned degraded playback, audio upload, VTT parse, missing mic unavailable state, Dictation zero-mic flow, word diffing, reload resume, and keyboard navigation.
 
 - [ ] **Step 2: Run axe-core accessibility check**
 Assert zero WCAG 2.2 AA violations in Media Room v2 (`await expect(page).toHaveNoViolations()`).

@@ -16,28 +16,30 @@
 
 This document defines the complete product and engineering specification for the **OMNI Media Learning Room (P04)**. It redesigns the legacy prototype media views (`MediaLabView`, `ShadowingStudio`, `DictationStudio`) into a unified, **Guided-first Media Learning Room** that enables IELTS learners to develop listening comprehension, connected speech prosody, and spelling accuracy from authentic audio and video sources.
 
-P04 consumes media references handed off from Sources (P03) or directly imported by the learner, manages the complete immutable transcript lifecycle, controls original media playback with sub-second segment synchronization, drives Guided and Independent Shadowing and Dictation practice, enforces strict learner audio privacy, and emits canonical `MistakeEvidence` to the Review module without fabricating transcripts, scores, or mastery.
+P04 consumes media references handed off from Sources (P03) via a P04-owned `MediaHandoffReference` or directly imported by the learner, manages the complete immutable transcript lifecycle, controls original media playback with sub-second segment synchronization, drives Guided and Independent Shadowing and Dictation practice, enforces strict learner audio privacy, routes all AI execution through the central AI router (`CAP-GLB-AI-ROUTER`), and emits canonical `MistakeEvidence` to the Review module without fabricating transcripts, scores, or mastery.
 
 ### 1.2 Core Architectural Principles
 
 1. **Guided-First Pedagogical Loop**: The default learning mode is scaffolded segment-by-segment progression: listen to original authentic audio â†’ shadow or dictate â†’ inspect honest formative feedback and word-level diffs â†’ retry or progress.
-2. **Media Consumes Sources; Sources Keep Provenance**: When media originates in the Sources Library (P03), Media receives a typed handoff reference pointing to `source_records.id` and `source_versions.id`. Media owns caption retrieval, transcription, segmentation, and playback, while Sources retains citation and provenance boundaries.
+2. **Media Consumes Sources; Sources Keep Provenance**: When media originates in the Sources Library (P03), Media receives a P04-owned `MediaHandoffReference` pointing to `sourceRecordId`. P03 deliberately does NOT create a `SourceVersion` for media handoffs (`processing_state = 'handoff_required'`); `sourceVersionId` is therefore absent at initial handoff. Media owns caption retrieval, transcription, segmentation, and playback, creating its own normalized `MediaTranscriptVersion`. Sources retains citation and library provenance.
 3. **Immutable Transcript Versions & Fine-Grained Alignment**: Transcripts are versioned (`raw_caption`, `ai_transcription`, `user_edited`, `normalised`). Transcript segments have immutable boundaries and stable identifiers (`seg_<hash>`), strictly separated from transient learner attempt states.
 4. **Honest Availability Over Speculative Scoring**:
    - Pronunciation and prosody scoring require real microphone audio and valid Voice Activity Detection (VAD) / speech timestamps. If the microphone is absent or permission is denied, acoustic scoring is explicitly `unavailable`; the system never scores pronunciation from speech-to-text text or transcript alone (`GUARD-001`).
    - Dictation requires original audio playback and text/touch response. Missing microphone disables Shadowing evaluation but **must never disable Dictation** (`PRD-008`).
-   - Missing transcripts or provider failures yield an honest `unavailable` or `degraded` state; the system never fabricates transcripts or estimates bands.
+   - If a YouTube item has no captions, original playback remains available for listening while transcript capability is marked `unavailable_transcript` and the learning room enters a `degraded` state (not terminal `failed`). The system never fabricates transcripts or estimates bands.
+   - Malformed subtitle files produce a typed `SUBTITLE_PARSE_ERROR` or `needs_review`; the system never generates fake timestamps or fallback segmenting.
 5. **Zero Direct Mastery or XP Generation**: Media Room emits zero direct `MasteryUpdate`, XP rewards, or automatic flashcards. Dictation emits listening/spelling `MistakeEvidence` from real learner errors. Shadowing emits pronunciation/prosody `MistakeEvidence` only when acoustic measurement is valid. All progress, SRS scheduling, and mastery updates are owned downstream by Review & Progress (`P05`).
-6. **Privacy-by-Default Audio Architecture**: Raw learner microphone audio is ephemeral by default and never stored in cloud databases. Local persistence uses client-side IndexedDB (`omni_ielts_media_artifacts_v1`) only upon explicit learner consent.
-7. **Deploy-Level Feature Flag & Safe Fallback**: Media Room v2 operates behind `OMNI_MEDIA_ROOM_V2`. When disabled, the application renders the existing fallback facade without schema breaks.
+6. **Central AI Router Execution**: All cloud AI tasks (audio transcription, acoustic evaluation) are executed exclusively through the central AI router (`CAP-GLB-AI-ROUTER`) using dedicated task profiles (`media_transcription_v1`, `media_shadowing_eval_v1`), strictly forbidding direct provider SDK construction inside Media.
+7. **Privacy-by-Default Audio Architecture**: Raw learner microphone audio is ephemeral by default and never stored in cloud databases. Local persistence uses client-side IndexedDB (`omni_ielts_media_artifacts_v1`) only upon explicit learner consent.
+8. **Deploy-Level Feature Flag & Safe Fallback**: Media Room v2 operates behind `OMNI_MEDIA_ROOM_V2`. When disabled, the application renders the existing fallback facade without schema breaks.
 
 ### 1.3 Program Map Ownership & Boundary Contract
 
 | Concern / Input | Media (P04) Owns | Media (P04) Forbidden | Owner / Delegate |
 |---|---|---|---|
 | YouTube URL | Caption extraction, yt-dlp job coordination, streaming player iframe integration | Direct downloading of copyrighted video files for long-term server hosting; bypassing PO-token provider boundary | P04 (ingestion) / YouTube Provider |
-| Audio Files (MP3, WAV, M4A) | Audio decoding, waveform generation via Wavesurfer, AI transcription via `CAP-MED-TRANSCRIPT`, segment alignment | Inventing transcripts when audio is corrupt or transcription fails | P04 / Official AI Provider |
-| Source Provenance | Consuming handoff from P03, linking `sourceRecordId` and `sourceVersionId` | Owning `SourceRecord`, `SourceVersion`, collections, or library search | Sources (`P03`) |
+| Audio Files (MP3, WAV, M4A) | Audio decoding, waveform generation via Wavesurfer, AI transcription via `CAP-MED-TRANSCRIPT`, segment alignment | Inventing transcripts when audio is corrupt or transcription fails | P04 / Central AI Router |
+| Source Provenance | Consuming handoff from P03 via `MediaHandoffReference` (linking `sourceRecordId`; `sourceVersionId` absent/optional). Media creates its own `MediaTranscriptVersion`. | Owning `SourceRecord`, `SourceVersion`, collections, or library search | Sources (`P03`) |
 | Academic Task 1 Charts | Routing chart requests to Academic Mock | Parsing or rendering Task 1 charts | Mock (`P07`) |
 | Practice Persisted Items | Emitting completed listening/spelling/prosody evidence | Creating four-skill practice units, reading passages, or questions | Practice (`P06`) |
 | Mistake Lifecycle & Mastery | Emitting canonical `MistakeEvidence` with `provenance.module = 'media'` | Incrementing learner XP, mutating SRS stages, updating target bands | Review & Progress (`P05`) |
@@ -52,14 +54,15 @@ P04 consumes media references handed off from Sources (P03) or directly imported
 | Baseline ID | Capability Name | Mechanism | Primary Guard / Metric | Spec Section |
 |---|---|---|---|---|
 | `PRD-008` | Media Learning Loop | Guided Shadowing and Dictation from original audio/video | `GUARD-001`, `METRIC-003` | Sections 4, 5 |
-| `CAP-MED-IMPORT` | Media Lesson Import | yt-dlp caption fetch, audio upload, P03 handoff intake | `METRIC-006` | Section 4.1 |
+| `CAP-MED-IMPORT` | Media Lesson Import | yt-dlp caption fetch, audio upload, P03 handoff intake via `MediaHandoffReference` | `METRIC-006` | Section 4.1 |
 | `CAP-MED-TRANSCRIPT` | Complete Transcript Versions | Timed segmentation, versioning, coverage validation | `GUARD-001` | Section 3.2, 4.1 |
 | `CAP-MED-PLAYER` | Original Media Player | YouTube & Wavesurfer players, sub-second loop, A-B loop | `METRIC-005` | Section 4.2 |
-| `CAP-MED-SHADOWING` | Shadowing with Acoustic Input | Real mic capture, client VAD telemetry, Gemini acoustic grading | `METRIC-003`, `GUARD-001` | Section 4.3, 6.3 |
-| `CAP-MED-DICTATION` | Dictation & Word-level Diff | Word-level diff via `jsdiff` adapter, sentence/gap/arrange modes | `METRIC-002` | Section 4.4, 6.2 |
+| `CAP-MED-SHADOWING` | Shadowing with Acoustic Input | Real mic capture, client VAD telemetry, acoustic evaluation via central AI router | `METRIC-003`, `GUARD-001` | Section 4.3, 6.3 |
+| `CAP-MED-DICTATION` | Dictation & Word-level Diff | Word-level diff via `diff@7.0.0` (jsdiff library) adapter, sentence/gap/arrange modes | `METRIC-002` | Section 4.4, 6.2 |
 | `CAP-MED-RESUME` | Media Attempt Resume | Segment position and attempt state recovery on reload | `METRIC-006` | Section 4.5 |
 | `CAP-GLB-VOICE` | Voice Architecture | VAD integration via `@ricky0123/vad-web`, audio capture | `METRIC-003` | Section 4.3, 7.1 |
 | `CAP-GLB-EVIDENCE` | Canonical Evidence Bridge | Formatting `MistakeEvidence` for Review module | `GUARD-001` | Section 6 |
+| `CAP-GLB-AI-ROUTER` | Central AI Execution Port | Unified routing, circuit breaking, quota enforcement, and error scrub | `METRIC-006`, `GUARD-001` | Section 9 |
 
 ### 2.2 Acceptance Criteria Matrix
 
@@ -67,28 +70,28 @@ The following table defines the normative acceptance criteria for P04. These ide
 
 | ID | Category | Scenario / Trigger | Expected Truthful Behavior |
 |---|---|---|---|
-| `AC-MED-001` | Handoff | P03 YouTube handoff received | System creates `MediaLesson` with reference to `sourceRecordId`, initiates caption check, displays YouTube player without re-extracting text in Sources. |
-| `AC-MED-002` | Handoff | P03 Audio handoff received | System creates `MediaLesson` referencing `sourceVersionId`, loads audio waveform, triggers `CAP-MED-TRANSCRIPT` if transcript not already present. |
+| `AC-MED-001` | Handoff | P03 YouTube handoff received | System ingests P04-owned `MediaHandoffReference` with `sourceRecordId` and `mediaUrl` (`sourceVersionId` absent), creates `MediaLesson`, initiates caption check, displays YouTube player without re-extracting text in Sources. |
+| `AC-MED-002` | Handoff | P03 Audio handoff received | System ingests P04-owned `MediaHandoffReference` referencing `sourceRecordId` (`sourceVersionId` absent), loads audio waveform, triggers `CAP-MED-TRANSCRIPT` to create P04's own `MediaTranscriptVersion`. |
 | `AC-MED-003` | Import | Direct YouTube URL import with valid English captions | `MediaImportJob` executes `probing` â†’ `captions` â†’ `normalizing` â†’ `validating` â†’ `ready`. Transcript coverage â‰¥ 65% of media duration. |
-| `AC-MED-004` | Import | Direct YouTube URL import with NO captions | Job halts at `captions`, transitions to `failed` with code `CAPTIONS_UNAVAILABLE`, prompts learner to upload audio or paste transcript. Never fabricates transcript. |
-| `AC-MED-005` | Import | Audio file upload (MP3/WAV/M4A â‰¤ 14MB) | Audio decoded, waveform initialized, AI transcription parses speech into sentences with `startMs`, `endMs`, `confidence`. |
-| `AC-MED-006` | Import | VTT/SRT file upload | File parsed into timed segments, validated for monotonic timestamps and minimum text length, saved as `imported` version. |
-| `AC-MED-007` | Import | Provider quota exhaustion or server error | Returns typed `MEDIA_AI_QUOTA_EXHAUSTED` or `MEDIA_IMPORT_FAILED` with clean Vietnamese user message and request ID; raw stack trace and credentials scrubbed. |
+| `AC-MED-004` | Import | Direct YouTube URL import with NO captions | Job transitions to `degraded` with transcript capability `unavailable_transcript`. Player loads authentic YouTube video/audio for original listening; Dictation and transcript-aligned Shadowing are disabled with an honest explanatory message. Never fabricates transcript, never calls fallback TTS, never generates fake pronunciation score. |
+| `AC-MED-005` | Import | Audio file upload (MP3/WAV/M4A â‰¤ 14MB) | Audio decoded, waveform initialized, AI transcription via router parses speech into sentences with `startMs`, `endMs`, `confidence`. |
+| `AC-MED-006` | Import | VTT/SRT file upload | File parsed into timed segments, validated for monotonic timestamps and minimum text length, saved as `imported` version. Malformed subtitle syntax produces typed `SUBTITLE_PARSE_ERROR` or `needs_review`; never generates fake timing or fallback segmenting. |
+| `AC-MED-007` | Import | Provider quota exhaustion or server error | Central router returns typed `MEDIA_AI_QUOTA_EXHAUSTED` or `MEDIA_IMPORT_FAILED` with clean Vietnamese user message and request ID; raw stack trace and credentials scrubbed. |
 | `AC-MED-008` | Transcript | Learner edits transcript text | System saves new immutable `MediaTranscriptVersion` with incremented version number, `stage: 'edited'`, and `normalizerVersion: 'user-edited-v1'`. |
 | `AC-MED-009` | Transcript | Incomplete / truncated transcript | If transcript coverage < 65% of media duration, status marks `coverage_insufficient`; room displays honest warning badge and prevents full-lesson auto-completion. |
 | `AC-MED-010` | Player | Playback control invocation | Player supports 0.5x, 0.75x, 1.0x, 1.25x, 1.5x speed; loops current segment N times; waits declared milliseconds (0ms, 800ms, 1500ms, 3000ms) between iterations. |
 | `AC-MED-011` | Player | Sentence progression | When current sentence completes in Guided mode, player pauses or loops according to settings; auto-advances only when full-lesson mode is explicitly enabled. |
-| `AC-MED-012` | Shadowing | Microphone available and permission granted | Learner audio recorded via `MediaRecorder`; `@ricky0123/vad-web` calculates speech segments, pauses, and WPM; Gemini evaluates acoustic audio; returns scores. |
+| `AC-MED-012` | Shadowing | Microphone available and permission granted | Learner audio recorded via `MediaRecorder`; `@ricky0123/vad-web` calculates speech segments, pauses, and WPM; central router evaluates acoustic audio; returns scores. |
 | `AC-MED-013` | Shadowing | Microphone missing or permission denied | Acoustic status displays `unavailable`; evaluation button is disabled with explanatory note; system never requests AI score and never estimates band from text. |
 | `AC-MED-014` | Shadowing | Evaluation returns low accuracy / swallowed words | System formats `MistakeEvidence` with `taxonomy: 'pronunciation'`, `evidenceClass: 'assisted_practice'`, and links to Review queue without awarding direct XP. |
 | `AC-MED-015` | Dictation | Dictation practice started | Original segment audio plays; learner enters text via typing, gap-fill, or word-arranging; **zero microphone permission requested or required**. |
 | `AC-MED-016` | Dictation | Microphone denied in browser | Dictation input and evaluation remain 100% functional and unobstructed. |
-| `AC-MED-017` | Dictation | Spelling / omission error detected | `diffWords` computes word-level diff; incorrect and missing words generate listening/spelling `MistakeEvidence` containing expected vs actual tokens. |
+| `AC-MED-017` | Dictation | Spelling / omission error detected | `diffAdapter` (wrapping `diff@7.0.0`) computes word-level diff; incorrect and missing words generate listening/spelling `MistakeEvidence` containing expected vs actual tokens. |
 | `AC-MED-018` | Evidence | Perfect Dictation or Shadowing score | Generates `SkillEvidence` record for practice session; zero direct XP increment in Media Room; zero direct manipulation of mastery status. |
 | `AC-MED-019` | Privacy | Shadowing recording finished | Raw audio blob kept in browser memory; if persistence consent is false, audio discarded on segment change; if true, stored in local IndexedDB (`idb-media://`). Raw audio never stored in Supabase tables. |
 | `AC-MED-020` | Privacy | Learner requests lesson deletion | All local IndexedDB audio artifacts associated with the lesson are deleted; Supabase records cascade delete. |
 | `AC-MED-021` | Resume | Browser reloaded during session | Room restores `activeSegmentId`, `mode`, `speed`, and previous valid attempt scores without losing user inputs. |
-| `AC-MED-022` | Resume | Reload when transcript generation was pending/failed | Room restores failed or degraded state truthfully; never converts incomplete job into ready state or fabricated score. |
+| `AC-MED-022` | Resume | Reload when transcript generation was pending/failed/degraded | Room restores degraded or failed state truthfully; never converts incomplete job into ready state or fabricated score. Original media remains playable if player loaded. |
 | `AC-MED-023` | Accessibility | Keyboard navigation | Arrow keys navigate sentences; Space toggles playback; R triggers repeat loop; Escape halts recording; all controls possess accessible ARIA labels. |
 | `AC-MED-024` | Accessibility | Screen reader announcement | Playback state, loop status, recording countdown, and evaluation results announced via dedicated `aria-live="polite"` regions. |
 | `AC-MED-025` | Flag | Feature flag `OMNI_MEDIA_ROOM_V2` OFF | Express serves legacy `MediaLabView`; cloud endpoints reject v2 requests with HTTP 403 `feature_disabled`. |
@@ -101,14 +104,14 @@ Every test suite must execute against concrete fixtures representing real-world 
 |---|---|---|---|
 | `FIX-MED-01` | YouTube Video | Standard English captions (VTT), duration 180s, 30 segments | Verifies clean caption parsing, coverage calculation, and segment alignment. |
 | `FIX-MED-02` | YouTube Video | Auto-generated rolling captions with heavy overlap and timing drift | Verifies VTT de-duplication, sentence boundary reconstruction, and monotonic ordering. |
-| `FIX-MED-03` | YouTube Video | No captions available; metadata only | Verifies clean error handling, prompt for alternate source, and no hallucinated text. |
-| `FIX-MED-04` | Audio (WAV) | 16kHz mono authentic IELTS lecture snippet, duration 45s | Verifies client-side audio decoding, Wavesurfer peaks generation, and AI transcription. |
+| `FIX-MED-03` | YouTube Video | No captions available; metadata only | Verifies player streams original video/audio, room enters degraded state with unavailable_transcript, Dictation and transcript-aligned Shadowing disable honestly, zero hallucinated text or fallback TTS. |
+| `FIX-MED-04` | Audio (WAV) | 16kHz mono authentic IELTS lecture snippet, duration 45s | Verifies client-side audio decoding, Wavesurfer peaks generation, and AI transcription via router. |
 | `FIX-MED-05` | Audio (MP3) | Corrupt headers / incomplete byte stream | Verifies decoder rejection, `AUDIO_DECODE_FAILED` normalization, and clean UI error message. |
-| `FIX-MED-06` | Subtitle (SRT) | Malformed timestamps and missing sequence numbers | Verifies parser resilience, fallback segmenting, and coverage validation. |
+| `FIX-MED-06` | Subtitle (SRT) | Malformed timestamps and missing sequence numbers | Verifies parser resilience, rejection with typed SUBTITLE_PARSE_ERROR or needs_review, safe preservation of raw input, and refusal to generate fake timings or fallback segments. |
 | `FIX-MED-07` | Subtitle (VTT) | Valid captions covering only first 30 seconds of a 300s video (10% coverage) | Verifies `coverage_insufficient` detection and refusal to certify as ready transcript. |
 | `FIX-MED-08` | Browser Mic | `NotAllowedError` (permission denied) | Verifies Shadowing switches to `unavailable` while Dictation remains 100% active. |
 | `FIX-MED-09` | Browser Mic | `NotFoundError` (no hardware microphone connected) | Verifies hardware absence detection and graceful degradation without uncaught exceptions. |
-| `FIX-MED-10` | Network | Latency injection & 503 Provider Timeout during evaluation | Verifies retryable error banner, retry button, and zero state corruption. |
+| `FIX-MED-10` | Network | Latency injection & 503 Provider Timeout during evaluation | Verifies retryable error banner, retry button, and zero state corruption via central router. |
 | `FIX-MED-11` | Storage | Reload with populated IndexedDB and persisted Supabase session | Verifies full resume fidelity of audio references and segment attempts. |
 | `FIX-MED-12` | Network | Offline / disconnected client | Verifies cached transcript readability and clear offline indicators. |
 
@@ -122,7 +125,7 @@ The data architecture separates static, immutable media and transcript assets fr
 
 ```mermaid
 erDiagram
-    SourceRecord ||--o| MediaLesson : "handed off to"
+    SourceRecord ||--o| MediaLesson : "referenced via MediaHandoffReference"
     MediaLesson ||--|{ MediaTranscriptVersion : "has versions"
     MediaTranscriptVersion ||--|{ MediaTranscriptSegment : "contains"
     MediaLesson ||--o{ ShadowingAttempt : "recorded against"
@@ -162,13 +165,29 @@ export interface MediaLesson {
   youtubeId?: string;
   channelTitle?: string;
   durationMs: number;
-  currentVersionId: string;
-  sourceRecordId?: string;
-  sourceVersionId?: string;
+  currentVersionId?: string; // Optional: absent before first transcript version is ready
+  sourceRecordId?: string; // Points to P03 SourceRecord when originating from Sources library
+  sourceVersionId?: string; // Optional: absent on initial handoff because P03 creates no SourceVersion for handoff_required
   processingState: MediaProcessingState;
+  transcriptState?: 'ready' | 'unavailable_transcript' | 'coverage_insufficient' | 'needs_review';
   createdAt: string;
   updatedAt: string;
   lastPracticedAt?: string;
+}
+
+/**
+ * P04-owned intake reference derived from P03 SourceRecord at the navigation boundary.
+ * P03 does NOT export this interface and does NOT create a SourceVersion for handoffs.
+ */
+export interface MediaHandoffReference {
+  sourceRecordId: string;
+  userId: string;
+  title: string;
+  mediaType: 'youtube' | 'audio';
+  mediaUrl: string;
+  sourceVersionId?: string; // Optional: absent on initial handoff from P03
+  provenanceCitation?: string;
+  retrievalDate?: string;
 }
 
 export type TranscriptStage = 'raw_caption' | 'ai_transcription' | 'user_edited' | 'normalised';
@@ -301,23 +320,26 @@ stateDiagram-v2
     Probing --> Captions : source is YouTube
     Probing --> Transcribing : source is uploaded audio
     Captions --> Normalizing : captions retrieved
-    Captions --> Failed : no captions & no audio download
-    Transcribing --> Normalizing : AI transcription succeeded
-    Transcribing --> Failed : provider quota / audio corrupt
+    Captions --> Degraded : no captions found (media playable without transcript)
+    Captions --> Failed : invalid YouTube URL / private video / blocked
+    Transcribing --> Normalizing : AI transcription succeeded via router
+    Transcribing --> Failed : router quota exhausted / audio corrupt
     Normalizing --> Validating : timestamps & sentences formatted
     Validating --> Ready : coverage >= 65% and monotonic
-    Validating --> Degraded : coverage < 65% or gaps
-    Validating --> Failed : 0 segments or corrupt timings
+    Validating --> Degraded : coverage < 65% (coverage_insufficient)
+    Validating --> NeedsReview : malformed syntax (SUBTITLE_PARSE_ERROR)
     Ready --> [*]
     Degraded --> [*]
+    NeedsReview --> [*]
     Failed --> [*]
 ```
 
 #### Transition Invariants:
-1. `Captions` must never fabricate subtitle lines if the video host returns empty tracks.
+1. When YouTube caption extraction finds no English captions, the job transitions to `degraded` with `transcriptState = 'unavailable_transcript'`. The lesson remains **playable** for listening, but Dictation and transcript-aligned Shadowing are disabled. The system never fabricates subtitle lines.
 2. `Normalizing` deduplicates rolling subtitles (e.g. YouTube automatic captions with overlapping word-level spans) and merges fragments into coherent sentence units.
 3. `Validating` enforces monotonic non-overlapping timestamps (`segment.endMs > segment.startMs` and `next.startMs >= current.endMs - 50ms`).
-4. Any failure sets `processingState = 'failed'` with a typed `MediaImportFailure` record; the server returns an HTTP error code with zero leakage of provider API keys or internal executable paths.
+4. Malformed subtitle files (e.g. invalid SRT timestamps) produce a typed `SUBTITLE_PARSE_ERROR` transitioning to `needs_review`. The system preserves raw input and invites user correction; it **never generates fake fallback timings**.
+5. Any failure sets `processingState = 'failed'` with a typed `MediaImportFailure` record; the server returns an HTTP error code with zero leakage of provider API keys or internal executable paths.
 
 ### 4.2 Player Playback & Loop Lifecycle
 
@@ -328,8 +350,10 @@ stateDiagram-v2
     [*] --> Unloaded
     Unloaded --> Loading : load media source
     Loading --> Ready : player buffered & metadata ready
+    Loading --> Degraded : player ready but transcript unavailable
     Loading --> Error : media unavailable / blocked
     Ready --> Playing : play command
+    Degraded --> Playing : play command (freeform listening only)
     Playing --> Paused : pause command / sentence end
     Playing --> LoopWaiting : segment end reached (loopCount > 1)
     LoopWaiting --> Playing : wait interval elapsed -> seek startMs
@@ -351,8 +375,8 @@ stateDiagram-v2
     RequestingMic --> MicUnavailable : permission denied / hardware absent
     RequestingMic --> Recording : microphone stream acquired
     Recording --> ProcessingEval : user stops / silence detected
-    ProcessingEval --> Evaluated : Gemini audio evaluation succeeded
-    ProcessingEval --> EvalUnavailable : provider 503 / timeout / invalid payload
+    ProcessingEval --> Evaluated : central AI router acoustic evaluation succeeded
+    ProcessingEval --> EvalUnavailable : router 503 / circuit broken / timeout
     Evaluated --> Idle : learner reviews feedback
     MicUnavailable --> Idle : learner dismisses warning
     EvalUnavailable --> Idle : learner retries
@@ -371,7 +395,7 @@ stateDiagram-v2
     SegmentReady --> PlayingAudio : plays segment audio
     PlayingAudio --> AwaitingInput : playback finishes (or loops)
     AwaitingInput --> Diffing : learner submits response
-    Diffing --> FeedbackReady : word diff calculated
+    Diffing --> FeedbackReady : word diff calculated via diffAdapter
     FeedbackReady --> EmittingMistakes : contains incorrect / missing words
     EmittingMistakes --> Completed : mistakes dispatched to Review
     FeedbackReady --> Completed : 100% correct match
@@ -390,7 +414,7 @@ stateDiagram-v2
 
 - On segment transition, mode switch, or pause, the client records a debounced (1000ms) update to `MediaResumeState`.
 - On application reload, the client hydrates `MediaResumeState` from Supabase (or local fallback). If the media version or segments match, it seeks the player to `playbackPositionMs` and highlights `activeSegmentId`.
-- If the media job is in `failed` or `degraded` state, resume restores the exact failure badge without displaying a false `ready` state.
+- If the media job is in `degraded` state (e.g. `unavailable_transcript`), resume restores the degraded badge and enables original playback while disabling Dictation. It never presents a false `ready` transcript state.
 
 ---
 
@@ -491,7 +515,7 @@ Learner voice recordings are classified as **`sensitive_audio`**:
 - Microphone audio streams are captured solely in the browser client memory via `MediaRecorder`.
 - Client-side VAD analysis runs locally in the Web Audio context using `@ricky0123/vad-web`.
 - When audio evaluation is requested, the recorded audio is encoded as WebM/Opus and transmitted securely over TLS to `/api/media/evaluate-shadowing`.
-- The server stream passes the audio to Gemini for acoustic analysis and **immediately discards the buffer from server memory**. Server logs never write audio base64, raw binary buffers, or audio transcripts.
+- The server routes the audio to the central AI router (`CAP-GLB-AI-ROUTER`) and **immediately discards the buffer from server memory**. Server logs never write raw audio binary buffers, base64 data, or speech transcripts.
 
 ### 7.2 Client-Side IndexedDB Storage
 
@@ -643,19 +667,26 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_resume_states TO authentica
 
 ---
 
-## 9. Server Transport, Provider Adapters, & Security Boundaries
+## 9. Server Transport, Central AI Router Port, & Security Boundaries
 
 ### 9.1 Authenticated Route Admission & Quota Management
 
 All Media server endpoints enforce:
 1. **Feature Flag Admission**: Checks `parseMediaRoomV2Env(process.env)`. If disabled, returns HTTP 403 `feature_disabled`.
-2. **Bearer Token Authentication**: Verifies the Supabase JWT. Unauthenticated requests receive HTTP 401 `UNAUTHORIZED`.
+2. **Authenticated Session Token Verification**: Verifies the Supabase JWT from the authorization header. Unauthenticated requests receive HTTP 401 `UNAUTHORIZED`.
 3. **Dedicated In-Memory Quotas**:
    - `media-import`: 10 requests per 15-minute sliding window per learner ID.
    - `audio-evaluation`: 20 requests per 10-minute sliding window per learner ID.
 4. **Body Limits**: Audio uploads capped at 14 MiB. Base64 strings are decoded in memory streams and never written to disk.
 
-### 9.2 YouTube Adapter & PO-Token Boundary
+### 9.2 Central AI Router Execution Port (`CAP-GLB-AI-ROUTER`)
+
+All cloud machine learning operations for Media are dispatched through the central AI router:
+- **Task Profile `media_transcription_v1`**: Receives decoded audio buffer, executes transcription via router, validates JSON response schema, returns timed segments.
+- **Task Profile `media_shadowing_eval_v1`**: Receives target sentence and audio stream, executes acoustic evaluation, enforces `MediaShadowingEvaluationSchema`, returns scores and telemetry.
+- **Circuit Breaker & Fallback**: The router manages provider retries, rate limits, and fallback without exposing provider-specific errors to Media controllers. Media code constructs zero direct Google GenAI SDK clients.
+
+### 9.3 YouTube Adapter & PO-Token Boundary
 
 The backend YouTube handler:
 - Uses pinned `yt-dlp` executable with checksum verification.
@@ -663,26 +694,11 @@ The backend YouTube handler:
 - If YouTube blocks automated fetching (bot challenge / sign-in required), returns normalized failure `YOUTUBE_PROVIDER_BLOCKED` with suggested action `upload_source`.
 - **Never invokes external web browser automation or unauthorized scraping bridges**.
 
-### 9.3 Audio Transcription Adapter
-
-- Handles authentic learner audio uploads.
-- Executes Gemini 2.5 Flash transcription with system prompt version `media-transcribe-v1`.
-- Outputs strictly typed JSON schema conforming to `AudioTranscribeResult`.
-- Fails closed with clean Vietnamese error messages if AI quota is exhausted.
-
-### 9.4 Audio Evaluation Adapter
-
-- Handles Shadowing recordings.
-- Evaluates acoustic fluency, stress, intonation, and accuracy.
-- Enforces prompt versioning `media-shadow-eval-v1`.
-- Enforces schema validation using `MediaShadowingEvaluationSchema`.
-- If parsing fails or output violates schema, returns HTTP 502 with `SCHEMA_INVALID` and request ID.
-
-### 9.5 Error Sanitization & Secret Scrubbing
+### 9.4 Error Sanitization & Secret Scrubbing
 
 All server errors pass through `scrubMediaError(error)` before serializing to the client:
 - Replaces absolute filesystem paths (e.g. `/tmp/...`, `node_modules/...`) with generic tokens.
-- Scrubs API keys matching patterns `AIza...`, `Bearer ...`, or `secret_...`.
+- Scrubs API keys, secret tokens, authorization header tokens, or private keys.
 - Replaces raw shell execution outputs with clean, user-facing Vietnamese descriptions.
 
 ---
