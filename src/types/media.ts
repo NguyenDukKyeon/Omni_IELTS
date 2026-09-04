@@ -89,7 +89,10 @@ export const MediaTranscriptSegmentSchema = z
     translationVi: z.string().optional(),
     confidence: z.enum(['high', 'medium', 'low']),
   })
-  .strict();
+  .strict()
+  .refine((seg) => seg.endMs > seg.startMs, {
+    message: 'endMs must be strictly greater than startMs',
+  });
 export type MediaTranscriptSegment = z.infer<typeof MediaTranscriptSegmentSchema>;
 
 export const MediaTranscriptVersionSchema = z.object({
@@ -179,11 +182,16 @@ export type DictationMode = z.infer<typeof DictationModeSchema>;
 export const DictationDifficultySchema = z.enum(['easy', 'medium', 'hard']);
 export type DictationDifficulty = z.infer<typeof DictationDifficultySchema>;
 
-export const WordDiffTokenSchema = z.object({
-  expected: z.string(),
-  user: z.string().optional(),
-  status: z.enum(['correct', 'incorrect', 'missing', 'extra']),
-});
+export const WordDiffTokenSchema = z
+  .object({
+    expected: z.string().max(200),
+    user: z.string().min(1).max(200).optional(),
+    status: z.enum(['correct', 'incorrect', 'missing', 'extra']),
+  })
+  .strict()
+  .refine((token) => (token.status === 'extra' ? true : token.expected.length >= 1), {
+    message: 'expected text must not be empty unless status is extra',
+  });
 export type WordDiffToken = z.infer<typeof WordDiffTokenSchema>;
 
 export const DictationAttemptSchema = z.object({
@@ -194,10 +202,10 @@ export const DictationAttemptSchema = z.object({
   userId: z.string().uuid(),
   mode: DictationModeSchema,
   difficulty: DictationDifficultySchema,
-  userResponseText: z.string(),
-  expectedText: z.string(),
+  userResponseText: z.string().max(2000),
+  expectedText: z.string().min(1).max(2000),
   accuracyScore: z.number().int().min(0).max(100),
-  diffTokens: z.array(WordDiffTokenSchema),
+  diffTokens: z.array(WordDiffTokenSchema).max(500),
   mistakeIds: z.array(z.string().uuid()),
   createdAt: z.string().datetime(),
 });

@@ -68,6 +68,24 @@ describe('Transcript Validation, Normalization, and Deterministic Identity', () 
       expect(result.issue).toBe('timestamps_invalid');
     });
 
+    it('enforces max 50ms overlap tolerance between consecutive segments', () => {
+      // 50ms overlap allowed
+      const validOverlap: MediaTranscriptSegment[] = [
+        { id: 's1', index: 0, startMs: 0, endMs: 10000, text: 'Seg 1', confidence: 'high' },
+        { id: 's2', index: 1, startMs: 9950, endMs: 20000, text: 'Seg 2', confidence: 'high' },
+      ];
+      expect(validateTranscriptCoverage(validOverlap, 20000).valid).toBe(true);
+
+      // 51ms overlap rejected
+      const invalidOverlap: MediaTranscriptSegment[] = [
+        { id: 's1', index: 0, startMs: 0, endMs: 10000, text: 'Seg 1', confidence: 'high' },
+        { id: 's2', index: 1, startMs: 9949, endMs: 20000, text: 'Seg 2', confidence: 'high' },
+      ];
+      const res = validateTranscriptCoverage(invalidOverlap, 20000);
+      expect(res.valid).toBe(false);
+      expect(res.issue).toBe('timestamps_invalid');
+    });
+
     it('rejects segments with empty text or invalid start/end bounds', () => {
       const emptyTextSegments: MediaTranscriptSegment[] = [
         {

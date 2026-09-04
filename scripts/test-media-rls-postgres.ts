@@ -890,9 +890,19 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     [lessonSecProofId, USER_A_ID, 'Lesson For Security Proofs', 'youtube', 'https://youtube.com/watch?v=proofs36to43', 30000, 'ready']
   );
   await client.query(
-    `INSERT INTO public.media_transcript_versions (id, lesson_id, user_id, version_number, stage, content_hash)
-     VALUES ($1, $2, $3, $4, $5, $6);`,
-    [versionSecProofId, lessonSecProofId, USER_A_ID, 1, 'raw_caption', 'hash_proof_36']
+    `INSERT INTO public.media_transcript_versions (id, lesson_id, user_id, version_number, stage, content_hash, segments)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [
+      versionSecProofId,
+      lessonSecProofId,
+      USER_A_ID,
+      1,
+      'raw_caption',
+      'hash_proof_36',
+      JSON.stringify([
+        { id: 'seg_1', index: 0, startMs: 0, endMs: 5000, text: 'Hello IELTS learners', confidence: 'high' },
+      ]),
+    ]
   );
   await client.query('COMMIT;');
 
@@ -1507,6 +1517,411 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   }
   details.push('PASS: Proof 50: Valid fully typed telemetry and Vietnamese feedback is accepted and verified');
 
+  // Proof 51: Database transcript invariants (R1)
+  // 51.a: Decimal index, startMs, endMs are rejected
+  const decimalCases = [
+    { id: 'seg_dec_1', index: 0.5, startMs: 0, endMs: 1000, text: 'Decimal index', confidence: 'high' },
+    { id: 'seg_dec_2', index: 0, startMs: 10.5, endMs: 1000, text: 'Decimal startMs', confidence: 'high' },
+    { id: 'seg_dec_3', index: 0, startMs: 0, endMs: 1000.5, text: 'Decimal endMs', confidence: 'high' },
+  ];
+  for (const badSeg of decimalCases) {
+    let decimalBlocked = false;
+    await client.query('BEGIN;');
+    await client.query('SET LOCAL ROLE authenticated;');
+    await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+    await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+    try {
+      await client.query(
+        `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+         VALUES ($1, $2, $3, $4, $5, $6);`,
+        [lessonSecProofId, USER_A_ID, 201, 'raw_caption', 'hash_dec', JSON.stringify([badSeg])]
+      );
+      await client.query('COMMIT;');
+    } catch (err: any) {
+      if (err.code === '23514') decimalBlocked = true;
+      await client.query('ROLLBACK;').catch(() => {});
+    }
+    if (!decimalBlocked) {
+      throw new Error(`Transcript invariant violation: Decimal value in segment was not blocked! ${JSON.stringify(badSeg)}`);
+    }
+  }
+
+  // 51.b: Zero-duration and inverted duration segments are rejected
+  const durationCases = [
+    { id: 'seg_dur_1', index: 0, startMs: 1000, endMs: 1000, text: 'Zero duration', confidence: 'high' },
+    { id: 'seg_dur_2', index: 0, startMs: 2000, endMs: 1000, text: 'Inverted duration', confidence: 'high' },
+  ];
+  for (const badSeg of durationCases) {
+    let durationBlocked = false;
+    await client.query('BEGIN;');
+    await client.query('SET LOCAL ROLE authenticated;');
+    await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+    await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+    try {
+      await client.query(
+        `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+         VALUES ($1, $2, $3, $4, $5, $6);`,
+        [lessonSecProofId, USER_A_ID, 202, 'raw_caption', 'hash_dur', JSON.stringify([badSeg])]
+      );
+      await client.query('COMMIT;');
+    } catch (err: any) {
+      if (err.code === '23514') durationBlocked = true;
+      await client.query('ROLLBACK;').catch(() => {});
+    }
+    if (!durationBlocked) {
+      throw new Error(`Transcript invariant violation: Invalid duration was not blocked! ${JSON.stringify(badSeg)}`);
+    }
+  }
+
+  // 51.c: Non-monotonic or discontinuous index order is rejected
+  const indexCases = [
+    [{ id: 'seg_idx_1', index: 1, startMs: 0, endMs: 1000, text: 'Start index 1', confidence: 'high' }],
+    [
+      { id: 'seg_idx_2a', index: 0, startMs: 0, endMs: 1000, text: 'Seg 0', confidence: 'high' },
+      { id: 'seg_idx_2b', index: 2, startMs: 1000, endMs: 2000, text: 'Seg 2 (skipped 1)', confidence: 'high' },
+    ],
+  ];
+  for (const badChain of indexCases) {
+    let indexBlocked = false;
+    await client.query('BEGIN;');
+    await client.query('SET LOCAL ROLE authenticated;');
+    await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+    await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+    try {
+      await client.query(
+        `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+         VALUES ($1, $2, $3, $4, $5, $6);`,
+        [lessonSecProofId, USER_A_ID, 203, 'raw_caption', 'hash_idx', JSON.stringify(badChain)]
+      );
+      await client.query('COMMIT;');
+    } catch (err: any) {
+      if (err.code === '23514') indexBlocked = true;
+      await client.query('ROLLBACK;').catch(() => {});
+    }
+    if (!indexBlocked) {
+      throw new Error('Transcript invariant violation: Discontinuous/non-monotonic index was not blocked!');
+    }
+  }
+
+  // 51.d: Overlap > 50ms or backwards segment is rejected
+  let overlapBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+       VALUES ($1, $2, $3, $4, $5, $6);`,
+      [
+        lessonSecProofId,
+        USER_A_ID,
+        204,
+        'raw_caption',
+        'hash_overlap',
+        JSON.stringify([
+          { id: 'seg_ov_1', index: 0, startMs: 0, endMs: 1000, text: 'Seg 0', confidence: 'high' },
+          { id: 'seg_ov_2', index: 1, startMs: 940, endMs: 2000, text: 'Seg 1 (60ms overlap)', confidence: 'high' },
+        ]),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') overlapBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!overlapBlocked) {
+    throw new Error('Transcript invariant violation: Overlap > 50ms was not blocked!');
+  }
+
+  // 51.e: Valid consecutive segments with 50ms overlap succeed
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const validChainRes = await client.query(
+    `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id;`,
+    [
+      lessonSecProofId,
+      USER_A_ID,
+      205,
+      'raw_caption',
+      'hash_valid_chain',
+      JSON.stringify([
+        { id: 'seg_vc_1', index: 0, startMs: 0, endMs: 1000, text: 'Seg 0', confidence: 'high' },
+        { id: 'seg_vc_2', index: 1, startMs: 950, endMs: 2000, text: 'Seg 1 (50ms overlap)', confidence: 'high' },
+      ]),
+    ]
+  );
+  await client.query('COMMIT;');
+  if (!validChainRes.rows[0]?.id) {
+    throw new Error('Transcript invariant error: Valid 50ms overlap segment chain failed to insert!');
+  }
+  details.push('PASS: Proof 51: Strict transcript invariants (integer timestamps, endMs > startMs, monotonic index, 50ms overlap tolerance) enforced by database validator');
+
+  // Proof 52: Database-enforced attempt segment reference (R2)
+  // 52.a: Fake segment_id in shadowing attempt rejected with 42501 and non-disclosing error
+  let fakeShadowingBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status)
+       VALUES ($1, $2, $3, $4, $5, $6);`,
+      [lessonSecProofId, 'fake_segment_id', versionSecProofId, USER_A_ID, 2000, 'unavailable']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' && err.message.includes('Invalid segment reference')) {
+      fakeShadowingBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!fakeShadowingBlocked) {
+    throw new Error('Attempt reference violation: Fake segment_id in shadowing attempt was not blocked with Invalid segment reference!');
+  }
+
+  // 52.b: Fake segment_id in dictation attempt rejected with 42501 and non-disclosing error
+  let fakeDictationBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+      [lessonSecProofId, 'fake_segment_id', versionSecProofId, USER_A_ID, 'full_sentence', 'easy', 'Test', 'Test', 100]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' && err.message.includes('Invalid segment reference')) {
+      fakeDictationBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!fakeDictationBlocked) {
+    throw new Error('Attempt reference violation: Fake segment_id in dictation attempt was not blocked with Invalid segment reference!');
+  }
+
+  // 52.c: Foreign or non-existent transcript_version_id rejected with identical 42501 error
+  let foreignVersionBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status)
+       VALUES ($1, $2, $3, $4, $5, $6);`,
+      [lessonSecProofId, 'seg_1', 'ffffffff-ffff-4000-8000-000000000001', USER_A_ID, 2000, 'unavailable']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' && err.message.includes('Invalid segment reference')) {
+      foreignVersionBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!foreignVersionBlocked) {
+    throw new Error('Attempt reference violation: Foreign/missing version was not blocked with identical non-disclosing error!');
+  }
+
+  // 52.d: Valid attempt referencing real seg_1 in owned version succeeds
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const validRefRes = await client.query(
+    `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id;`,
+    [lessonSecProofId, 'seg_1', versionSecProofId, USER_A_ID, 3000, 'unavailable']
+  );
+  await client.query('COMMIT;');
+  if (!validRefRes.rows[0]?.id) {
+    throw new Error('Attempt reference error: Valid attempt referencing seg_1 failed to insert!');
+  }
+  details.push('PASS: Proof 52: Attempt segment reference and tenant/lesson isolation enforced with non-disclosing 42501 error by omni_internal trigger');
+
+  // Proof 53: Strict dictation diff tokens & expected text persistence (R3)
+  // 53.a: Empty expected_text or expected_text > 2000 is rejected
+  for (const badExpected of ['', 'a'.repeat(2001)]) {
+    let expectedBlocked = false;
+    await client.query('BEGIN;');
+    await client.query('SET LOCAL ROLE authenticated;');
+    await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+    await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+    try {
+      await client.query(
+        `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+        [lessonSecProofId, 'seg_1', versionSecProofId, USER_A_ID, 'full_sentence', 'easy', 'Hello', badExpected, 100]
+      );
+      await client.query('COMMIT;');
+    } catch (err: any) {
+      if (err.code === '23514') expectedBlocked = true;
+      await client.query('ROLLBACK;').catch(() => {});
+    }
+    if (!expectedBlocked) {
+      throw new Error(`Dictation expected_text bounds violation was not blocked for length ${badExpected.length}!`);
+    }
+  }
+
+  // 53.b: expected_text with raw audio base64 signature is rejected
+  let expectedAudioBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+      [lessonSecProofId, 'seg_1', versionSecProofId, USER_A_ID, 'full_sentence', 'easy', 'Hello', 'UklGRiQAAABXQVZFZmt0AAAACQAA', 100]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') expectedAudioBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!expectedAudioBlocked) {
+    throw new Error('Dictation expected_text raw audio payload was not blocked by clean text validator!');
+  }
+
+  // 53.c: diff_tokens with unknown key is rejected
+  let unknownTokenKeyBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score, diff_tokens)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        'full_sentence',
+        'easy',
+        'Hello',
+        'Hello',
+        100,
+        JSON.stringify([{ expected: 'Hello', status: 'correct', injectedField: 'malicious' }]),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') unknownTokenKeyBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!unknownTokenKeyBlocked) {
+    throw new Error('Dictation diff_tokens unknown key was not blocked by structural validator!');
+  }
+
+  // 53.d: diff_tokens with invalid status is rejected
+  let invalidStatusBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score, diff_tokens)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        'full_sentence',
+        'easy',
+        'Hello',
+        'Hello',
+        100,
+        JSON.stringify([{ expected: 'Hello', status: 'forged_status' }]),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') invalidStatusBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!invalidStatusBlocked) {
+    throw new Error('Dictation diff_tokens invalid status was not blocked by structural validator!');
+  }
+
+  // 53.e: diff_tokens leaf with raw audio base64 is rejected
+  let tokenAudioBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score, diff_tokens)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        'full_sentence',
+        'easy',
+        'Hello',
+        'Hello',
+        100,
+        JSON.stringify([{ expected: 'UklGRiQAAABXQVZFZmt0AAAACQAA', status: 'correct' }]),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') tokenAudioBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!tokenAudioBlocked) {
+    throw new Error('Dictation diff_tokens raw audio payload was not blocked by structural validator!');
+  }
+
+  // 53.f: Valid dictation attempt with typed diff_tokens (including extra with empty expected) succeeds
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const validDictRes = await client.query(
+    `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score, diff_tokens)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING id, diff_tokens;`,
+    [
+      lessonSecProofId,
+      'seg_1',
+      versionSecProofId,
+      USER_A_ID,
+      'full_sentence',
+      'medium',
+      'Hello IELTS extra learners',
+      'Hello IELTS learners',
+      80,
+      JSON.stringify([
+        { expected: 'Hello', user: 'Hello', status: 'correct' },
+        { expected: 'IELTS', user: 'IELTS', status: 'correct' },
+        { expected: '', user: 'extra', status: 'extra' },
+        { expected: 'learners', user: 'learners', status: 'correct' },
+      ]),
+    ]
+  );
+  await client.query('COMMIT;');
+  if (!validDictRes.rows[0]?.id || validDictRes.rows[0].diff_tokens.length !== 4) {
+    throw new Error('Dictation attempt error: Valid typed diff_tokens failed to insert!');
+  }
+  details.push('PASS: Proof 53: Strict dictation diff tokens, leaf bounds, clean media text, and expected_text bounds enforced by database validator');
+
   return details;
 }
 
@@ -1520,10 +1935,14 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
     !sql.includes('omni_internal.prevent_media_transcript_version_mutation') ||
     !sql.includes('omni_internal.active_deleting_media_lessons') ||
     !sql.includes('omni_internal.enforce_media_lesson_provenance') ||
+    !sql.includes('omni_internal.enforce_media_attempt_segment_reference') ||
     !sql.includes('shadowing_evaluation_schema_valid') ||
+    !sql.includes('dictation_diff_tokens_schema_valid') ||
+    !sql.includes('dictation_expected_text_valid') ||
     !sql.includes('media_lessons_media_url_no_raw_audio') ||
     !sql.includes('validate_shadowing_evaluation') ||
     !sql.includes('validate_media_transcript_segments') ||
+    !sql.includes('validate_media_dictation_diff_tokens') ||
     !sql.includes('is_clean_media_text') ||
     sql.includes('omni.active_deleting_media_lesson_id')
   ) {
@@ -1594,7 +2013,7 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
       status: 'passed',
       details: [
         ...details,
-        'PASS: All 50 Media RLS proof contracts verified against live disposable database',
+        'PASS: All 53 Media RLS proof contracts verified against live disposable database',
       ],
     };
   } catch (err: unknown) {

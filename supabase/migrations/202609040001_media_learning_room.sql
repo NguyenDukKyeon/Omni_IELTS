@@ -88,10 +88,12 @@ IMMUTABLE
 AS $$
 DECLARE
   v_seg JSONB;
-  v_index INT;
-  v_start_ms INT;
-  v_end_ms INT;
+  v_index NUMERIC;
+  v_start_ms NUMERIC;
+  v_end_ms NUMERIC;
   v_count INT;
+  v_expected_index INT := 0;
+  v_prev_end_ms NUMERIC := NULL;
 BEGIN
   IF segments IS NULL THEN
     RETURN false;
@@ -125,7 +127,8 @@ BEGIN
       RETURN false;
     END IF;
 
-    IF jsonb_typeof(v_seg->'index') <> 'number' THEN
+    -- Non-negative integer index (no decimals, no scientific notation)
+    IF jsonb_typeof(v_seg->'index') <> 'number' OR (v_seg->>'index') !~ '^[0-9]+$' THEN
       RETURN false;
     END IF;
     v_index := (v_seg->>'index')::numeric;
@@ -133,15 +136,35 @@ BEGIN
       RETURN false;
     END IF;
 
-    IF jsonb_typeof(v_seg->'startMs') <> 'number' OR jsonb_typeof(v_seg->'endMs') <> 'number' THEN
+    -- Strictly monotonic and continuous in array order (0, 1, 2, ...)
+    IF v_index <> v_expected_index THEN
       RETURN false;
     END IF;
+    v_expected_index := v_expected_index + 1;
+
+    -- Non-negative integer startMs and endMs (no decimals, no scientific notation)
+    IF jsonb_typeof(v_seg->'startMs') <> 'number' OR (v_seg->>'startMs') !~ '^[0-9]+$' THEN
+      RETURN false;
+    END IF;
+    IF jsonb_typeof(v_seg->'endMs') <> 'number' OR (v_seg->>'endMs') !~ '^[0-9]+$' THEN
+      RETURN false;
+    END IF;
+
     v_start_ms := (v_seg->>'startMs')::numeric;
     v_end_ms := (v_seg->>'endMs')::numeric;
 
-    IF v_start_ms < 0 OR v_end_ms <= 0 OR v_end_ms < v_start_ms OR v_end_ms > 86400000 THEN
+    -- endMs > startMs strictly (no zero-duration segments)
+    IF v_start_ms < 0 OR v_end_ms <= v_start_ms OR v_end_ms > 86400000 THEN
       RETURN false;
     END IF;
+
+    -- Subsequent segments must satisfy next.startMs >= previous.endMs - 50 (max 50ms overlap tolerance, blocking backward segments)
+    IF v_prev_end_ms IS NOT NULL THEN
+      IF v_start_ms < (v_prev_end_ms - 50) THEN
+        RETURN false;
+      END IF;
+    END IF;
+    v_prev_end_ms := v_end_ms;
 
     IF jsonb_typeof(v_seg->'text') <> 'string' OR
        length(v_seg->>'text') < 1 OR length(v_seg->>'text') > 5000 OR
@@ -500,6 +523,91 @@ CREATE TABLE IF NOT EXISTS public.media_shadowing_attempts (
   )
 );
 
+-- Pure immutable validator for dictation diff tokens matching WordDiffToken contract
+CREATE OR REPLACE FUNCTION public.validate_media_dictation_diff_tokens(diff_tokens JSONB)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_token JSONB;
+  v_count INT;
+  v_expected TEXT;
+  v_user TEXT;
+  v_status TEXT;
+BEGIN
+  IF diff_tokens IS NULL THEN
+    RETURN false;
+  END IF;
+
+  IF jsonb_typeof(diff_tokens) <> 'array' THEN
+    RETURN false;
+  END IF;
+
+  v_count := jsonb_array_length(diff_tokens);
+  IF v_count > 500 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_token IN SELECT * FROM jsonb_array_elements(diff_tokens) LOOP
+    IF jsonb_typeof(v_token) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    -- 1. Required top-level keys
+    IF NOT (v_token ?& ARRAY['expected', 'status']) THEN
+      RETURN false;
+    END IF;
+
+    -- 2. Exact allowed keys: expected, status, optional user
+    IF (v_token - ARRAY['expected', 'status', 'user']) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    -- 3. Enum status
+    IF jsonb_typeof(v_token->'status') <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_status := v_token->>'status';
+    IF v_status NOT IN ('correct', 'incorrect', 'missing', 'extra') THEN
+      RETURN false;
+    END IF;
+
+    -- 4. Validate expected string and bounds
+    IF jsonb_typeof(v_token->'expected') <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_expected := v_token->>'expected';
+
+    IF v_status = 'extra' THEN
+      IF length(v_expected) > 200 OR NOT public.is_clean_media_text(v_expected) THEN
+        RETURN false;
+      END IF;
+    ELSE
+      IF length(v_expected) < 1 OR length(v_expected) > 200 OR NOT public.is_clean_media_text(v_expected) THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    -- 5. Validate optional user string and bounds
+    IF v_token ? 'user' THEN
+      IF jsonb_typeof(v_token->'user') <> 'string' THEN
+        RETURN false;
+      END IF;
+      v_user := v_token->>'user';
+      IF length(v_user) < 1 OR length(v_user) > 200 OR NOT public.is_clean_media_text(v_user) THEN
+        RETURN false;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.validate_media_dictation_diff_tokens(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_media_dictation_diff_tokens(JSONB) TO authenticated, anon;
+
 -- 4. Media Dictation Attempts
 CREATE TABLE IF NOT EXISTS public.media_dictation_attempts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -518,6 +626,14 @@ CREATE TABLE IF NOT EXISTS public.media_dictation_attempts (
   CONSTRAINT dictation_no_raw_audio CHECK (
     length(user_response_text) <= 2000 AND
     public.is_clean_media_text(user_response_text)
+  ),
+  CONSTRAINT dictation_expected_text_valid CHECK (
+    length(expected_text) >= 1 AND
+    length(expected_text) <= 2000 AND
+    public.is_clean_media_text(expected_text)
+  ),
+  CONSTRAINT dictation_diff_tokens_schema_valid CHECK (
+    public.validate_media_dictation_diff_tokens(diff_tokens)
   )
 );
 
@@ -695,6 +811,58 @@ CREATE TRIGGER media_lessons_after_cascade
   AFTER DELETE ON public.media_lessons
   FOR EACH ROW
   EXECUTE FUNCTION omni_internal.clear_media_lesson_cascade_delete();
+
+-- Enforce Attempt Segment Reference and Tenant/Lesson Isolation on media_shadowing_attempts and media_dictation_attempts
+CREATE OR REPLACE FUNCTION omni_internal.enforce_media_attempt_segment_reference()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
+AS $$
+DECLARE
+  v_auth_uid UUID := auth.uid();
+  v_owner_id UUID;
+BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME NOT IN ('media_shadowing_attempts', 'media_dictation_attempts') THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_auth_uid IS NOT NULL AND NEW.user_id <> v_auth_uid THEN
+    RAISE EXCEPTION 'Invalid user ownership' USING ERRCODE = '42501';
+  END IF;
+
+  v_owner_id := COALESCE(v_auth_uid, NEW.user_id);
+
+  -- Segment must exist in transcript version belonging to lesson_id and owner
+  -- Missing, foreign, or fake segment references produce identical non-disclosing error
+  IF NOT EXISTS (
+    SELECT 1 FROM public.media_transcript_versions v
+    WHERE v.id = NEW.transcript_version_id
+      AND v.lesson_id = NEW.lesson_id
+      AND v.user_id = v_owner_id
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(v.segments) AS s
+        WHERE s->>'id' = NEW.segment_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'Invalid segment reference' USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS media_shadowing_attempts_enforce_segment ON public.media_shadowing_attempts;
+CREATE TRIGGER media_shadowing_attempts_enforce_segment
+  BEFORE INSERT OR UPDATE OF segment_id, transcript_version_id, lesson_id, user_id ON public.media_shadowing_attempts
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.enforce_media_attempt_segment_reference();
+
+DROP TRIGGER IF EXISTS media_dictation_attempts_enforce_segment ON public.media_dictation_attempts;
+CREATE TRIGGER media_dictation_attempts_enforce_segment
+  BEFORE INSERT OR UPDATE OF segment_id, transcript_version_id, lesson_id, user_id ON public.media_dictation_attempts
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.enforce_media_attempt_segment_reference();
 
 -- Privileges: revoke all execution rights on internal schema functions from public/authenticated/anon
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA omni_internal FROM PUBLIC, anon, authenticated;

@@ -7,6 +7,7 @@ import {
   MediaTranscriptSegmentSchema,
   ShadowingAttemptSchema,
   DictationAttemptSchema,
+  WordDiffTokenSchema,
   MediaResumeStateSchema,
 } from '../../types/media';
 
@@ -118,6 +119,23 @@ describe('Media Domain Contracts and Zod Schemas', () => {
         shadowingScore: 85,
       })
     ).toThrow();
+
+    // Zero duration or inverted bounds must be rejected
+    expect(() =>
+      MediaTranscriptSegmentSchema.parse({
+        ...validSegment,
+        startMs: 1000,
+        endMs: 1000,
+      })
+    ).toThrow();
+
+    expect(() =>
+      MediaTranscriptSegmentSchema.parse({
+        ...validSegment,
+        startMs: 2000,
+        endMs: 1000,
+      })
+    ).toThrow();
   });
 
   it('validates immutable MediaTranscriptVersion and enforces coverage ratio bounds', () => {
@@ -198,6 +216,103 @@ describe('Media Domain Contracts and Zod Schemas', () => {
       createdAt: '2026-09-04T00:00:00.000Z',
     };
     expect(DictationAttemptSchema.parse(validDictation)).toEqual(validDictation);
+  });
+
+  it('enforces strict schema on WordDiffTokenSchema rejecting unknown keys', () => {
+    const validToken = {
+      expected: 'sustainability',
+      user: 'sustainibility',
+      status: 'incorrect' as const,
+    };
+    expect(WordDiffTokenSchema.parse(validToken)).toEqual(validToken);
+
+    expect(() =>
+      WordDiffTokenSchema.parse({
+        ...validToken,
+        unknownKey: 'malicious',
+      })
+    ).toThrow();
+  });
+
+  it('enforces leaf limits and status handling on WordDiffTokenSchema', () => {
+    // Valid extra word with empty expected
+    const extraToken = {
+      expected: '',
+      user: 'extraWord',
+      status: 'extra' as const,
+    };
+    expect(WordDiffTokenSchema.parse(extraToken)).toEqual(extraToken);
+
+    // Empty expected on non-extra must throw
+    expect(() =>
+      WordDiffTokenSchema.parse({
+        expected: '',
+        user: 'word',
+        status: 'correct' as const,
+      })
+    ).toThrow();
+
+    // Leaf text exceeding 200 chars must throw
+    expect(() =>
+      WordDiffTokenSchema.parse({
+        expected: 'a'.repeat(201),
+        status: 'missing' as const,
+      })
+    ).toThrow();
+
+    expect(() =>
+      WordDiffTokenSchema.parse({
+        expected: 'valid',
+        user: 'b'.repeat(201),
+        status: 'incorrect' as const,
+      })
+    ).toThrow();
+  });
+
+  it('enforces expectedText bounds and diffTokens array bounds on DictationAttemptSchema', () => {
+    const validDictation = {
+      id: '550e8400-e29b-41d4-a716-446655440003',
+      lessonId: '550e8400-e29b-41d4-a716-446655440000',
+      segmentId: 'seg_a1b2c3d4e5f6',
+      transcriptVersionId: '550e8400-e29b-41d4-a716-446655440001',
+      userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      mode: 'full_sentence' as const,
+      difficulty: 'medium' as const,
+      userResponseText: 'Good morning.',
+      expectedText: 'Good morning.',
+      accuracyScore: 100,
+      diffTokens: [{ expected: 'Good', user: 'Good', status: 'correct' as const }],
+      mistakeIds: [],
+      createdAt: '2026-09-04T00:00:00.000Z',
+    };
+
+    // Empty expectedText must throw
+    expect(() =>
+      DictationAttemptSchema.parse({
+        ...validDictation,
+        expectedText: '',
+      })
+    ).toThrow();
+
+    // expectedText > 2000 chars must throw
+    expect(() =>
+      DictationAttemptSchema.parse({
+        ...validDictation,
+        expectedText: 'a'.repeat(2001),
+      })
+    ).toThrow();
+
+    // diffTokens > 500 must throw
+    const tooManyTokens = Array.from({ length: 501 }, () => ({
+      expected: 'word',
+      status: 'correct' as const,
+    }));
+    expect(() =>
+      DictationAttemptSchema.parse({
+        ...validDictation,
+        diffTokens: tooManyTokens,
+      })
+    ).toThrow();
   });
 
   it('validates MediaResumeState with speed and loop bounds', () => {

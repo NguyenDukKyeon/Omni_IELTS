@@ -124,6 +124,29 @@ describe('P04 Media Learning Room Database Schema and RLS Policies', () => {
     expect(sql).toContain("'requires_original_audio'");
   });
 
+  it('enforces database attempt segment reference triggers inside omni_internal with non-disclosing error', () => {
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toContain('FUNCTION omni_internal.enforce_media_attempt_segment_reference');
+    expect(sql).not.toContain('FUNCTION public.enforce_media_attempt_segment_reference');
+    expect(sql).toContain('media_shadowing_attempts_enforce_segment');
+    expect(sql).toContain('media_dictation_attempts_enforce_segment');
+    expect(sql).toContain('Invalid segment reference');
+    expect(sql).toContain("TG_TABLE_SCHEMA <> 'public'");
+    expect(sql).toContain("media_shadowing_attempts");
+    expect(sql).toContain("media_dictation_attempts");
+    expect(sql).toContain("SET search_path = public, omni_internal, pg_temp");
+  });
+
+  it('enforces dictation diff tokens structural validator and expected_text bounds in database schema', () => {
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toContain('FUNCTION public.validate_media_dictation_diff_tokens');
+    expect(sql).toContain('dictation_expected_text_valid');
+    expect(sql).toContain('dictation_diff_tokens_schema_valid');
+    expect(sql).toContain('length(expected_text) >= 1');
+    expect(sql).toContain('length(expected_text) <= 2000');
+    expect(sql).toContain('public.is_clean_media_text(expected_text)');
+  });
+
   it('models multi-tenant isolation: User B cannot attach attempts to User A lesson/version', () => {
     const stolenAttempt: AttemptRow = {
       id: 'att-stolen',
