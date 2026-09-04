@@ -80,25 +80,40 @@ describe('P04 Media Learning Room Database Schema and RLS Policies', () => {
     // Database-owned cascade tracking in private schema
     expect(sql).toContain('omni_internal.active_deleting_media_lessons');
     expect(sql).toContain('REVOKE ALL ON SCHEMA omni_internal FROM PUBLIC, anon, authenticated;');
+    expect(sql).toContain('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA omni_internal FROM PUBLIC, anon, authenticated;');
+    // Functions must be in omni_internal, NOT in public
+    expect(sql).toContain('FUNCTION omni_internal.prevent_media_transcript_version_mutation');
+    expect(sql).toContain('FUNCTION omni_internal.mark_media_lesson_cascade_delete');
+    expect(sql).toContain('FUNCTION omni_internal.clear_media_lesson_cascade_delete');
+    expect(sql).not.toContain('FUNCTION public.prevent_media_transcript_version_mutation');
+    expect(sql).not.toContain('FUNCTION public.mark_media_lesson_cascade_delete');
+    expect(sql).not.toContain('FUNCTION public.clear_media_lesson_cascade_delete');
     expect(sql).toContain('BEFORE UPDATE OR DELETE ON public.media_transcript_versions');
     expect(sql).toContain('BEFORE DELETE ON public.media_lessons');
     expect(sql).toContain('AFTER DELETE ON public.media_lessons');
   });
 
-  it('enforces provenance ownership triggers on media_lessons', () => {
+  it('enforces provenance ownership triggers on media_lessons inside omni_internal with context guard', () => {
     const sql = readFileSync(migrationPath, 'utf8');
-    expect(sql).toContain('enforce_media_lesson_provenance');
+    expect(sql).toContain('FUNCTION omni_internal.enforce_media_lesson_provenance');
+    expect(sql).not.toContain('FUNCTION public.enforce_media_lesson_provenance');
     expect(sql).toContain('media_lessons_enforce_provenance');
     expect(sql).toContain('Invalid source reference');
     expect(sql).toContain('Invalid version reference');
+    expect(sql).toContain("TG_TABLE_SCHEMA <> 'public'");
+    expect(sql).toContain("TG_TABLE_NAME <> 'media_lessons'");
   });
 
   it('enforces check constraints against raw audio binary and base64 across tables and urls', () => {
     const sql = readFileSync(migrationPath, 'utf8');
     expect(sql).toContain('media_lessons_media_url_no_raw_audio');
     expect(sql).toContain('shadowing_evaluation_schema_valid');
-    expect(sql).toMatch(/data:audio\//);
-    expect(sql).toMatch(/base64/);
+    expect(sql).toContain('validate_shadowing_evaluation');
+    expect(sql).toMatch(/\^https\?:/);
+    expect(sql).toMatch(/UklGR/);
+    expect(sql).toMatch(/GkXf/);
+    expect(sql).toMatch(/SUQz/);
+    expect(sql).toMatch(/T2dn/);
   });
 
   it('enforces complete state machine processing states including needs_review and requires_original_audio in check constraint', () => {

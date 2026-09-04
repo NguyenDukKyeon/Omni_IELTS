@@ -875,6 +875,354 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   }
   details.push('PASS: Proof 35: Parent cascade delete cleanly removes owned versions, attempts, and resume state without affecting other tenants');
 
+  // --- PROOFS 36-43: Trigger Hijacking Prevention and Deep Raw-Audio Privacy ---
+  const lessonSecProofId = 'a2000000-0000-4000-8000-000000000001';
+  const versionSecProofId = 'a2000000-0000-4000-8000-000000000002';
+
+  // Seed Lesson & Version for Proofs 36-43
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, duration_ms, processing_state)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [lessonSecProofId, USER_A_ID, 'Lesson For Security Proofs', 'youtube', 'https://youtube.com/watch?v=proofs36to43', 30000, 'ready']
+  );
+  await client.query(
+    `INSERT INTO public.media_transcript_versions (id, lesson_id, user_id, version_number, stage, content_hash)
+     VALUES ($1, $2, $3, $4, $5, $6);`,
+    [versionSecProofId, lessonSecProofId, USER_A_ID, 1, 'raw_caption', 'hash_proof_36']
+  );
+  await client.query('COMMIT;');
+
+  // Proof 36: User A attempts temp table trigger hijacking with mark_media_lesson_cascade_delete
+  let triggerHijackBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`CREATE TEMP TABLE temp_spoof_cascade (id UUID);`);
+    await client.query(`
+      CREATE TRIGGER trg_hijack
+      BEFORE DELETE ON temp_spoof_cascade
+      FOR EACH ROW
+      EXECUTE FUNCTION omni_internal.mark_media_lesson_cascade_delete();
+    `);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501') triggerHijackBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  // Also verify that version remained intact
+  const versionSecCheck = await client.query(
+    `SELECT COUNT(*) FROM public.media_transcript_versions WHERE id = $1;`,
+    [versionSecProofId]
+  );
+  if (!triggerHijackBlocked || Number(versionSecCheck.rows[0].count) !== 1) {
+    throw new Error('SECURITY_VIOLATION: Attaching omni_internal trigger to temp table was not blocked with 42501 permission denied!');
+  }
+  details.push('PASS: Proof 36: Temp table trigger hijacking attempt is strictly rejected with 42501 permission denied; transcript versions remain intact');
+
+  // Proof 37: Upper-case and lower-case data URIs in media_url are rejected
+  let uppercaseDataUriBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, $2, $3, $4);`,
+      [USER_A_ID, 'Malicious Uppercase Data URI', 'audio', 'DATA:AUDIO/WEBM;BASE64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') uppercaseDataUriBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  let lowercaseDataUriBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, $2, $3, $4);`,
+      [USER_A_ID, 'Malicious Lowercase Data URI', 'audio', 'data:audio/wav;base64,UklGRiQAAABXQVZF']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') lowercaseDataUriBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  if (!uppercaseDataUriBlocked || !lowercaseDataUriBlocked) {
+    throw new Error('Privacy constraint violation: Data URIs in media_url were not blocked by CHECK constraint!');
+  }
+  details.push('PASS: Proof 37: Upper-case and lower-case data URIs in media_url are strictly rejected by CHECK constraint');
+
+  // Proof 38: Bare WAV/WebM base64 signatures in media_url are rejected
+  let bareWavUrlBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, $2, $3, $4);`,
+      [USER_A_ID, 'Bare WAV Base64', 'audio', 'UklGRiQAAABXQVZFZmt0']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') bareWavUrlBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  let bareWebmUrlBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, $2, $3, $4);`,
+      [USER_A_ID, 'Bare WebM Base64', 'audio', 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') bareWebmUrlBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  if (!bareWavUrlBlocked || !bareWebmUrlBlocked) {
+    throw new Error('Privacy constraint violation: Bare audio base64 signatures in media_url were not blocked!');
+  }
+  details.push('PASS: Proof 38: Bare WAV/WebM audio base64 signatures in media_url are strictly rejected by CHECK constraint');
+
+  // Proof 39: Bare base64 in user_response_text is rejected
+  let bareBase64DictationBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+      [lessonSecProofId, 'seg_1', versionSecProofId, USER_A_ID, 'full_sentence', 'easy', 'UklGRiQAAABXQVZFZmt0AAAACQAA', 'Hello', 0]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') bareBase64DictationBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!bareBase64DictationBlocked) {
+    throw new Error('Privacy constraint violation: Bare base64 audio payload in user_response_text was not blocked!');
+  }
+  details.push('PASS: Proof 39: Bare base64 audio tokens in user_response_text are strictly rejected by CHECK constraint');
+
+  // Proof 40: Reject bare base64 in evaluation.feedbackVi
+  let bareBase64FeedbackBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 80,
+          fluencyScore: 80,
+          intonationScore: 80,
+          accuracyScore: 80,
+          feedbackVi: 'UklGRiQAAABXQVZFZmt0AAAACQAA',
+          swallowedWords: [],
+          stressHighlights: [],
+          acousticStatus: 'measured',
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') bareBase64FeedbackBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!bareBase64FeedbackBlocked) {
+    throw new Error('Privacy constraint violation: Bare base64 audio in evaluation feedbackVi was not blocked!');
+  }
+  details.push('PASS: Proof 40: Bare base64 audio tokens in evaluation feedbackVi are strictly rejected by structural CHECK validator');
+
+  // Proof 41: Reject evaluation with valid keys but invalid types or score ranges
+  let invalidScoreRangeBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 150, // Invalid range (>100)
+          fluencyScore: 80,
+          intonationScore: 80,
+          accuracyScore: 80,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [],
+          acousticStatus: 'measured',
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') invalidScoreRangeBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  let invalidScoreTypeBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: '80', // Invalid type (string)
+          fluencyScore: 80,
+          intonationScore: 80,
+          accuracyScore: 80,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [],
+          acousticStatus: 'measured',
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') invalidScoreTypeBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+
+  if (!invalidScoreRangeBlocked || !invalidScoreTypeBlocked) {
+    throw new Error('Privacy constraint violation: Invalid evaluation score range or type was not blocked!');
+  }
+  details.push('PASS: Proof 41: Evaluations with invalid score ranges or invalid types are strictly rejected by structural CHECK validator');
+
+  // Proof 42: Reject unknown evaluation keys
+  let unknownEvaluationKeyBlocked42 = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 85,
+          fluencyScore: 85,
+          intonationScore: 85,
+          accuracyScore: 85,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [],
+          acousticStatus: 'measured',
+          rawAudioBlob: 'malicious_extra_field',
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') unknownEvaluationKeyBlocked42 = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!unknownEvaluationKeyBlocked42) {
+    throw new Error('Privacy constraint violation: Unknown evaluation key rawAudioBlob was not blocked!');
+  }
+  details.push('PASS: Proof 42: Evaluations with unknown keys are strictly rejected by structural CHECK validator');
+
+  // Proof 43: Accept one valid, fully typed, bounded evaluation object with Vietnamese feedback
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const validInsertRes = await client.query(
+    `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, evaluation;`,
+    [
+      lessonSecProofId,
+      'seg_1',
+      versionSecProofId,
+      USER_A_ID,
+      4500,
+      'measured',
+      JSON.stringify({
+        overallScore: 92,
+        fluencyScore: 90,
+        intonationScore: 94,
+        accuracyScore: 91,
+        feedbackVi: 'Phát âm rất chuẩn và ngữ điệu tự nhiên, cần duy trì tốc độ nói này.',
+        swallowedWords: ['to'],
+        stressHighlights: [
+          { word: 'natural', isCorrect: true, tip: 'Nhấn đúng trọng âm 1' },
+        ],
+        actionableAdviceVi: 'Tiếp tục luyện tập các câu ghép phức tạp hơn.',
+        acousticStatus: 'measured',
+        telemetry: {
+          rawWpm: 125,
+          fillerCount: 0,
+        },
+      }),
+    ]
+  );
+  await client.query('COMMIT;');
+
+  if (!validInsertRes.rows[0]?.id || validInsertRes.rows[0].evaluation.overallScore !== 92) {
+    throw new Error('Privacy constraint error: Valid typed evaluation object failed to insert!');
+  }
+  details.push('PASS: Proof 43: Fully typed, bounded evaluation object with Vietnamese feedback is accepted and verified');
+
   return details;
 }
 
@@ -885,11 +1233,12 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
   // 1. Verify migration SQL structure and trigger rules
   const sql = MIGRATION_PATHS.map((migrationPath) => readFileSync(migrationPath, 'utf8')).join('\n');
   if (
-    !sql.includes('prevent_media_transcript_version_mutation') ||
+    !sql.includes('omni_internal.prevent_media_transcript_version_mutation') ||
     !sql.includes('omni_internal.active_deleting_media_lessons') ||
-    !sql.includes('enforce_media_lesson_provenance') ||
+    !sql.includes('omni_internal.enforce_media_lesson_provenance') ||
     !sql.includes('shadowing_evaluation_schema_valid') ||
     !sql.includes('media_lessons_media_url_no_raw_audio') ||
+    !sql.includes('validate_shadowing_evaluation') ||
     sql.includes('omni.active_deleting_media_lesson_id')
   ) {
     details.push('FAIL: Migration SQL is missing required append-only, non-spoofable cascade, or provenance controls');
@@ -959,7 +1308,7 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
       status: 'passed',
       details: [
         ...details,
-        'PASS: All 35 Media RLS proof contracts verified against live disposable database',
+        'PASS: All 43 Media RLS proof contracts verified against live disposable database',
       ],
     };
   } catch (err: unknown) {

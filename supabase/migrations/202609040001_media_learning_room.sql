@@ -38,8 +38,11 @@ CREATE TABLE IF NOT EXISTS public.media_lessons (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT media_lessons_media_url_no_raw_audio CHECK (
-    NOT (lower(media_url) LIKE 'data:%') AND
-    NOT (lower(media_url) LIKE '%base64%')
+    media_url ~ '^https?://[^\s]+$' AND
+    length(media_url) BETWEEN 10 AND 2048 AND
+    media_url !~* 'data:' AND
+    media_url !~* 'base64' AND
+    media_url !~ '(UklGR|GkXf|SUQz|T2dn)'
   )
 );
 
@@ -64,6 +67,162 @@ CREATE TABLE IF NOT EXISTS public.media_transcript_versions (
   )
 );
 
+-- Pure immutable validator for shadowing evaluation payload matching ShadowingEvaluation contract
+CREATE OR REPLACE FUNCTION public.validate_shadowing_evaluation(evaluation JSONB)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_text TEXT;
+  v_item JSONB;
+BEGIN
+  IF evaluation IS NULL THEN
+    RETURN true;
+  END IF;
+
+  IF jsonb_typeof(evaluation) <> 'object' THEN
+    RETURN false;
+  END IF;
+
+  -- 1. Required keys present
+  IF NOT (evaluation ?& ARRAY[
+    'overallScore',
+    'fluencyScore',
+    'intonationScore',
+    'accuracyScore',
+    'feedbackVi',
+    'swallowedWords',
+    'stressHighlights',
+    'acousticStatus'
+  ]) THEN
+    RETURN false;
+  END IF;
+
+  -- 2. No unknown keys allowed
+  IF (evaluation - ARRAY[
+    'overallScore',
+    'fluencyScore',
+    'intonationScore',
+    'accuracyScore',
+    'feedbackVi',
+    'swallowedWords',
+    'stressHighlights',
+    'actionableAdviceVi',
+    'acousticStatus',
+    'telemetry'
+  ]) <> '{}'::jsonb THEN
+    RETURN false;
+  END IF;
+
+  -- 3. Validate numeric scores (0 to 100)
+  IF jsonb_typeof(evaluation->'overallScore') <> 'number' OR
+     jsonb_typeof(evaluation->'fluencyScore') <> 'number' OR
+     jsonb_typeof(evaluation->'intonationScore') <> 'number' OR
+     jsonb_typeof(evaluation->'accuracyScore') <> 'number' THEN
+    RETURN false;
+  END IF;
+
+  IF (evaluation->>'overallScore')::numeric < 0 OR (evaluation->>'overallScore')::numeric > 100 OR
+     (evaluation->>'fluencyScore')::numeric < 0 OR (evaluation->>'fluencyScore')::numeric > 100 OR
+     (evaluation->>'intonationScore')::numeric < 0 OR (evaluation->>'intonationScore')::numeric > 100 OR
+     (evaluation->>'accuracyScore')::numeric < 0 OR (evaluation->>'accuracyScore')::numeric > 100 THEN
+    RETURN false;
+  END IF;
+
+  -- 4. Validate feedbackVi string
+  IF jsonb_typeof(evaluation->'feedbackVi') <> 'string' THEN
+    RETURN false;
+  END IF;
+
+  v_text := evaluation->>'feedbackVi';
+  IF length(v_text) < 1 OR length(v_text) > 4000 THEN
+    RETURN false;
+  END IF;
+
+  -- Privacy checks on feedbackVi: reject data URIs, base64 keywords, audio signatures, or base64 tokens >= 40 chars
+  IF v_text ~* 'data:' OR
+     v_text ~* 'base64' OR
+     v_text ~ '(UklGR|GkXf|SUQz|T2dn)' OR
+     v_text ~ '[A-Za-z0-9+/=]{40,}' THEN
+    RETURN false;
+  END IF;
+
+  -- 5. Validate acousticStatus
+  IF jsonb_typeof(evaluation->'acousticStatus') <> 'string' OR
+     (evaluation->>'acousticStatus') NOT IN ('measured', 'unavailable') THEN
+    RETURN false;
+  END IF;
+
+  -- 6. Validate swallowedWords array
+  IF jsonb_typeof(evaluation->'swallowedWords') <> 'array' OR
+     jsonb_array_length(evaluation->'swallowedWords') > 50 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(evaluation->'swallowedWords') LOOP
+    IF jsonb_typeof(v_item) <> 'string' OR length(v_item#>>'{}') < 1 OR length(v_item#>>'{}') > 200 THEN
+      RETURN false;
+    END IF;
+  END LOOP;
+
+  -- 7. Validate stressHighlights array
+  IF jsonb_typeof(evaluation->'stressHighlights') <> 'array' OR
+     jsonb_array_length(evaluation->'stressHighlights') > 50 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(evaluation->'stressHighlights') LOOP
+    IF jsonb_typeof(v_item) <> 'object' OR
+       jsonb_typeof(v_item->'word') <> 'string' OR
+       length(v_item->>'word') < 1 OR
+       length(v_item->>'word') > 200 OR
+       jsonb_typeof(v_item->'isCorrect') <> 'boolean' THEN
+      RETURN false;
+    END IF;
+    IF v_item ? 'tip' AND (jsonb_typeof(v_item->'tip') <> 'string' OR length(v_item->>'tip') > 1000) THEN
+      RETURN false;
+    END IF;
+  END LOOP;
+
+  -- 8. Optional actionableAdviceVi
+  IF evaluation ? 'actionableAdviceVi' THEN
+    IF jsonb_typeof(evaluation->'actionableAdviceVi') <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_text := evaluation->>'actionableAdviceVi';
+    IF length(v_text) > 4000 OR
+       v_text ~* 'data:' OR
+       v_text ~* 'base64' OR
+       v_text ~ '(UklGR|GkXf|SUQz|T2dn)' OR
+       v_text ~ '[A-Za-z0-9+/=]{40,}' THEN
+      RETURN false;
+    END IF;
+  END IF;
+
+  -- 9. Optional telemetry
+  IF evaluation ? 'telemetry' THEN
+    IF jsonb_typeof(evaluation->'telemetry') <> 'object' THEN
+      RETURN false;
+    END IF;
+  END IF;
+
+  -- 10. Global text inspection on full evaluation JSON
+  v_text := evaluation::text;
+  IF v_text ~* 'data:audio/' OR
+     v_text ~* 'base64' OR
+     v_text ~ '(UklGR|GkXf|SUQz|T2dn)' OR
+     v_text ~ '[A-Za-z0-9+/=]{60,}' THEN
+    RETURN false;
+  END IF;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.validate_shadowing_evaluation(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_shadowing_evaluation(JSONB) TO authenticated, anon;
+
 -- 3. Media Shadowing Attempts
 CREATE TABLE IF NOT EXISTS public.media_shadowing_attempts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -76,13 +235,7 @@ CREATE TABLE IF NOT EXISTS public.media_shadowing_attempts (
   evaluation JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT shadowing_evaluation_schema_valid CHECK (
-    evaluation IS NULL OR (
-      jsonb_typeof(evaluation) = 'object'
-      AND (evaluation ?& ARRAY['overallScore', 'fluencyScore', 'intonationScore', 'accuracyScore', 'feedbackVi', 'swallowedWords', 'stressHighlights', 'acousticStatus'])
-      AND ((evaluation - ARRAY['overallScore', 'fluencyScore', 'intonationScore', 'accuracyScore', 'feedbackVi', 'swallowedWords', 'stressHighlights', 'actionableAdviceVi', 'acousticStatus', 'telemetry']) = '{}'::jsonb)
-      AND NOT (lower(evaluation::text) LIKE '%data:audio/%')
-      AND NOT (lower(evaluation::text) LIKE '%base64%')
-    )
+    public.validate_shadowing_evaluation(evaluation)
   )
 );
 
@@ -102,8 +255,11 @@ CREATE TABLE IF NOT EXISTS public.media_dictation_attempts (
   mistake_ids UUID[] NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT dictation_no_raw_audio CHECK (
-    NOT (lower(user_response_text) LIKE 'data:%') AND
-    NOT (lower(user_response_text) LIKE '%base64%')
+    length(user_response_text) <= 2000 AND
+    user_response_text !~* 'data:' AND
+    user_response_text !~* 'base64' AND
+    user_response_text !~ '(UklGR|GkXf|SUQz|T2dn)' AND
+    user_response_text !~ '[A-Za-z0-9+/=]{60,}'
   )
 );
 
@@ -127,17 +283,21 @@ CREATE INDEX IF NOT EXISTS idx_media_versions_lesson ON public.media_transcript_
 CREATE INDEX IF NOT EXISTS idx_media_shadowing_user ON public.media_shadowing_attempts(user_id, lesson_id);
 CREATE INDEX IF NOT EXISTS idx_media_dictation_user ON public.media_dictation_attempts(user_id, lesson_id);
 
--- Enforce Provenance Ownership and Cross-Row Constraints on media_lessons
-CREATE OR REPLACE FUNCTION public.enforce_media_lesson_provenance()
+-- Enforce Provenance Ownership and Cross-Row Constraints on media_lessons (stored in private omni_internal schema)
+CREATE OR REPLACE FUNCTION omni_internal.enforce_media_lesson_provenance()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = public, omni_internal, pg_temp
 AS $$
 DECLARE
   v_auth_uid UUID := auth.uid();
   v_owner_id UUID;
 BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_lessons' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
   IF v_auth_uid IS NOT NULL AND NEW.user_id <> v_auth_uid THEN
     RAISE EXCEPTION 'Invalid user ownership' USING ERRCODE = '42501';
   END IF;
@@ -190,17 +350,21 @@ DROP TRIGGER IF EXISTS media_lessons_enforce_provenance ON public.media_lessons;
 CREATE TRIGGER media_lessons_enforce_provenance
   BEFORE INSERT OR UPDATE OF user_id, source_record_id, source_version_id, current_version_id ON public.media_lessons
   FOR EACH ROW
-  EXECUTE FUNCTION public.enforce_media_lesson_provenance();
+  EXECUTE FUNCTION omni_internal.enforce_media_lesson_provenance();
 
 -- Append-only trigger for media_transcript_versions: blocks direct UPDATE/DELETE
 -- Allows parent cascade delete ONLY via database-owned non-spoofable transaction tracking table in omni_internal schema.
-CREATE OR REPLACE FUNCTION public.prevent_media_transcript_version_mutation()
+CREATE OR REPLACE FUNCTION omni_internal.prevent_media_transcript_version_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, omni_internal, pg_temp
 AS $$
 BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_transcript_versions' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
   IF TG_OP = 'UPDATE' THEN
     RAISE EXCEPTION 'media_transcript_versions are append-only; update forbidden'
       USING ERRCODE = '42501';
@@ -225,15 +389,19 @@ DROP TRIGGER IF EXISTS media_transcript_versions_append_only ON public.media_tra
 CREATE TRIGGER media_transcript_versions_append_only
   BEFORE UPDATE OR DELETE ON public.media_transcript_versions
   FOR EACH ROW
-  EXECUTE FUNCTION public.prevent_media_transcript_version_mutation();
+  EXECUTE FUNCTION omni_internal.prevent_media_transcript_version_mutation();
 
-CREATE OR REPLACE FUNCTION public.mark_media_lesson_cascade_delete()
+CREATE OR REPLACE FUNCTION omni_internal.mark_media_lesson_cascade_delete()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, omni_internal, pg_temp
 AS $$
 BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_lessons' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
   INSERT INTO omni_internal.active_deleting_media_lessons (lesson_id, tx_id)
   VALUES (OLD.id, pg_current_xact_id())
   ON CONFLICT DO NOTHING;
@@ -241,13 +409,17 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.clear_media_lesson_cascade_delete()
+CREATE OR REPLACE FUNCTION omni_internal.clear_media_lesson_cascade_delete()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, omni_internal, pg_temp
 AS $$
 BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_lessons' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
   DELETE FROM omni_internal.active_deleting_media_lessons
   WHERE lesson_id = OLD.id AND tx_id = pg_current_xact_id();
   RETURN OLD;
@@ -258,13 +430,16 @@ DROP TRIGGER IF EXISTS media_lessons_before_cascade ON public.media_lessons;
 CREATE TRIGGER media_lessons_before_cascade
   BEFORE DELETE ON public.media_lessons
   FOR EACH ROW
-  EXECUTE FUNCTION public.mark_media_lesson_cascade_delete();
+  EXECUTE FUNCTION omni_internal.mark_media_lesson_cascade_delete();
 
 DROP TRIGGER IF EXISTS media_lessons_after_cascade ON public.media_lessons;
 CREATE TRIGGER media_lessons_after_cascade
   AFTER DELETE ON public.media_lessons
   FOR EACH ROW
-  EXECUTE FUNCTION public.clear_media_lesson_cascade_delete();
+  EXECUTE FUNCTION omni_internal.clear_media_lesson_cascade_delete();
+
+-- Privileges: revoke all execution rights on internal schema functions from public/authenticated/anon
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA omni_internal FROM PUBLIC, anon, authenticated;
 
 -- Row Level Security (RLS) Enforcement
 ALTER TABLE public.media_lessons ENABLE ROW LEVEL SECURITY;
