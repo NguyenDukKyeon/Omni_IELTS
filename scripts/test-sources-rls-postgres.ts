@@ -213,6 +213,8 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     END $$;
   `);
   await client.query(`GRANT USAGE ON SCHEMA public TO authenticated, anon;`);
+  await client.query(`GRANT USAGE ON SCHEMA auth TO authenticated, anon;`);
+  await client.query(`GRANT ALL ON ALL ROUTINES IN SCHEMA auth TO authenticated, anon;`);
   await client.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;`);
   await client.query(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;`);
   await client.query(`GRANT ALL ON ALL ROUTINES IN SCHEMA public TO authenticated;`);
@@ -280,7 +282,35 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   if (!crossUserEditBlocked) {
     throw new Error('Policy violation: User B was able to call append_source_edited_version for User A source!');
   }
-  details.push('PASS: Proof 8: User B cannot append an edited version for User A source');
+
+  // Non-disclosing check: Calling append_source_edited_version for a non-existent (missing) source returns identical VERSION_CONFLICT
+  let missingSourceBlockedNonDisclosing = false;
+  const missingRecordId = '00000000-0000-4000-8000-000000000099';
+  const missingVersionId = '00000000-0000-4000-8000-000000000098';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [missingRecordId, missingVersionId, 'Missing source edit attempt.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) missingSourceBlockedNonDisclosing = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!missingSourceBlockedNonDisclosing) {
+    throw new Error('Policy violation: Missing source edit did not return non-disclosing VERSION_CONFLICT!');
+  }
+
+  // Verify User A's source record and current_version_id remain untampered by User B
+  const recordAState = await client.query(`SELECT current_version_id FROM public.source_records WHERE id = $1;`, [recordAId]);
+  if (recordAState.rows[0]?.current_version_id !== versionAId) {
+    throw new Error('Policy violation: User A current_version_id tampered after User B rejected call');
+  }
+  details.push('PASS: Proof 8: User B cannot append an edited version for User A source (foreign and missing requests are non-disclosing)');
 
   // Proof 9: User A gets a server-derived v2 while v1 remains unchanged.
   let editedVersionRows: any[] = [];
@@ -302,7 +332,7 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   }
   details.push('PASS: Proof 9: User A append creates server-derived edited v2 and preserves v1');
 
-  // Proof 10: A stale base version is rejected after currentVersionId advanced.
+  // Proof 10: A stale or forged base version is rejected; version number and currentVersionId cannot be forged or skipped.
   let staleEditBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -321,7 +351,27 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   if (!staleEditBlocked) {
     throw new Error('Optimistic version conflict was not enforced for stale source edit');
   }
-  details.push('PASS: Proof 10: Stale source edit returns VERSION_CONFLICT without overwrite');
+
+  let forgedBaseEditBlocked = false;
+  const forgedBaseVersionId = 'a0000000-0000-4000-8000-999999999999';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [recordAId, forgedBaseVersionId, 'Forged base version must not skip versions.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) forgedBaseEditBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!forgedBaseEditBlocked) {
+    throw new Error('Version conflict was not enforced for forged/skipped base version');
+  }
+  details.push('PASS: Proof 10: Stale or forged base version returns VERSION_CONFLICT without overwrite');
 
   // Proof 1: User B cannot select User A source (returns 0 rows)
   await client.query('BEGIN;');

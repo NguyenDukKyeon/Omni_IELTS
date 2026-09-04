@@ -152,6 +152,52 @@ describe('P03 source_versions RLS and immutability', () => {
     expect(editSql).toContain('GRANT EXECUTE ON FUNCTION public.append_source_edited_version');
     expect(editSql).not.toMatch(/p_content_hash|p_blocks|p_stage|p_version_number/i);
   });
+
+  it('enforces non-disclosing VERSION_CONFLICT on foreign or missing source records and forged base versions', () => {
+    function appendSourceEditedVersionModel(
+      caller: Actor,
+      sourceId: string,
+      baseVersionId: string,
+      recordsList: (RecordRow & { current_version_id: string; processing_state: string })[],
+      versionsList: VersionRow[]
+    ) {
+      const record = recordsList.find(
+        (r) => r.id === sourceId && r.user_id === caller.id && r.processing_state === 'ready'
+      );
+      if (!record || record.current_version_id !== baseVersionId) {
+        throw new Error('P0001: VERSION_CONFLICT');
+      }
+      const baseVer = versionsList.find(
+        (v) => v.id === baseVersionId && v.source_id === sourceId && v.user_id === caller.id
+      );
+      if (!baseVer) {
+        throw new Error('P0001: VERSION_CONFLICT');
+      }
+      return { ok: true, nextVersionNumber: 2 };
+    }
+
+    const testRecords = [
+      { id: 's-alice', user_id: alice.id, current_version_id: 'v1', processing_state: 'ready' },
+    ];
+    const testVersions = [
+      { id: 'v1', source_id: 's-alice', user_id: alice.id, version_number: 1 },
+    ];
+
+    // User A valid call succeeds
+    expect(appendSourceEditedVersionModel(alice, 's-alice', 'v1', testRecords, testVersions).ok).toBe(true);
+
+    // User B calling for User A source fails with VERSION_CONFLICT (non-disclosing)
+    expect(() => appendSourceEditedVersionModel(bob, 's-alice', 'v1', testRecords, testVersions))
+      .toThrow('P0001: VERSION_CONFLICT');
+
+    // Missing source fails with identical VERSION_CONFLICT (cannot infer existence)
+    expect(() => appendSourceEditedVersionModel(bob, 's-missing', 'v1', testRecords, testVersions))
+      .toThrow('P0001: VERSION_CONFLICT');
+
+    // Forged or stale base version fails with VERSION_CONFLICT (cannot skip/forge version)
+    expect(() => appendSourceEditedVersionModel(alice, 's-alice', 'v-forged', testRecords, testVersions))
+      .toThrow('P0001: VERSION_CONFLICT');
+  });
 });
 
 describe('Disposable DB RLS runner safety and contracts', () => {
