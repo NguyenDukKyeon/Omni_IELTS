@@ -111,44 +111,52 @@ export type MediaTranscriptVersion = z.infer<typeof MediaTranscriptVersionSchema
 export const AcousticStatusSchema = z.enum(['measured', 'unavailable']);
 export type AcousticStatus = z.infer<typeof AcousticStatusSchema>;
 
-export const SilentPauseSchema = z.object({
-  startMs: z.number().int().nonnegative(),
-  endMs: z.number().int().nonnegative(),
-  durationMs: z.number().int().nonnegative(),
-});
+export const SilentPauseSchema = z
+  .object({
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().nonnegative(),
+    durationMs: z.number().int().nonnegative(),
+  })
+  .strict();
 
-export const ShadowingTelemetrySchema = z.object({
-  rawWpm: z.number().nonnegative(),
-  articulationRate: z.number().nullable(),
-  fillerCount: z.number().int().nonnegative(),
-  fillerRatePer100Words: z.number().nonnegative(),
-  silentPauses: z.array(SilentPauseSchema),
-  averagePauseDurationMs: z.number().nullable(),
-  longPauseCount: z.number().int().nonnegative(),
-  speechRatio: z.number().min(0).max(1),
-  acousticStatus: AcousticStatusSchema,
-  vadVersion: z.string().min(1),
-});
+export const ShadowingTelemetrySchema = z
+  .object({
+    rawWpm: z.number().nonnegative(),
+    articulationRate: z.number().nullable(),
+    fillerCount: z.number().int().nonnegative(),
+    fillerRatePer100Words: z.number().nonnegative(),
+    silentPauses: z.array(SilentPauseSchema),
+    averagePauseDurationMs: z.number().nullable(),
+    longPauseCount: z.number().int().nonnegative(),
+    speechRatio: z.number().min(0).max(1),
+    acousticStatus: AcousticStatusSchema,
+    vadVersion: z.string().min(1),
+  })
+  .strict();
 export type ShadowingTelemetry = z.infer<typeof ShadowingTelemetrySchema>;
 
-export const StressHighlightSchema = z.object({
-  word: z.string().min(1),
-  isCorrect: z.boolean(),
-  tip: z.string().optional(),
-});
+export const StressHighlightSchema = z
+  .object({
+    word: z.string().min(1),
+    isCorrect: z.boolean(),
+    tip: z.string().optional(),
+  })
+  .strict();
 
-export const ShadowingEvaluationSchema = z.object({
-  overallScore: z.number().min(0).max(100),
-  fluencyScore: z.number().min(0).max(100),
-  intonationScore: z.number().min(0).max(100),
-  accuracyScore: z.number().min(0).max(100),
-  feedbackVi: z.string().min(1),
-  swallowedWords: z.array(z.string()),
-  stressHighlights: z.array(StressHighlightSchema),
-  actionableAdviceVi: z.string().optional(),
-  acousticStatus: AcousticStatusSchema,
-  telemetry: ShadowingTelemetrySchema.optional(),
-});
+export const ShadowingEvaluationSchema = z
+  .object({
+    overallScore: z.number().min(0).max(100),
+    fluencyScore: z.number().min(0).max(100),
+    intonationScore: z.number().min(0).max(100),
+    accuracyScore: z.number().min(0).max(100),
+    feedbackVi: z.string().min(1),
+    swallowedWords: z.array(z.string()),
+    stressHighlights: z.array(StressHighlightSchema),
+    actionableAdviceVi: z.string().optional(),
+    acousticStatus: AcousticStatusSchema,
+    telemetry: ShadowingTelemetrySchema.optional(),
+  })
+  .strict();
 export type ShadowingEvaluation = z.infer<typeof ShadowingEvaluationSchema>;
 
 export const ShadowingAttemptSchema = z.object({

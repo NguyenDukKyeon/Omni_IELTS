@@ -109,6 +109,8 @@ describe('P04 Media Learning Room Database Schema and RLS Policies', () => {
     expect(sql).toContain('media_lessons_media_url_no_raw_audio');
     expect(sql).toContain('shadowing_evaluation_schema_valid');
     expect(sql).toContain('validate_shadowing_evaluation');
+    expect(sql).toContain('validate_media_transcript_segments');
+    expect(sql).toContain('is_clean_media_text');
     expect(sql).toMatch(/\^https\?:/);
     expect(sql).toMatch(/UklGR/);
     expect(sql).toMatch(/GkXf/);

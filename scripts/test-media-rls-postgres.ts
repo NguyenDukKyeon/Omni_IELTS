@@ -1209,10 +1209,6 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
         ],
         actionableAdviceVi: 'Tiếp tục luyện tập các câu ghép phức tạp hơn.',
         acousticStatus: 'measured',
-        telemetry: {
-          rawWpm: 125,
-          fillerCount: 0,
-        },
       }),
     ]
   );
@@ -1222,6 +1218,294 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     throw new Error('Privacy constraint error: Valid typed evaluation object failed to insert!');
   }
   details.push('PASS: Proof 43: Fully typed, bounded evaluation object with Vietnamese feedback is accepted and verified');
+
+  // Proof 44: Chunked base64 under 60 chars in telemetry fields is rejected
+  let chunkedTelemetryBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 80,
+          fluencyScore: 80,
+          intonationScore: 80,
+          accuracyScore: 80,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [{ word: 'test', isCorrect: true }],
+          acousticStatus: 'measured',
+          telemetry: {
+            p1: 'QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD',
+            p2: 'QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD',
+          },
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') chunkedTelemetryBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!chunkedTelemetryBlocked) {
+    throw new Error('Privacy constraint violation: Chunked base64 under 60 chars in telemetry fields was not blocked!');
+  }
+  details.push('PASS: Proof 44: Chunked base64 under 60 chars in telemetry fields is strictly rejected by structural CHECK validator');
+
+  // Proof 45: Chunked base64 across multiple stressHighlights unknown/extra fields is rejected
+  let chunkedStressBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 80,
+          fluencyScore: 80,
+          intonationScore: 80,
+          accuracyScore: 80,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [
+            { word: 'natural', isCorrect: true, chunk1: 'QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD' },
+          ],
+          acousticStatus: 'measured',
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') chunkedStressBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!chunkedStressBlocked) {
+    throw new Error('Privacy constraint violation: Chunked base64 in stressHighlights extra fields was not blocked!');
+  }
+  details.push('PASS: Proof 45: Chunked base64 across stressHighlights unknown fields is strictly rejected by structural CHECK validator');
+
+  // Proof 46: Bare encoded payload in swallowedWords is rejected
+  let bareSwallowedWordsBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 80,
+          fluencyScore: 80,
+          intonationScore: 80,
+          accuracyScore: 80,
+          feedbackVi: 'Tốt',
+          swallowedWords: ['QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD'],
+          stressHighlights: [{ word: 'test', isCorrect: true }],
+          acousticStatus: 'measured',
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') bareSwallowedWordsBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!bareSwallowedWordsBlocked) {
+    throw new Error('Privacy constraint violation: Bare encoded payload in swallowedWords was not blocked!');
+  }
+  details.push('PASS: Proof 46: Bare encoded payload in swallowedWords is strictly rejected by structural CHECK validator');
+
+  // Proof 47: Bare encoded payload in transcript segment text is rejected
+  let bareSegmentPayloadBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+       VALUES ($1, $2, $3, $4, $5, $6);`,
+      [
+        lessonSecProofId,
+        USER_A_ID,
+        2,
+        'raw_caption',
+        'hash_proof_47',
+        JSON.stringify([
+          { id: 'seg_47', index: 0, startMs: 0, endMs: 1000, text: 'QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD', confidence: 'high' },
+        ]),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') bareSegmentPayloadBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!bareSegmentPayloadBlocked) {
+    throw new Error('Privacy constraint violation: Bare encoded payload in transcript segment text was not blocked!');
+  }
+  details.push('PASS: Proof 47: Bare encoded payload in transcript segment text is strictly rejected by structural CHECK validator');
+
+  // Proof 48: Transcript segment with unknown key is rejected
+  let unknownSegmentKeyBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_transcript_versions (lesson_id, user_id, version_number, stage, content_hash, segments)
+       VALUES ($1, $2, $3, $4, $5, $6);`,
+      [
+        lessonSecProofId,
+        USER_A_ID,
+        3,
+        'raw_caption',
+        'hash_proof_48',
+        JSON.stringify([
+          { id: 'seg_48', index: 0, startMs: 0, endMs: 1000, text: 'Hello IELTS learners', confidence: 'high', audioBlob: 'malicious' },
+        ]),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') unknownSegmentKeyBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!unknownSegmentKeyBlocked) {
+    throw new Error('Privacy constraint violation: Transcript segment with unknown key was not blocked!');
+  }
+  details.push('PASS: Proof 48: Transcript segment with unknown key is strictly rejected by structural CHECK validator');
+
+  // Proof 49: Invalid telemetry field type/range is rejected
+  let invalidTelemetryRangeBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonSecProofId,
+        'seg_1',
+        versionSecProofId,
+        USER_A_ID,
+        3000,
+        'measured',
+        JSON.stringify({
+          overallScore: 85,
+          fluencyScore: 85,
+          intonationScore: 85,
+          accuracyScore: 85,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [{ word: 'test', isCorrect: true }],
+          acousticStatus: 'measured',
+          telemetry: {
+            rawWpm: -5, // Invalid negative
+            articulationRate: 135,
+            fillerCount: 0,
+            fillerRatePer100Words: 0,
+            silentPauses: [],
+            averagePauseDurationMs: 0,
+            longPauseCount: 0,
+            speechRatio: 0.8,
+            acousticStatus: 'measured',
+            vadVersion: 'silero-vad-web-0.0.30',
+          },
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') invalidTelemetryRangeBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!invalidTelemetryRangeBlocked) {
+    throw new Error('Privacy constraint violation: Invalid telemetry field range was not blocked!');
+  }
+  details.push('PASS: Proof 49: Invalid telemetry field range is strictly rejected by structural CHECK validator');
+
+  // Proof 50: Valid fully typed telemetry and valid Vietnamese feedback still insert successfully
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const validFullTelemetryRes = await client.query(
+    `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, evaluation;`,
+    [
+      lessonSecProofId,
+      'seg_1',
+      versionSecProofId,
+      USER_A_ID,
+      4500,
+      'measured',
+      JSON.stringify({
+        overallScore: 95,
+        fluencyScore: 94,
+        intonationScore: 93,
+        accuracyScore: 96,
+        feedbackVi: 'Rất tốt, ngữ điệu và phát âm chuẩn xác.',
+        swallowedWords: [],
+        stressHighlights: [
+          { word: 'sustainability', isCorrect: true, tip: 'Nhấn đúng trọng âm' },
+        ],
+        actionableAdviceVi: 'Duy trì tốc độ nói này trong các bài thi nói.',
+        acousticStatus: 'measured',
+        telemetry: {
+          rawWpm: 130,
+          articulationRate: 142,
+          fillerCount: 0,
+          fillerRatePer100Words: 0.0,
+          silentPauses: [
+            { startMs: 1100, endMs: 1500, durationMs: 400 },
+          ],
+          averagePauseDurationMs: 400,
+          longPauseCount: 0,
+          speechRatio: 0.88,
+          acousticStatus: 'measured',
+          vadVersion: 'silero-vad-web-0.0.30',
+        },
+      }),
+    ]
+  );
+  await client.query('COMMIT;');
+
+  if (!validFullTelemetryRes.rows[0]?.id || validFullTelemetryRes.rows[0].evaluation.overallScore !== 95) {
+    throw new Error('Privacy constraint error: Valid fully typed evaluation object failed to insert!');
+  }
+  details.push('PASS: Proof 50: Valid fully typed telemetry and Vietnamese feedback is accepted and verified');
 
   return details;
 }
@@ -1239,6 +1523,8 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
     !sql.includes('shadowing_evaluation_schema_valid') ||
     !sql.includes('media_lessons_media_url_no_raw_audio') ||
     !sql.includes('validate_shadowing_evaluation') ||
+    !sql.includes('validate_media_transcript_segments') ||
+    !sql.includes('is_clean_media_text') ||
     sql.includes('omni.active_deleting_media_lesson_id')
   ) {
     details.push('FAIL: Migration SQL is missing required append-only, non-spoofable cascade, or provenance controls');
@@ -1308,7 +1594,7 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
       status: 'passed',
       details: [
         ...details,
-        'PASS: All 43 Media RLS proof contracts verified against live disposable database',
+        'PASS: All 50 Media RLS proof contracts verified against live disposable database',
       ],
     };
   } catch (err: unknown) {

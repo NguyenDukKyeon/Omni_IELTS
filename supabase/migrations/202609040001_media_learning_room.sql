@@ -46,6 +46,138 @@ CREATE TABLE IF NOT EXISTS public.media_lessons (
   )
 );
 
+-- Helper function to validate that learner text / metadata leaves do not contain base64 raw audio chunks or signatures
+CREATE OR REPLACE FUNCTION public.is_clean_media_text(p_text TEXT)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+  IF p_text IS NULL THEN
+    RETURN true;
+  END IF;
+
+  IF p_text ~* 'data:' THEN
+    RETURN false;
+  END IF;
+
+  IF p_text ~* 'base64' THEN
+    RETURN false;
+  END IF;
+
+  IF p_text ~ '(UklGR|GkXf|SUQz|T2dn)' THEN
+    RETURN false;
+  END IF;
+
+  IF p_text ~ '[A-Za-z0-9+/=]{28,}' THEN
+    RETURN false;
+  END IF;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_clean_media_text(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_clean_media_text(TEXT) TO authenticated, anon;
+
+-- Pure immutable validator for transcript segments matching MediaTranscriptSegment contract
+CREATE OR REPLACE FUNCTION public.validate_media_transcript_segments(segments JSONB)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_seg JSONB;
+  v_index INT;
+  v_start_ms INT;
+  v_end_ms INT;
+  v_count INT;
+BEGIN
+  IF segments IS NULL THEN
+    RETURN false;
+  END IF;
+
+  IF jsonb_typeof(segments) <> 'array' THEN
+    RETURN false;
+  END IF;
+
+  v_count := jsonb_array_length(segments);
+  IF v_count > 1000 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_seg IN SELECT * FROM jsonb_array_elements(segments) LOOP
+    IF jsonb_typeof(v_seg) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    IF NOT (v_seg ?& ARRAY['id', 'index', 'startMs', 'endMs', 'text', 'confidence']) THEN
+      RETURN false;
+    END IF;
+
+    IF (v_seg - ARRAY['id', 'index', 'startMs', 'endMs', 'text', 'confidence', 'speaker', 'translationVi']) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'id') <> 'string' OR
+       length(v_seg->>'id') < 1 OR length(v_seg->>'id') > 100 OR
+       NOT public.is_clean_media_text(v_seg->>'id') THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'index') <> 'number' THEN
+      RETURN false;
+    END IF;
+    v_index := (v_seg->>'index')::numeric;
+    IF v_index < 0 OR v_index > 10000 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'startMs') <> 'number' OR jsonb_typeof(v_seg->'endMs') <> 'number' THEN
+      RETURN false;
+    END IF;
+    v_start_ms := (v_seg->>'startMs')::numeric;
+    v_end_ms := (v_seg->>'endMs')::numeric;
+
+    IF v_start_ms < 0 OR v_end_ms <= 0 OR v_end_ms < v_start_ms OR v_end_ms > 86400000 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'text') <> 'string' OR
+       length(v_seg->>'text') < 1 OR length(v_seg->>'text') > 5000 OR
+       NOT public.is_clean_media_text(v_seg->>'text') THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'confidence') <> 'string' OR
+       (v_seg->>'confidence') NOT IN ('high', 'medium', 'low') THEN
+      RETURN false;
+    END IF;
+
+    IF v_seg ? 'speaker' THEN
+      IF jsonb_typeof(v_seg->'speaker') <> 'string' OR
+         length(v_seg->>'speaker') < 1 OR length(v_seg->>'speaker') > 100 OR
+         NOT public.is_clean_media_text(v_seg->>'speaker') THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    IF v_seg ? 'translationVi' THEN
+      IF jsonb_typeof(v_seg->'translationVi') <> 'string' OR
+         length(v_seg->>'translationVi') < 1 OR length(v_seg->>'translationVi') > 5000 OR
+         NOT public.is_clean_media_text(v_seg->>'translationVi') THEN
+        RETURN false;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.validate_media_transcript_segments(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_media_transcript_segments(JSONB) TO authenticated, anon;
+
 -- 2. Media Transcript Versions (immutable append-only)
 CREATE TABLE IF NOT EXISTS public.media_transcript_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -61,9 +193,8 @@ CREATE TABLE IF NOT EXISTS public.media_transcript_versions (
   is_complete BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (lesson_id, version_number),
-  CONSTRAINT transcript_no_raw_audio CHECK (
-    NOT (lower(segments::text) LIKE '%data:audio/%') AND
-    NOT (lower(segments::text) LIKE '%base64%')
+  CONSTRAINT transcript_segments_valid CHECK (
+    public.validate_media_transcript_segments(segments)
   )
 );
 
@@ -74,8 +205,10 @@ LANGUAGE plpgsql
 IMMUTABLE
 AS $$
 DECLARE
-  v_text TEXT;
   v_item JSONB;
+  v_telemetry JSONB;
+  v_pause JSONB;
+  v_text TEXT;
 BEGIN
   IF evaluation IS NULL THEN
     RETURN true;
@@ -85,7 +218,7 @@ BEGIN
     RETURN false;
   END IF;
 
-  -- 1. Required keys present
+  -- 1. Required top-level keys
   IF NOT (evaluation ?& ARRAY[
     'overallScore',
     'fluencyScore',
@@ -99,7 +232,7 @@ BEGIN
     RETURN false;
   END IF;
 
-  -- 2. No unknown keys allowed
+  -- 2. No unknown top-level keys allowed
   IF (evaluation - ARRAY[
     'overallScore',
     'fluencyScore',
@@ -136,15 +269,7 @@ BEGIN
   END IF;
 
   v_text := evaluation->>'feedbackVi';
-  IF length(v_text) < 1 OR length(v_text) > 4000 THEN
-    RETURN false;
-  END IF;
-
-  -- Privacy checks on feedbackVi: reject data URIs, base64 keywords, audio signatures, or base64 tokens >= 40 chars
-  IF v_text ~* 'data:' OR
-     v_text ~* 'base64' OR
-     v_text ~ '(UklGR|GkXf|SUQz|T2dn)' OR
-     v_text ~ '[A-Za-z0-9+/=]{40,}' THEN
+  IF length(v_text) < 1 OR length(v_text) > 4000 OR NOT public.is_clean_media_text(v_text) THEN
     RETURN false;
   END IF;
 
@@ -161,27 +286,47 @@ BEGIN
   END IF;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(evaluation->'swallowedWords') LOOP
-    IF jsonb_typeof(v_item) <> 'string' OR length(v_item#>>'{}') < 1 OR length(v_item#>>'{}') > 200 THEN
+    IF jsonb_typeof(v_item) <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_text := v_item#>>'{}';
+    IF length(v_text) < 1 OR length(v_text) > 100 OR NOT public.is_clean_media_text(v_text) THEN
       RETURN false;
     END IF;
   END LOOP;
 
-  -- 7. Validate stressHighlights array
+  -- 7. Validate stressHighlights array (strict: only word, isCorrect, optional tip)
   IF jsonb_typeof(evaluation->'stressHighlights') <> 'array' OR
      jsonb_array_length(evaluation->'stressHighlights') > 50 THEN
     RETURN false;
   END IF;
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(evaluation->'stressHighlights') LOOP
-    IF jsonb_typeof(v_item) <> 'object' OR
-       jsonb_typeof(v_item->'word') <> 'string' OR
-       length(v_item->>'word') < 1 OR
-       length(v_item->>'word') > 200 OR
+    IF jsonb_typeof(v_item) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    IF NOT (v_item ?& ARRAY['word', 'isCorrect']) THEN
+      RETURN false;
+    END IF;
+
+    IF (v_item - ARRAY['word', 'isCorrect', 'tip']) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_item->'word') <> 'string' OR
+       length(v_item->>'word') < 1 OR length(v_item->>'word') > 100 OR
+       NOT public.is_clean_media_text(v_item->>'word') OR
        jsonb_typeof(v_item->'isCorrect') <> 'boolean' THEN
       RETURN false;
     END IF;
-    IF v_item ? 'tip' AND (jsonb_typeof(v_item->'tip') <> 'string' OR length(v_item->>'tip') > 1000) THEN
-      RETURN false;
+
+    IF v_item ? 'tip' THEN
+      IF jsonb_typeof(v_item->'tip') <> 'string' OR
+         length(v_item->>'tip') < 1 OR length(v_item->>'tip') > 1000 OR
+         NOT public.is_clean_media_text(v_item->>'tip') THEN
+        RETURN false;
+      END IF;
     END IF;
   END LOOP;
 
@@ -191,28 +336,144 @@ BEGIN
       RETURN false;
     END IF;
     v_text := evaluation->>'actionableAdviceVi';
-    IF length(v_text) > 4000 OR
-       v_text ~* 'data:' OR
-       v_text ~* 'base64' OR
-       v_text ~ '(UklGR|GkXf|SUQz|T2dn)' OR
-       v_text ~ '[A-Za-z0-9+/=]{40,}' THEN
+    IF length(v_text) < 1 OR length(v_text) > 4000 OR NOT public.is_clean_media_text(v_text) THEN
       RETURN false;
     END IF;
   END IF;
 
-  -- 9. Optional telemetry
+  -- 9. Optional telemetry (strict match for ShadowingTelemetrySchema)
   IF evaluation ? 'telemetry' THEN
-    IF jsonb_typeof(evaluation->'telemetry') <> 'object' THEN
+    v_telemetry := evaluation->'telemetry';
+    IF jsonb_typeof(v_telemetry) <> 'object' THEN
       RETURN false;
     END IF;
+
+    -- Strict allowed keys only
+    IF (v_telemetry - ARRAY[
+      'rawWpm',
+      'articulationRate',
+      'fillerCount',
+      'fillerRatePer100Words',
+      'silentPauses',
+      'averagePauseDurationMs',
+      'longPauseCount',
+      'speechRatio',
+      'acousticStatus',
+      'vadVersion'
+    ]) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    -- Required keys present
+    IF NOT (v_telemetry ?& ARRAY[
+      'rawWpm',
+      'articulationRate',
+      'fillerCount',
+      'fillerRatePer100Words',
+      'silentPauses',
+      'averagePauseDurationMs',
+      'longPauseCount',
+      'speechRatio',
+      'acousticStatus',
+      'vadVersion'
+    ]) THEN
+      RETURN false;
+    END IF;
+
+    -- Numeric non-negative fields
+    IF jsonb_typeof(v_telemetry->'rawWpm') <> 'number' OR
+       (v_telemetry->>'rawWpm')::numeric < 0 OR (v_telemetry->>'rawWpm')::numeric > 1000 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'fillerCount') <> 'number' OR
+       (v_telemetry->>'fillerCount')::numeric < 0 OR (v_telemetry->>'fillerCount')::numeric > 500 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'fillerRatePer100Words') <> 'number' OR
+       (v_telemetry->>'fillerRatePer100Words')::numeric < 0 OR (v_telemetry->>'fillerRatePer100Words')::numeric > 100 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'longPauseCount') <> 'number' OR
+       (v_telemetry->>'longPauseCount')::numeric < 0 OR (v_telemetry->>'longPauseCount')::numeric > 500 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'speechRatio') <> 'number' OR
+       (v_telemetry->>'speechRatio')::numeric < 0 OR (v_telemetry->>'speechRatio')::numeric > 1 THEN
+      RETURN false;
+    END IF;
+
+    -- Nullable numeric fields
+    IF jsonb_typeof(v_telemetry->'articulationRate') <> 'null' THEN
+      IF jsonb_typeof(v_telemetry->'articulationRate') <> 'number' OR
+         (v_telemetry->>'articulationRate')::numeric < 0 OR (v_telemetry->>'articulationRate')::numeric > 1000 THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'averagePauseDurationMs') <> 'null' THEN
+      IF jsonb_typeof(v_telemetry->'averagePauseDurationMs') <> 'number' OR
+         (v_telemetry->>'averagePauseDurationMs')::numeric < 0 OR (v_telemetry->>'averagePauseDurationMs')::numeric > 60000 THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    -- acousticStatus: enum ('measured', 'unavailable')
+    IF jsonb_typeof(v_telemetry->'acousticStatus') <> 'string' OR
+       (v_telemetry->>'acousticStatus') NOT IN ('measured', 'unavailable') THEN
+      RETURN false;
+    END IF;
+
+    -- vadVersion: bounded clean string
+    IF jsonb_typeof(v_telemetry->'vadVersion') <> 'string' OR
+       length(v_telemetry->>'vadVersion') < 1 OR length(v_telemetry->>'vadVersion') > 100 OR
+       NOT public.is_clean_media_text(v_telemetry->>'vadVersion') THEN
+      RETURN false;
+    END IF;
+
+    -- silentPauses: array of SilentPauseSchema objects
+    IF jsonb_typeof(v_telemetry->'silentPauses') <> 'array' OR
+       jsonb_array_length(v_telemetry->'silentPauses') > 50 THEN
+      RETURN false;
+    END IF;
+
+    FOR v_pause IN SELECT * FROM jsonb_array_elements(v_telemetry->'silentPauses') LOOP
+      IF jsonb_typeof(v_pause) <> 'object' THEN
+        RETURN false;
+      END IF;
+
+      -- Strict allowed keys
+      IF NOT (v_pause ?& ARRAY['startMs', 'endMs', 'durationMs']) THEN
+        RETURN false;
+      END IF;
+
+      IF (v_pause - ARRAY['startMs', 'endMs', 'durationMs']) <> '{}'::jsonb THEN
+        RETURN false;
+      END IF;
+
+      IF jsonb_typeof(v_pause->'startMs') <> 'number' OR
+         jsonb_typeof(v_pause->'endMs') <> 'number' OR
+         jsonb_typeof(v_pause->'durationMs') <> 'number' THEN
+        RETURN false;
+      END IF;
+
+      IF (v_pause->>'startMs')::numeric < 0 OR
+         (v_pause->>'endMs')::numeric < (v_pause->>'startMs')::numeric OR
+         (v_pause->>'durationMs')::numeric < 0 OR
+         (v_pause->>'endMs')::numeric > 86400000 THEN
+        RETURN false;
+      END IF;
+    END LOOP;
   END IF;
 
-  -- 10. Global text inspection on full evaluation JSON
+  -- 10. Global text inspection on full evaluation JSON as defense-in-depth
   v_text := evaluation::text;
   IF v_text ~* 'data:audio/' OR
      v_text ~* 'base64' OR
-     v_text ~ '(UklGR|GkXf|SUQz|T2dn)' OR
-     v_text ~ '[A-Za-z0-9+/=]{60,}' THEN
+     v_text ~ '(UklGR|GkXf|SUQz|T2dn)' THEN
     RETURN false;
   END IF;
 
@@ -256,10 +517,7 @@ CREATE TABLE IF NOT EXISTS public.media_dictation_attempts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT dictation_no_raw_audio CHECK (
     length(user_response_text) <= 2000 AND
-    user_response_text !~* 'data:' AND
-    user_response_text !~* 'base64' AND
-    user_response_text !~ '(UklGR|GkXf|SUQz|T2dn)' AND
-    user_response_text !~ '[A-Za-z0-9+/=]{60,}'
+    public.is_clean_media_text(user_response_text)
   )
 );
 
