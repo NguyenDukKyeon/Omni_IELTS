@@ -1,0 +1,1 @@
+export const SOURCE_IMPORT_MAX_BINARY_BYTES = 8 * 1024 * 1024;

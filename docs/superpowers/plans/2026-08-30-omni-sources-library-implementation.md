@@ -14,6 +14,10 @@
 
 **Coding epic gate:** Do not start Tasks 1–12 until P02 is merged into `origin/main` and Product Owner approves this corrected plan.
 
+### Batch C correction delta (applies to Tasks 8–11)
+
+The implementation correction keeps the existing task sequence and does not start Task 12. The flag is one server-owned `OMNI_SOURCES_LIBRARY_V2` value injected into the browser shell; OFF selects the legacy facade and rejects all Sources routes before work. The `Open artifact` action carries a typed, in-memory pending handoff through the existing app context to the matching destination consumer, with no reload persistence and no Sources-owned destination rows. Import authenticates before decode/hash/extraction, invalid or oversized requests consume no quota, source import and artifact generation use separate quota configuration/defaults, and all artifact target bands are 3.0–9.0 in 0.5 steps. Sources learner copy is Vietnamese, guest empty state uses `Đăng nhập để thêm nguồn`, and Sources Evidence Dock shows only truthful source context.
+
 ## Global Constraints
 
 - Library-first UX is the default landing view when `sources_library_v2` is ON; no automatic multi-artifact generation on import.
@@ -49,6 +53,8 @@ src/
 ├── lib/
 │   └── sources/
 │       ├── featureFlags.ts                # sources_library_v2 kill switch
+│       ├── featureFlags.server.ts         # parseSourcesLibraryV2Env (server only)
+│       ├── quota.server.ts                # in-process verified-user quota (server only)
 │       ├── extractors/
 │       │   ├── textExtractor.ts           # Direct plain-text & Markdown normalizer
 │       │   ├── urlExtractor.ts            # Readability + DOMPurify web extractor
@@ -60,7 +66,8 @@ src/
 │       ├── importJobMachine.ts            # Batch ingestion state machine
 │       ├── sourceErrors.ts                # Normalized typed errors & scrubbed diagnostics
 │       ├── libraryStore.ts                # Library search, filter, and collection management
-│       ├── groundedChat.ts                # Context builder, citation validator, Zod schemas
+│       ├── groundedChat.ts                # Context builder, citation validator, Zod schemas, request handlers
+│       ├── sourcesRepository.server.ts    # Request-scoped learner-JWT SourcesRepository (server only)
 │       ├── artifactJobMachine.ts          # Single-destination generation & quality validation
 │       └── destinationHandoff.ts          # Handoff adapters to Practice, Mock, Vocab, Note
 ├── components/
@@ -85,6 +92,7 @@ src/
     ├── sourcesImportMachine.test.ts
     ├── sourcesLibraryStore.test.ts
     ├── sourcesGroundedChat.test.ts
+    ├── sourcesRouteHardening.test.ts
     ├── sourcesArtifactJob.test.ts
     ├── sourcesDestinationHandoff.test.ts
     └── sourcesUxContracts.test.ts
@@ -132,6 +140,8 @@ Candidate packages — adopt **only** if Task 2 extraction cannot be done with e
 | `dompurify` | ADOPT for HTML sanitization of Readability/mammoth HTML | `3.4.14` | MPL-2.0 OR Apache-2.0 | npm registry `latest` published 2026-08-19 (`https://www.npmjs.com/package/dompurify`, `https://registry.npmjs.org/dompurify/3.4.14`); dual license from npm `license` field and `https://github.com/cure53/DOMPurify` | Reject unsanitized HTML; paste-text | Uninstall; reject HTML inputs |
 | `pdf-parse` | ADOPT for **text-layer** PDF only | `2.4.5` | Apache-2.0 | npm registry `latest` published 2025-10-20 (`https://www.npmjs.com/package/pdf-parse`, `https://registry.npmjs.org/pdf-parse/2.4.5`); LICENSE Apache-2.0 at `https://github.com/mehmet-kozan/pdf-parse/blob/v2.4.5/LICENSE`; engines node `>=20.16.0 <21` or `>=22.3.0` | `PDF_SCANNED_NO_TEXT` + paste | Uninstall; paste-only PDF path |
 | `mammoth` | ADOPT for DOCX | `1.12.2` | BSD-2-Clause | npm registry `latest` published 2026-08-28 (`https://www.npmjs.com/package/mammoth`, `https://registry.npmjs.org/mammoth/1.12.2`); LICENSE BSD-2-Clause at `https://github.com/mwilliamson/mammoth.js` | `MALFORMED_DOCUMENT` + paste | Uninstall; paste-only DOCX path |
+| `pg` | ADOPT as devDependency for disposable PostgreSQL RLS/cascade proof runner (`scripts/test-sources-rls-postgres.ts`). Test-only, zero production bundle footprint. | `8.23.0` | MIT | npm registry `latest` (`https://www.npmjs.com/package/pg`, `https://registry.npmjs.org/pg/8.23.0`); engines node `>=16.0.0`; homepage `https://github.com/brianc/node-postgres` | Run status: `skipped_no_db` in environments without DB | Uninstall when RLS proof runner is retired |
+| `@types/pg` | ADOPT as devDependency for TypeScript types of `pg` client. | `8.23.1` | MIT | npm registry `latest` (`https://www.npmjs.com/package/@types/pg`, `https://registry.npmjs.org/@types/pg/8.23.1`); homepage `https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/pg` | TypeScript `any` fallback | Uninstall with `pg` |
 | `dexie` | **REJECT for P03** | n/a | n/a | https://dexie.org (registry candidate only; not adopted) | Native IndexedDB or in-memory cache in `sourcesStorage`; P09 owns offline queue | Never introduce |
 
 Unpinned, speculative, or program-map-violating packages are prohibited, including AnyDoc/firecrawl, yt-dlp, new AI provider SDKs, `@testing-library/react`, and Dexie.
@@ -682,23 +692,52 @@ git commit -m "feat(sources): implement library search, filter, and collection s
 
 ---
 
+### Task 5.0: Authenticated grounded-chat repository boundary (architecture correction)
+
+**Files:**
+
+- Modify only: `docs/superpowers/specs/2026-08-30-omni-sources-library-design.md`
+- Modify only: `docs/architecture/adr/2026-08-30-sources-library-domain-and-destination-boundary.md`
+- Modify only: this plan (Task 5 files / handler contract below)
+- No new PRD, NFR, CAP, METRIC, or GUARD IDs
+
+The approved Task 5 request body contains only `selectedVersionIds`. Current Source data is browser IndexedDB / client-Supabase storage, and `server.ts` has no authenticated Source repository. Task 5 must not fake hydration from process memory, trust client-supplied raw source text, use a service-role key, or create a parallel provider path.
+
+Server boundary that Task 5 must implement:
+
+- Both `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` call existing server-only `parseSourcesLibraryV2Env(process.env)` first. When false (default), return one typed `feature_disabled` HTTP 403 (`FEATURE_DISABLED`) before JWT verification, repository hydration, quota, Brave, or the AI router. Do not mention the flag name, env var, source IDs, or secrets in the body.
+- `POST /api/sources/grounded-chat` authenticates the learner’s Supabase Bearer JWT.
+- After verified identity only, consume existing `consumeFixedWindowQuota` in separate buckets (`grounded-chat` vs `web-research`) keyed by verified `userId`. Never key by unverified Bearer text or IP. Env-configurable clamped defaults: 20 chat / 10 web-research per 3,600,000 ms (limit 1–100, window 60s–24h). In-process only; not a paid plan; not durable across instances. HTTP 429 `quota_exceeded` with `Retry-After` and zero repository/router/Brave calls. Forged JWTs never consume quota.
+- A request-scoped `SourcesRepository` retrieves requested `SourceVersion`s and parent `SourceRecord`s through Supabase using the learner JWT and existing RLS.
+- Use Supabase URL + anon key only; never service-role credentials.
+- The server must hydrate exactly the selected IDs. Missing, foreign, or unselected IDs must not reveal whether a source exists and must not invoke AI (`selection_unavailable`).
+- Missing/invalid auth: typed `auth_required` response, no provider call, no quota consumption.
+- Supabase unavailable: truthful typed `unavailable` response, no fake context.
+- Do not log or persist raw `SourceVersion` plain text, bearer token, or keys.
+- `POST /api/sources/web-research` remains the only explicit search path and also requires authenticated cloud access. The question uses the same 8,000 Unicode-code-point bound; oversized questions never reach Brave. If no existing approved search adapter is configured, return typed `unavailable`; do not add crawling/search packages.
+- Guests retain offline/sample behaviour; cloud Source Chat is not silently available to guests.
+
+---
+
 ### Task 5: Selected-Source Context & Executable Grounded Chat
 
 **Files:**
 
 - Create: `src/lib/sources/groundedChat.ts`
+- Create: `src/lib/sources/sourcesRepository.server.ts` (request-scoped learner-JWT + anon-key adapter; not imported by browser modules)
 - Modify: `server.ts` (add `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` only)
 - Test: `src/lib/__tests__/sourcesGroundedChat.test.ts`
 
 **Interfaces:**
 
-- Consumes: selected `SourceVersion[]` plus `SourceRecord` metadata, existing `GroundedProviderRouter`, `AI_TASK_PROFILES.balanced`, `classifyApiFailure`, `zod`
-- Produces: `buildGroundedContext`, `validateGroundedCitations`, `executeGroundedChat`, `GroundedChatRequestSchema`, `GroundedChatResponseSchema`
+- Consumes: selected `SourceVersion[]` plus `SourceRecord` metadata via request-scoped `SourcesRepository`, existing `GroundedProviderRouter`, `AI_TASK_PROFILES.balanced`, `classifyApiFailure`, `zod`
+- Produces: `buildGroundedContext`, `validateGroundedCitations`, `executeGroundedChat`, `handleGroundedChatRequest`, `handleWebResearchRequest`, `GroundedChatRequestSchema`, `GroundedChatResponseSchema`
 
 Exact API boundary:
 
-- `POST /api/sources/grounded-chat` body `{ selectedVersionIds: string[]; question: string; sourceSpan?: SourceSpan; conversationId?: string }`
-- `POST /api/sources/web-research` body `{ question: string; conversationId?: string }` — the only path that may invoke `CAP-GLB-SEARCH`
+- `POST /api/sources/grounded-chat` body `{ selectedVersionIds: string[]; question: string; sourceSpan?: SourceSpan; conversationId?: string }` plus `Authorization: Bearer <Supabase JWT>`
+- Hydration is server-side through RLS; the body never carries source plaintext
+- `POST /api/sources/web-research` body `{ question: string; conversationId?: string }` — the only path that may invoke `CAP-GLB-SEARCH`, and only when an existing approved adapter is configured
 - Server handler must call `router.execute` on the existing `GroundedProviderRouter` instance used by Live Hub / AI gateway. It must not construct `@google/genai` or fetch `/api/gemini/*`.
 - Model profile: `AI_TASK_PROFILES.balanced` (`capability: 'text'`, `tools: []`). Do not use `AI_TASK_PROFILES.grounded` (it enables `googleSearch`).
 
@@ -862,7 +901,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/lib/sources/groundedChat.ts src/lib/__tests__/sourcesGroundedChat.test.ts server.ts
+git add src/lib/sources/groundedChat.ts src/lib/sources/sourcesRepository.server.ts src/lib/__tests__/sourcesGroundedChat.test.ts server.ts
 git commit -m "feat(sources): execute grounded chat through the central AI router"
 ```
 
@@ -1045,6 +1084,72 @@ Expected: PASS (1 test).
 git add src/lib/sources/destinationHandoff.ts src/lib/__tests__/sourcesDestinationHandoff.test.ts
 git commit -m "feat(sources): implement destination handoff adapters and deep link routes"
 ```
+
+---
+
+### Batch C0: Real authenticated transport before Tasks 8–11
+
+Batch C adds the server boundary required by the Sources UI without adding a
+new product capability or program-map ID. `POST /api/sources/import` accepts
+the exact Zod `SourceImportRequestSchema`: bounded string content for text,
+URL, and VTT/SRT; bounded base64 plus declared MIME type for PDF/DOCX; and
+metadata-only YouTube/audio/chart handoffs. Binary payloads are decoded and
+signature-checked on the server before the existing extractor path runs.
+Flag validation, request validation, verified JWT, semantic extraction
+validation, and the separate `source-import` quota precede RLS persistence.
+Ready imports persist one `SourceRecord` plus one immutable `SourceVersion`;
+handoffs persist no version; failures never create a ready record.
+
+`POST /api/sources/artifact-jobs` accepts one source version, an optional
+validated span, one destination, and bounded target-band/instruction fields.
+It hydrates through the learner-JWT SourcesRepository, consumes the separate
+`artifact-generation` quota, invokes the existing balanced text executor with
+no tools or web search, and persists only `SourceArtifactJob` state. `GET
+/api/sources/artifact-jobs/:jobId` is the safe learner-scoped refresh path.
+`GET /api/sources/library` and `GET /api/sources/versions/:versionId` provide
+the real RLS-backed read adapters used by the flag-ON workspace. The browser
+wrapper obtains the current Supabase session token per request and never puts
+the token in component state, storage, logs, or errors. No delete control is
+rendered until a real learner-owned delete route is added.
+
+**C0 files:** `src/lib/sources/importTransport.server.ts`,
+`src/lib/sources/artifactTransport.server.ts`,
+`src/lib/sources/libraryTransport.server.ts`,
+`src/lib/sources/transportShared.server.ts`,
+`src/lib/sources/sourcesApi.ts`, and the JWT/RLS write/read methods in
+`src/lib/sources/sourcesRepository.server.ts`.
+
+### Batch C.2: Security and integrity correction before Task 12
+
+This correction remains within the existing Batch C scope and does not start
+Task 12. The global JSON parser skips the import route, including its accepted
+trailing-slash form. A header-only admission gate checks the feature flag,
+Bearer syntax, verified learner JWT, JSON content type, and declared body size
+before a route-local parser is installed. The route-local limit is derived from
+the bounded base64 field plus a fixed 16 KiB JSON envelope allowance; chunked
+requests are still bounded. No client-provided forwarded IP header is trusted
+for identity or rate limiting.
+
+DOCX central-directory inspection runs before Mammoth with these fixed limits:
+512 entries, 4 MiB uncompressed per entry, 16 MiB total uncompressed, and
+100:1 maximum compression ratio. Malformed, encrypted, multi-disk, ZIP64, and
+unsupported structures fail closed. The complete DOCX transformation —
+Mammoth conversion, JSDOM construction, DOMPurify sanitisation, allowed
+paragraph/heading/list/table extraction, whitespace normalisation, and output
+limits — runs in a short-lived child process with a 256 MiB V8 old-space limit
+and a 15 second timeout. The child returns only bounded `plainText` and block
+data; converted HTML never crosses into the parent. PDF parsing is limited to
+100 pages through public `pdf-parse` controls. Extracted binary output is
+bounded at 200,000 Unicode code points and 2,000 blocks; breaches return
+`RESOURCE_LIMIT_EXCEEDED`, reject rather than truncate, and create no version.
+
+Import quota is consumed only after verified authentication and semantic
+extraction validation. Artifact quota is consumed only after hydration proves
+exactly one RLS-visible version, `version.sourceId === record.id`, exact
+`processingState === 'ready'`, and valid supplied record/version/block span
+IDs. Historical versions remain eligible when they belong to the ready record,
+regardless of `currentVersionId`. Invalid integrity states do not consume
+quota, write jobs, or invoke the router.
 
 ---
 

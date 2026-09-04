@@ -16,4 +16,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Start Disposable PostgreSQL for Sources RLS Proof
+        run: docker compose -p omni-sources-rls-test -f docker-compose.sources-rls-test.yml up -d --wait
+      - name: Run Strict Sources RLS Proof on Disposable PostgreSQL
+        env:
+          LOCAL_DISPOSABLE_DB_URL: postgres://postgres:postgrespassword@127.0.0.1:54322/omni_sources_rls_test
+        run: npm run test:sources:rls:db -- --strict
+      - name: Stop Disposable PostgreSQL
+        if: always()
+        run: docker compose -p omni-sources-rls-test -f docker-compose.sources-rls-test.yml down -v
       - run: npm run check:beta

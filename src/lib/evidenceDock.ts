@@ -46,6 +46,23 @@ export function buildEvidenceDockModel(input: EvidenceDockInput): EvidenceDockMo
     return { visibility: 'hidden', sections: [] };
   }
 
+  if (input.activeModule === 'sources') {
+    return {
+      visibility: 'open',
+      sections: [{
+        id: 'sources-context',
+        title: 'Ngữ cảnh Sources',
+        items: [{
+          id: 'sources-no-evidence',
+          label: 'Chưa có bằng chứng nguồn',
+          detail: 'Sources chỉ chuẩn bị bản nháp; chưa ghi bằng chứng học tập tại đây.',
+          status: 'missing',
+          action: 'none',
+        }],
+      }],
+    };
+  }
+
   const dueCandidates: Array<EvidenceDockItem | null> = [
     input.dueMistakeCount > 0 ? {
       id: 'due-mistakes',

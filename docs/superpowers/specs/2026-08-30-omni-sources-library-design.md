@@ -14,6 +14,15 @@
 
 **Coding epic gate:** P03 implementation remains blocked until P02 is merged into `origin/main` and this corrected plan receives Product Owner approval.
 
+### Batch C correction delta
+
+For the existing Batch C implementation, the approved transport and handoff correction is:
+
+- `OMNI_SOURCES_LIBRARY_V2` is the only deploy-level flag. Express injects its parsed boolean into `window.__OMNI_FLAGS__.sourcesLibraryV2`; the browser does not read a parallel Vite flag. OFF keeps `SourceIngestionView` and rejects all Sources cloud routes before work.
+- `Open artifact` creates a typed, in-memory `PendingArtifactHandoff` at the app navigation boundary. The matching Practice, Mock, Vocabulary, or Sources Note/Idea Bank surface consumes and reviews it. No destination rows are written by Sources, and reload does not resume the handoff.
+- Verified learner authentication precedes binary decode, hashing, extraction, and quota work. Invalid or oversized requests do not consume quota. Source import and artifact generation have separate documented quota settings, and artifact bands are 3.0–9.0 in 0.5 steps.
+- New learner-facing Sources copy is Vietnamese, and guest empty state exposes the single primary action `Đăng nhập để thêm nguồn`.
+
 ---
 
 ## 1. Executive Summary & Problem Framing
@@ -276,12 +285,94 @@ Request body for private-source chat (Zod-validated):
 }
 ```
 
-The handler loads only the caller's RLS-visible `SourceVersion` rows whose ids are in `selectedVersionIds`, and attaches `SourceRecord` metadata (`title`, `canonicalCitation`, `rightsState`, `processingState`). Versions in `unavailable` or `handoff_required` are excluded from prompt context and reported in `excludedSources`.
+The handler does not receive source plaintext in the request. It authenticates the learner and hydrates exactly the selected IDs through a request-scoped repository (section 4.1.1). Versions in `unavailable` or `handoff_required` that the learner owns are excluded from prompt context and reported in `excludedSources`. Missing, foreign, or otherwise non-visible IDs never produce a partial context.
+
+### 4.1.1 Authenticated request-scoped SourcesRepository boundary
+
+Current Source rows live in browser IndexedDB / client-Supabase storage. `server.ts` has no process-memory Source catalogue and no authenticated Source repository of its own. Grounded Chat therefore cannot invent hydration.
+
+`POST /api/sources/grounded-chat` must:
+
+0. Call server-only `parseSourcesLibraryV2Env(process.env)` first. When the flag is not exactly `true` (default OFF), return one typed `feature_disabled` response at **HTTP 403** with `NormalizedSourceError` code `FEATURE_DISABLED` before JWT verification, repository hydration, quota, Brave/search, or the AI router. Learner copy does not mention the flag key, env var, source IDs, or secrets.
+1. Authenticate the learner from the `Authorization: Bearer <Supabase JWT>` header. Guests keep offline/sample library behaviour on the client; cloud Source Chat is not silently available without a learner JWT.
+2. After a verified learner `userId` (and not before), consume an in-process fixed-window quota via existing `consumeFixedWindowQuota`. Grounded chat and web research use **separate buckets**, keyed only by that verified `userId` — never by unverified Bearer text or IP. Safe beta defaults are 20 grounded-chat and 10 web-research requests per 3,600,000 ms, configurable with `OMNI_SOURCES_GROUNDED_CHAT_QUOTA_LIMIT` / `_WINDOW_MS` and `OMNI_SOURCES_WEB_RESEARCH_QUOTA_LIMIT` / `_WINDOW_MS`, clamped to limit 1–100 and window 60s–24h. This is per-process memory, not a paid plan and not durable across instances. Limit exceeded: typed `quota_exceeded` (`QUOTA_EXCEEDED`) at **HTTP 429** with `Retry-After`, `retryAfterSeconds`, and safe Vietnamese recovery copy; zero repository, router, or Brave calls.
+3. Construct a **request-scoped** `SourcesRepository` that queries `source_versions` and parent `source_records` through Supabase using that learner JWT and the existing RLS policies.
+4. Use the Supabase URL and **anon key only**. Never a service-role key, never a shared server session, never a parallel provider SDK.
+5. Hydrate **exactly** the `selectedVersionIds`. Do not accept client-supplied raw source text, and do not read Source rows from process memory.
+6. If any selected ID is missing, belongs to another learner, or is not RLS-visible, return one typed `selection_unavailable` response that does not disclose whether a row exists, and **do not** invoke the AI router.
+7. Missing or invalid auth: typed `auth_required` (`NormalizedSourceError` code `AUTH_REQUIRED`). No provider call and no quota consumption.
+8. Supabase or the cloud source store unavailable: typed `unavailable`. No fake context and no provider call.
+9. Do not log or persist raw `SourceVersion` plain text, bearer tokens, or API keys.
+
+`POST /api/sources/web-research` remains the only explicit `CAP-GLB-SEARCH` path. It is gated by the same `parseSourcesLibraryV2Env` kill switch (HTTP 403 `feature_disabled` before any other work) and the same verified-JWT rule: the handler verifies the learner Supabase access token server-side with Supabase Auth using the project URL and **anon key only** (never a service-role key) before any Brave/search, repository, AI, or quota call. Missing, malformed, expired, invalid, or unverifiable JWTs return typed `auth_required` (HTTP 401) and do not consume quota. The web-research question uses the same 8,000 Unicode-code-point bound as grounded chat; oversized questions return typed `select_smaller_source` and never reach Brave. After verified identity, the separate web-research quota bucket is consumed before Brave. Supabase transport or configuration failure returns typed `unavailable` (HTTP 503). A syntactically valid Bearer string is not sufficient. If no existing approved search adapter used by Live Hub / forecast grounding (Brave Search) is configured, return typed `unavailable`. Do not add crawling or search packages, and do not use `AI_TASK_PROFILES.grounded`.
+
+
+### 4.1.2 Batch C0 authenticated import and artifact transport
+
+The flag-ON workspace uses real server transport before exposing import or
+artifact controls. `POST /api/sources/import` accepts the exact Zod
+`SourceImportRequestSchema`: bounded string content for text/Markdown, URL,
+and VTT/SRT; bounded base64 with declared MIME type for PDF/DOCX; and
+metadata-only YouTube/audio/chart handoffs. The server decodes binary payloads,
+checks the declared type, byte bound, and basic PDF/DOCX signature, then calls
+the existing SSRF-safe URL extractor or supported document extractor. The
+order is feature flag, request validation, verified JWT, semantic extraction
+validation, `source-import` quota, then learner-JWT/RLS persistence. A ready import persists one
+record and one immutable version; a handoff persists a record without a
+version; failures never produce a ready record and return typed retry state.
+
+`POST /api/sources/artifact-jobs` accepts exactly one `sourceVersionId`, an
+optional validated `SourceSpan`, one destination, and bounded target-band and
+custom-instruction fields. It hydrates the selected version through the
+request-scoped learner-JWT repository, validates the exact selected
+record/version pair and supplied span, then consumes a separate
+`artifact-generation` quota. It invokes the existing balanced text executor
+with an empty tool list and no web search, and persists only the job. It returns
+the real job state (`queued`, `processing`, `validating`, `ready`, `needs_review`,
+or typed failure); destination rows are never written. The learner-scoped
+`GET /api/sources/artifact-jobs/:jobId` endpoint refreshes state without
+disclosing foreign IDs. `GET /api/sources/library` and
+`GET /api/sources/versions/:versionId` are the corresponding RLS-backed read
+paths for the flag-ON workspace. The browser wrapper obtains the current
+session token ephemerally per request; it never stores, logs, or returns the
+token to component state.
+
+### 4.1.3 Batch C.2 security and integrity correction
+
+The import endpoint is admitted by headers before any body parser. The global
+`express.json` middleware skips the import path, including its accepted
+trailing-slash form. A route-local parser is installed only after the feature
+flag, Bearer syntax, verified learner JWT, exact JSON content type, and safe
+declared `Content-Length` checks succeed. Its byte limit is derived from the
+bounded base64 field plus a fixed 16 KiB JSON envelope allowance; chunked
+requests remain bounded by that parser. No `X-Forwarded-For` value is used as
+identity or for rate limiting.
+
+Before Mammoth, DOCX central-directory metadata is checked against 512 entries,
+4 MiB per-entry uncompressed size, 16 MiB total uncompressed size, and a
+100:1 compression-ratio ceiling. Malformed, encrypted, multi-disk, ZIP64, and
+unsupported ZIP structures fail closed. The complete DOCX transformation —
+Mammoth conversion, JSDOM construction, DOMPurify sanitisation, allowed
+paragraph/heading/list/table extraction, whitespace normalisation, and output
+limits — runs in a short-lived process with a 256 MiB V8 old-space limit and a
+15 second timeout. The child returns only bounded `plainText` and block data;
+converted HTML never crosses into the parent. PDF parsing is limited to 100
+pages through public `pdf-parse` controls. Both extractors reject output over
+200,000 Unicode code points or 2,000 blocks and return typed
+`RESOURCE_LIMIT_EXCEEDED` without truncating or creating a version.
+
+Source import consumes `source-import` quota only after verified identity and
+successful semantic extraction validation. Artifact generation hydrates exactly
+one RLS-visible version, requires the selected version to belong to its record
+and the record state to be exactly `ready`, validates all supplied span IDs,
+then consumes quota before job persistence or routing. Historical versions are
+allowed when they belong to that ready record, even when they are not its
+`currentVersionId`.
 
 ### 4.2 Selection & Context Formation
 
 - **Explicit Selection Rule**: Learners may select 1 to N sources via checkboxes in the Library Explorer or Collection view. The chat input displays an active token chip: `Context: 2 sources (4,250 words)` or `Context: Selected span (180 words)`.
-- **Token Budget & Truncation**: When total selected context exceeds the prompt budget (32k tokens), the system prompts the learner to select a sub-collection or specific blocks, preventing silent arbitrary middle-truncation.
+- **Token Budget & Truncation**: When total selected context exceeds the prompt budget (32k tokens), the system prompts the learner to select a sub-collection or specific blocks, preventing silent arbitrary middle-truncation. The runtime uses a documented conservative estimate over the **complete provider prompt** (system instructions + selected source context + question + JSON instruction): Unicode code-point count ÷ 3, plus 256 tokens of instruction overhead. The Zod request schema caps `question` at 8,000 Unicode code points. Oversized question or total prompt returns typed `select_smaller_source` (bounded input) with no model call and no silent truncation. If that estimate exceeds 32,000, grounded chat returns typed `select_smaller_source` and does not call the model. An explicit `sourceSpan` is validated against hydrated selected pairs (`sourceId` + `sourceVersionId` + every supplied `blockId` on that exact version). Unknown or mismatched spans yield `unsupported_by_sources` with no model call and never fall back to full `plainText`. A selected source with non-empty `plainText` but zero usable blocks is `unsupported_by_sources`; the model is never called with instructions only.
 - **Single Source Chat vs Multi-Source Chat**: In Source Detail, single-source chat is pre-scoped to `currentVersionId`. In Library Explorer, multi-source chat activates only when at least one source is checked.
 - Unselected versions are never added to the model context.
 
@@ -413,6 +504,7 @@ export interface ValidatedMockDraft {
   blueprintId?: string;
   targetBand: number;
   packagePayload: Record<string, unknown>;
+  sourceSpanRef: SourceSpan;
   provenance: SourceProvenance;
 }
 
@@ -438,6 +530,7 @@ export interface ValidatedNoteDraft {
   summaryVi: string;
   keyTakeaways: string[];
   annotatedCitations: Array<{ claim: string; blockId: string }>;
+  sourceSpanRef: SourceSpan;
   provenance: SourceProvenance;
 }
 
@@ -592,7 +685,7 @@ Routing `sources` to the new workspace is forbidden until this flag is specified
 | Server env | `OMNI_SOURCES_LIBRARY_V2` (`true` / `false`) |
 | Default | **OFF**. `src/App.tsx` `case 'sources'` continues to render legacy `SourceIngestionView`. |
 | ON | `case 'sources'` renders `SourcesView` inside `data-ux-scope="sources-library-v2"`. |
-| Kill switch | Set `OMNI_SOURCES_LIBRARY_V2=false` and redeploy. No schema down-migration. New tables remain dormant. |
+| Kill switch | Set `OMNI_SOURCES_LIBRARY_V2=false` and redeploy. No schema down-migration. New tables remain dormant. Both `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` call `parseSourcesLibraryV2Env(process.env)` first; when false they return typed `feature_disabled` at HTTP 403 before JWT, quota, repository, Brave, or the AI router. |
 | One-release facade | Keep `src/views/SourceIngestionView.tsx` imported and constructible. Do not delete it in the P03 coding epic. A hidden compatibility export remains for one release after flag ON. |
 | Rollback | Flag OFF restores the legacy route in one deploy. Learners see `SourceIngestionView`. No XP/mastery repair is required because the new path never wrote those records. |
 | Import side effects | The new workspace never calls `awardXP`, never inserts vocabulary cards, never emits `SkillEvidence` / `MistakeEvidence` / `MasteryUpdate`, and never opens `SourceToLearningPackageModal` as an automatic four-skill generator. |

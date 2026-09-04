@@ -37,6 +37,7 @@ import {
   Share2,
   ListFilter
 } from 'lucide-react';
+import { PendingArtifactDraftPanel } from '../components/sources/PendingArtifactDraftPanel';
 import { useApp } from '../context/AppContext';
 import { VocabCard, VocabExample, VocabSynonym } from '../types';
 import { ReviewRating, getDueVocabCards, isDueForReview } from '../services/srsScheduler';
@@ -545,6 +546,7 @@ export const VocabularySRSView: React.FC = () => {
 
   return (
     <div id="vocabulary-module" className="space-y-6 animate-fadeIn pb-12">
+      <PendingArtifactDraftPanel destination="vocabulary_deck" />
       {/* 1. BENTO HERO HEADER & CONTROLS */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="space-y-1.5">

@@ -1,0 +1,645 @@
+import { readFileSync } from 'node:fs';
+import net from 'node:net';
+import pg from 'pg';
+
+const { Client } = pg;
+const MIGRATION_PATH = 'supabase/migrations/202608300001_sources_library.sql';
+const VERSION_EDIT_MIGRATION_PATH = 'supabase/migrations/202609010001_sources_immutable_edit.sql';
+const VERSION_EDIT_INVOKER_MIGRATION_PATH = 'supabase/migrations/202609010002_sources_immutable_edit_invoker.sql';
+const MIGRATION_PATHS = [MIGRATION_PATH, VERSION_EDIT_MIGRATION_PATH, VERSION_EDIT_INVOKER_MIGRATION_PATH];
+export const REQUIRED_DISPOSABLE_DB_NAME = 'omni_sources_rls_test';
+export const REQUIRED_MARKER_NAME = 'OMNI_SOURCES_RLS_TEST_ENVIRONMENT';
+export const REDACTED_DISPOSABLE_DB_URL = '[redacted disposable database URL]';
+const PINNED_LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1']);
+const CONNECT_FAILURE_MESSAGE = 'Failed to connect to disposable database';
+const MARKER_FAILURE_MESSAGE =
+  'SECURITY_VIOLATION: Missing or invalid disposable database marker omni_test.disposable_marker. Refusing to run destructive operations on non-disposable database.';
+const LIVE_EXECUTION_FAILURE_MESSAGE = 'Live database execution error';
+const UNEXPECTED_FAILURE_MESSAGE = 'Unexpected disposable database runner error';
+
+export type RlsProofResult = {
+  executable: boolean;
+  proven: boolean;
+  status: 'passed' | 'skipped_no_db' | 'failed';
+  details: string[];
+};
+
+export const USER_A_ID = 'a0000000-0000-4000-8000-000000000001';
+export const USER_B_ID = 'b0000000-0000-4000-8000-000000000002';
+
+export type PostgresConfig = {
+  host: string;
+  port: number;
+  user: string;
+  password?: string;
+  database: string;
+};
+
+/**
+ * Never returns a user-provided raw URL, query string, password, username, or malformed input.
+ * Display/log paths must use this fixed label only.
+ */
+export function sanitizeUrlForDisplay(_rawUrl: string): string {
+  return REDACTED_DISPOSABLE_DB_URL;
+}
+
+function isSafeInternalFailureMessage(message: string): boolean {
+  return (
+    message.startsWith('SECURITY_VIOLATION:') ||
+    message.startsWith('Policy violation:') ||
+    message.startsWith('Cascade deletion failed:') ||
+    message.startsWith('Cascade state exploit failed to be blocked:')
+  );
+}
+
+function safeFailureMessage(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : '';
+  if (isSafeInternalFailureMessage(message)) {
+    return message;
+  }
+  return fallback;
+}
+
+/**
+ * Validates that a database URL is a literal pinned loopback address targeting the
+ * dedicated disposable database `omni_sources_rls_test`.
+ * Accepts only 127.0.0.1 and ::1. Rejects localhost, every hostname (including loopback
+ * aliases), 0.0.0.0, LAN/WAN addresses, remote cloud endpoints, non-postgres protocols,
+ * and any database name other than `omni_sources_rls_test` before any connection is attempted.
+ */
+export function assertLocalDatabaseUrl(rawUrl: string): PostgresConfig {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error('SECURITY_VIOLATION: Invalid database URL format.');
+  }
+
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+    throw new Error('SECURITY_VIOLATION: Database protocol must be postgres: or postgresql.');
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+
+  if (
+    hostname.includes('supabase.co') ||
+    hostname.includes('supabase.com') ||
+    hostname.includes('amazonaws.com') ||
+    hostname.includes('azure.com')
+  ) {
+    throw new Error('SECURITY_VIOLATION: Supabase or remote cloud database endpoints are strictly forbidden for disposable RLS tests.');
+  }
+
+  if (!PINNED_LOOPBACK_HOSTS.has(hostname)) {
+    throw new Error(
+      'SECURITY_VIOLATION: Remote or non-loopback database URLs are strictly forbidden (0.0.0.0, LAN, WAN, and hostnames including localhost disallowed). Disposable DB runner must only target literal loopback addresses 127.0.0.1 or ::1.'
+    );
+  }
+
+  const dbName = decodeURIComponent((url.pathname || '').replace(/^\//, '')).trim();
+  if (dbName !== REQUIRED_DISPOSABLE_DB_NAME) {
+    throw new Error(
+      `SECURITY_VIOLATION: Database name must be exactly "${REQUIRED_DISPOSABLE_DB_NAME}". Refusing to connect to non-test database.`
+    );
+  }
+
+  return {
+    host: hostname,
+    port: url.port ? Number(url.port) : 54322,
+    user: decodeURIComponent(url.username || 'postgres'),
+    password: decodeURIComponent(url.password || ''),
+    database: dbName,
+  };
+}
+
+/**
+ * Checks if a TCP port on a loopback host is reachable with a timeout.
+ */
+async function isPortReachable(host: string, port: number, timeoutMs = 1000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, host);
+  });
+}
+
+/**
+ * Verifies that the connected database contains the disposable marker outside public schema.
+ */
+export async function assertDisposableMarker(client: pg.Client): Promise<void> {
+  try {
+    const markerRes = await client.query(
+      `SELECT disposable FROM omni_test.disposable_marker WHERE marker_name = $1;`,
+      [REQUIRED_MARKER_NAME]
+    );
+    if (markerRes.rows.length === 0 || markerRes.rows[0].disposable !== true) {
+      throw new Error('Disposable marker value mismatch');
+    }
+  } catch {
+    throw new Error(MARKER_FAILURE_MESSAGE);
+  }
+}
+
+/**
+ * Executes the full suite of RLS and cascade trigger proofs against a live disposable Postgres DB using pg.Client.
+ * Every step and transaction statement uses separate, discrete client.query() calls.
+ */
+export async function executeDisposableDbSuite(client: pg.Client): Promise<string[]> {
+  const details: string[] = [];
+
+  // 1. Verify disposable database marker before any destructive schema setup
+  await assertDisposableMarker(client);
+  details.push('PASS: Verified disposable database marker omni_test.disposable_marker');
+
+  // 2. Reset only the disposable schemas (preserving omni_test marker schema)
+  await client.query(`DROP SCHEMA IF EXISTS auth CASCADE;`);
+  await client.query(`CREATE SCHEMA auth;`);
+  await client.query(`DROP SCHEMA IF EXISTS public CASCADE;`);
+  await client.query(`CREATE SCHEMA public;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO postgres;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO public;`);
+  details.push('PASS: Reset disposable test schemas (auth, public)');
+
+  // 3. Initialize auth helpers, roles, and functions
+  await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
+  await client.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS auth.users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+  await client.query(`
+    CREATE OR REPLACE FUNCTION auth.uid()
+    RETURNS uuid
+    LANGUAGE sql
+    STABLE
+    AS $$
+      SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+    $$;
+  `);
+  await client.query(`
+    CREATE OR REPLACE FUNCTION auth.role()
+    RETURNS text
+    LANGUAGE sql
+    STABLE
+    AS $$
+      SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.role', true), ''), 'authenticated');
+    $$;
+  `);
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        CREATE ROLE anon;
+      END IF;
+    END $$;
+  `);
+  await client.query(`GRANT USAGE ON SCHEMA public TO authenticated, anon;`);
+  await client.query(`GRANT USAGE ON SCHEMA auth TO authenticated, anon;`);
+  await client.query(`GRANT ALL ON ALL ROUTINES IN SCHEMA auth TO authenticated, anon;`);
+  await client.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;`);
+  await client.query(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;`);
+  await client.query(`GRANT ALL ON ALL ROUTINES IN SCHEMA public TO authenticated;`);
+  await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;`);
+  await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated;`);
+  await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO authenticated;`);
+  details.push('PASS: Auth schema, functions, and authenticated role permissions initialized');
+
+  // 4. Apply migration SQL
+  for (const migrationPath of MIGRATION_PATHS) {
+    await client.query(readFileSync(migrationPath, 'utf8'));
+    details.push(`PASS: ${migrationPath.split('/').at(-1)} applied to disposable database`);
+  }
+
+  // 5. Seed authenticated test identities User A and User B
+  await client.query(
+    `INSERT INTO auth.users (id, email) VALUES ($1, $2), ($3, $4) ON CONFLICT (id) DO NOTHING;`,
+    [USER_A_ID, 'alice@disposable.test', USER_B_ID, 'bob@disposable.test']
+  );
+  details.push('PASS: Seeded authenticated test identities User A and User B');
+
+  const recordAId = 'a0000000-0000-4000-8000-000000000010';
+  const versionAId = 'a0000000-0000-4000-8000-000000000020';
+  const jobAId = 'a0000000-0000-4000-8000-000000000030';
+
+  // User A creates a source record, version, and job
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.source_records (id, user_id, title, summary, media_type, provenance, processing_state)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [recordAId, USER_A_ID, 'Alice Article', 'A summary of renewable energy', 'text', JSON.stringify({ originType: 'pasted_text' }), 'ready']
+  );
+  await client.query(
+    `INSERT INTO public.source_versions (id, source_id, user_id, version_number, stage, content_hash, plain_text, extraction_report)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
+    [versionAId, recordAId, USER_A_ID, 1, 'raw', 'hash_a1', 'Renewable energy content', JSON.stringify({ extractor: 'text' })]
+  );
+  await client.query(`UPDATE public.source_records SET current_version_id = $1 WHERE id = $2;`, [versionAId, recordAId]);
+  await client.query(
+    `INSERT INTO public.source_artifact_jobs (id, user_id, source_version_id, destination, target_band, state)
+     VALUES ($1, $2, $3, $4, $5, $6);`,
+    [jobAId, USER_A_ID, versionAId, 'practice', 7.5, 'ready']
+  );
+  await client.query('COMMIT;');
+
+  // Proof 8: User B cannot call the append-only edit operation for User A's source.
+  let crossUserEditBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [recordAId, versionAId, 'Stolen edited source content.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) crossUserEditBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!crossUserEditBlocked) {
+    throw new Error('Policy violation: User B was able to call append_source_edited_version for User A source!');
+  }
+
+  // Non-disclosing check: Calling append_source_edited_version for a non-existent (missing) source returns identical VERSION_CONFLICT
+  let missingSourceBlockedNonDisclosing = false;
+  const missingRecordId = '00000000-0000-4000-8000-000000000099';
+  const missingVersionId = '00000000-0000-4000-8000-000000000098';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [missingRecordId, missingVersionId, 'Missing source edit attempt.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) missingSourceBlockedNonDisclosing = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!missingSourceBlockedNonDisclosing) {
+    throw new Error('Policy violation: Missing source edit did not return non-disclosing VERSION_CONFLICT!');
+  }
+
+  // Verify User A's source record and current_version_id remain untampered by User B
+  const recordAState = await client.query(`SELECT current_version_id FROM public.source_records WHERE id = $1;`, [recordAId]);
+  if (recordAState.rows[0]?.current_version_id !== versionAId) {
+    throw new Error('Policy violation: User A current_version_id tampered after User B rejected call');
+  }
+  details.push('PASS: Proof 8: User B cannot append an edited version for User A source (foreign and missing requests are non-disclosing)');
+
+  // Proof 9: User A gets a server-derived v2 while v1 remains unchanged.
+  let editedVersionRows: any[] = [];
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  editedVersionRows = (await client.query(
+    `SELECT id, source_id, version_number, stage, content_hash, plain_text FROM public.append_source_edited_version($1, $2, $3);`,
+    [recordAId, versionAId, 'Edited   renewable policy content.\n\nA second immutable paragraph.']
+  )).rows;
+  await client.query('COMMIT;');
+  if (editedVersionRows.length !== 1 || editedVersionRows[0].version_number !== 2 || editedVersionRows[0].stage !== 'edited') {
+    throw new Error('Edited source version append did not return a server-derived v2');
+  }
+  const v1Unchanged = await client.query(`SELECT plain_text FROM public.source_versions WHERE id = $1;`, [versionAId]);
+  if (v1Unchanged.rows[0]?.plain_text !== 'Renewable energy content') {
+    throw new Error('Immutable v1 content changed after edited version append');
+  }
+  details.push('PASS: Proof 9: User A append creates server-derived edited v2 and preserves v1');
+
+  // Proof 10: A stale or forged base version is rejected; version number and currentVersionId cannot be forged or skipped.
+  let staleEditBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [recordAId, versionAId, 'Stale base must not overwrite current.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) staleEditBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!staleEditBlocked) {
+    throw new Error('Optimistic version conflict was not enforced for stale source edit');
+  }
+
+  let forgedBaseEditBlocked = false;
+  const forgedBaseVersionId = 'a0000000-0000-4000-8000-999999999999';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `SELECT * FROM public.append_source_edited_version($1, $2, $3);`,
+      [recordAId, forgedBaseVersionId, 'Forged base version must not skip versions.']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === 'P0001' && String(err.message).includes('VERSION_CONFLICT')) forgedBaseEditBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!forgedBaseEditBlocked) {
+    throw new Error('Version conflict was not enforced for forged/skipped base version');
+  }
+  details.push('PASS: Proof 10: Stale or forged base version returns VERSION_CONFLICT without overwrite');
+
+  // Proof 1: User B cannot select User A source (returns 0 rows)
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const selectResB = await client.query(`SELECT * FROM public.source_records WHERE id = $1;`, [recordAId]);
+  await client.query('COMMIT;');
+  if (selectResB.rows.length !== 0) {
+    throw new Error('Policy violation: User B was able to SELECT User A source record!');
+  }
+  details.push('PASS: Proof 1: User B cannot SELECT User A source_records (returns zero rows)');
+
+  // Proof 2: User B cannot insert a version into User A source (fails RLS)
+  let insertVersionBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.source_versions (id, source_id, user_id, version_number, stage, content_hash, plain_text, extraction_report)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
+      ['b0000000-0000-4000-8000-000000000021', recordAId, USER_B_ID, 2, 'raw', 'hash_b', 'Stolen content', JSON.stringify({ extractor: 'text' })]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || String(err).includes('row-level security') || String(err).includes('policy')) {
+      insertVersionBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!insertVersionBlocked) {
+    throw new Error('Policy violation: User B was able to INSERT a version for User A source ID without RLS rejection!');
+  }
+  details.push('PASS: Proof 2: User B cannot INSERT source_versions with User A source_id (fails RLS)');
+
+  // Proof 3: User B cannot insert an artifact job into User A version (fails RLS)
+  let insertJobBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.source_artifact_jobs (id, user_id, source_version_id, destination, target_band, state)
+       VALUES ($1, $2, $3, $4, $5, $6);`,
+      ['b0000000-0000-4000-8000-000000000031', USER_B_ID, versionAId, 'vocabulary_deck', 7.0, 'queued']
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || String(err).includes('row-level security') || String(err).includes('policy')) {
+      insertJobBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!insertJobBlocked) {
+    throw new Error('Policy violation: User B was able to INSERT artifact job for User A version ID without RLS rejection!');
+  }
+  details.push('PASS: Proof 3: User B cannot INSERT source_artifact_jobs with User A version_id (fails RLS)');
+
+  // Proof 4: User A direct version UPDATE gives SQLSTATE 42501
+  let updateVersionFailedWith42501 = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`UPDATE public.source_versions SET plain_text = $1 WHERE id = $2;`, ['tampered', versionAId]);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || String(err).includes('42501') || String(err).includes('append-only')) {
+      updateVersionFailedWith42501 = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!updateVersionFailedWith42501) {
+    throw new Error('Policy violation: Direct UPDATE of source_versions did not raise 42501!');
+  }
+  details.push('PASS: Proof 4: User A direct version UPDATE gives SQLSTATE 42501');
+
+  // Proof 5: User A direct version DELETE gives SQLSTATE 42501
+  let deleteVersionFailedWith42501 = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`DELETE FROM public.source_versions WHERE id = $1;`, [versionAId]);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || String(err).includes('42501') || String(err).includes('append-only')) {
+      deleteVersionFailedWith42501 = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!deleteVersionFailedWith42501) {
+    throw new Error('Policy violation: Direct DELETE of source_versions did not raise 42501!');
+  }
+  details.push('PASS: Proof 5: User A direct version DELETE gives SQLSTATE 42501');
+
+  // Proof 6: User A parent source delete cascades versions and jobs
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(`DELETE FROM public.source_records WHERE id = $1;`, [recordAId]);
+  await client.query('COMMIT;');
+
+  const versionsCountRes = await client.query(
+    `SELECT count(*)::text AS count FROM public.source_versions WHERE id = $1;`,
+    [versionAId]
+  );
+  const jobsCountRes = await client.query(
+    `SELECT count(*)::text AS count FROM public.source_artifact_jobs WHERE id = $1;`,
+    [jobAId]
+  );
+  if (versionsCountRes.rows[0]?.count !== '0' || jobsCountRes.rows[0]?.count !== '0') {
+    throw new Error('Cascade deletion failed: source_versions or source_artifact_jobs remained after parent source_records delete');
+  }
+  details.push('PASS: Proof 6: User A parent source delete cascades versions/jobs');
+
+  // Proof 7: Deleting parent A2 cannot enable later direct version delete for A3 in the same transaction
+  const recordA2Id = 'a0000000-0000-4000-8000-000000000040';
+  const versionA2Id = 'a0000000-0000-4000-8000-000000000041';
+  const recordA3Id = 'a0000000-0000-4000-8000-000000000050';
+  const versionA3Id = 'a0000000-0000-4000-8000-000000000051';
+
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.source_records (id, user_id, title, media_type) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8);`,
+    [recordA2Id, USER_A_ID, 'Record A2', 'text', recordA3Id, USER_A_ID, 'Record A3', 'text']
+  );
+  await client.query(
+    `INSERT INTO public.source_versions (id, source_id, user_id, version_number, stage, content_hash, plain_text)
+     VALUES ($1, $2, $3, $4, $5, $6, $7), ($8, $9, $10, $11, $12, $13, $14);`,
+    [versionA2Id, recordA2Id, USER_A_ID, 1, 'raw', 'hash2', 'Version 2', versionA3Id, recordA3Id, USER_A_ID, 1, 'raw', 'hash3', 'Version 3']
+  );
+  await client.query('COMMIT;');
+
+  let exploitedDeleteRaised42501 = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`DELETE FROM public.source_records WHERE id = $1;`, [recordA2Id]);
+    await client.query(`DELETE FROM public.source_versions WHERE id = $1;`, [versionA3Id]);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || String(err).includes('42501') || String(err).includes('append-only')) {
+      exploitedDeleteRaised42501 = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!exploitedDeleteRaised42501) {
+    throw new Error('Cascade state exploit failed to be blocked: later direct child delete succeeded within same transaction!');
+  }
+  details.push('PASS: Proof 7: Deleting parent A2 cannot enable later direct version delete for A3 in the same transaction');
+
+  return details;
+}
+
+/**
+ * Runs the full disposable-DB PostgreSQL RLS verification suite.
+ */
+export async function runSourcesRlsProof(options: { strict?: boolean; dbUrl?: string } = {}): Promise<RlsProofResult> {
+  const details: string[] = [];
+  const isStrict = options.strict ?? (process.env.CI === 'true' || process.argv.includes('--strict'));
+
+  // 1. Verify migration SQL structure and trigger rules
+  const sql = MIGRATION_PATHS.map((migrationPath) => readFileSync(migrationPath, 'utf8')).join('\n');
+  if (!sql.includes('prevent_source_version_mutation') || !sql.includes('active_deleting_source_id') || !sql.includes('append_source_edited_version') || !sql.includes('SECURITY INVOKER')) {
+    details.push('FAIL: Migration SQL is missing required append-only, cascade, or immutable-edit controls');
+    return { executable: true, proven: false, status: 'failed', details };
+  }
+  details.push('PASS: Migration SQL contains required append-only trigger and isolated cascade controls');
+
+  // 2. Discover local disposable PostgreSQL instance from explicit LOCAL_DISPOSABLE_DB_URL or dbUrl ONLY.
+  // Do NOT auto-probe or read DATABASE_URL, even if it is present.
+  const rawDbUrl = options.dbUrl || process.env.LOCAL_DISPOSABLE_DB_URL;
+
+  if (!rawDbUrl) {
+    if (isStrict) {
+      details.push('FAIL-CLOSED: LOCAL_DISPOSABLE_DB_URL is required in strict mode/CI');
+      return { executable: true, proven: false, status: 'failed', details };
+    }
+
+    details.push('GATE-STATUS: LOCAL_DISPOSABLE_DB_URL environment variable is not set.');
+    details.push('GATE-STATUS: Real disposable-DB RLS test skipped locally (status: skipped_no_db).');
+    details.push('GATE-STATUS: NOT claiming RLS is proven; marked as required CI / disposable-DB gate.');
+    return { executable: false, proven: false, status: 'skipped_no_db', details };
+  }
+
+  let dbConfig: PostgresConfig;
+  try {
+    dbConfig = assertLocalDatabaseUrl(rawDbUrl);
+  } catch (err: unknown) {
+    details.push(`FAIL-CLOSED: ${safeFailureMessage(err, 'Invalid disposable database URL.')}`);
+    return { executable: true, proven: false, status: 'failed', details };
+  }
+
+  const isAlive = await isPortReachable(dbConfig.host, dbConfig.port, 1500);
+  if (!isAlive) {
+    if (isStrict) {
+      details.push(`FAIL-CLOSED: Disposable database host ${dbConfig.host}:${dbConfig.port} is unreachable`);
+      return { executable: true, proven: false, status: 'failed', details };
+    }
+
+    details.push(`GATE-STATUS: Disposable database host ${dbConfig.host}:${dbConfig.port} is unreachable (status: skipped_no_db).`);
+    details.push('GATE-STATUS: Real disposable-DB RLS test skipped locally.');
+    details.push('GATE-STATUS: NOT claiming RLS is proven; marked as required CI / disposable-DB gate.');
+    return { executable: false, proven: false, status: 'skipped_no_db', details };
+  }
+
+  const client = new Client(dbConfig);
+  try {
+    await client.connect();
+  } catch {
+    await client.end().catch(() => {});
+    if (isStrict) {
+      details.push(`FAIL-CLOSED: ${CONNECT_FAILURE_MESSAGE}`);
+      return { executable: true, proven: false, status: 'failed', details };
+    }
+    details.push(`GATE-STATUS: ${CONNECT_FAILURE_MESSAGE} (status: skipped_no_db).`);
+    return { executable: false, proven: false, status: 'skipped_no_db', details };
+  }
+
+  // 3. Execute live tests on reachable database instance
+  try {
+    details.push(`Connected to disposable PostgreSQL instance at ${dbConfig.host}:${dbConfig.port} (database: ${dbConfig.database})`);
+    const suiteDetails = await executeDisposableDbSuite(client);
+    details.push(...suiteDetails);
+    await client.end();
+
+    return {
+      executable: true,
+      proven: true,
+      status: 'passed',
+      details: [
+        ...details,
+        'PASS: All 7 RLS proof contracts verified against live disposable database',
+      ],
+    };
+  } catch (err: unknown) {
+    await client.end().catch(() => {});
+    details.push(`FAIL: ${safeFailureMessage(err, LIVE_EXECUTION_FAILURE_MESSAGE)}`);
+    return { executable: true, proven: false, status: 'failed', details };
+  }
+}
+
+if (process.argv[1]?.endsWith('test-sources-rls-postgres.ts')) {
+  const isStrict = process.argv.includes('--strict') || process.env.CI === 'true';
+  runSourcesRlsProof({ strict: isStrict })
+    .then((result) => {
+      console.log(`[RLS-PROOF] Status: ${result.status} (proven: ${result.proven})`);
+      for (const d of result.details) {
+        console.log(' -', d);
+      }
+      if (result.status === 'failed' || (isStrict && !result.proven)) {
+        process.exit(1);
+      }
+    })
+    .catch(() => {
+      console.error(`[RLS-PROOF] ${UNEXPECTED_FAILURE_MESSAGE}`);
+      process.exit(1);
+    });
+}

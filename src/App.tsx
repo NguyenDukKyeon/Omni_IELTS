@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { AppShellProvider } from './context/AppShellContext';
 import { FocusDockLayout } from './components/shell/FocusDockLayout';
@@ -15,9 +15,11 @@ import { MistakeNotebookModal } from './components/MistakeNotebookModal';
 import { DiagnosticPsychometricianModal } from './components/diagnostic/DiagnosticPsychometricianModal';
 import { SentenceAcademicStylistModal } from './components/practice/SentenceAcademicStylistModal';
 import { AppNotification } from './components/AppNotification';
+import { getClientSourcesLibraryV2Flag, resolveSourcesViewName } from './lib/sources/featureFlags';
 
 import { DashboardView } from './views/DashboardView';
 import { SourceIngestionView } from './views/SourceIngestionView';
+import { SourcesView } from './views/SourcesView';
 import { VocabularySRSView } from './views/VocabularySRSView';
 import { GrammarStrategyView } from './views/GrammarStrategyView';
 import { MediaLabView } from './views/MediaLabView';
@@ -30,6 +32,8 @@ import { ReviewProgressView } from './views/ReviewProgressView';
 const MainContent: React.FC = () => {
   const {
     activeModule,
+    setActiveModule,
+    openArtifactHandoff,
     isExamModeActive,
     isDiagnosticOpen,
     setIsDiagnosticOpen,
@@ -38,12 +42,30 @@ const MainContent: React.FC = () => {
     sentenceStylistData,
   } = useApp();
 
+  useEffect(() => {
+    const mainViewport = document.getElementById('main-viewport-content');
+    if (!(mainViewport instanceof HTMLElement)) return undefined;
+    mainViewport.scrollTop = 0;
+    const frame = window.requestAnimationFrame(() => {
+      mainViewport.scrollTop = 0;
+    });
+    const delayedReset = window.setTimeout(() => {
+      mainViewport.scrollTop = 0;
+    }, 100);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(delayedReset);
+    };
+  }, [activeModule]);
+
   const renderActiveView = () => {
     switch (activeModule) {
       case 'dashboard':
         return <DashboardView />;
       case 'sources':
-        return <SourceIngestionView />;
+        return resolveSourcesViewName(getClientSourcesLibraryV2Flag()) === 'SourcesView'
+          ? <SourcesView onNavigate={setActiveModule} onOpenArtifact={openArtifactHandoff} />
+          : <SourceIngestionView />;
       case 'vocabulary':
         return <VocabularySRSView />;
       case 'grammar':
@@ -73,6 +95,7 @@ const MainContent: React.FC = () => {
         navigation={<ModuleNavigation />}
         evidence={<EvidenceDock />}
         examMode={isFullScreenExam}
+        mainKey={activeModule}
       >
         {renderActiveView()}
       </FocusDockLayout>

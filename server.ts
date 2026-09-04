@@ -52,6 +52,38 @@ import { ForecastServerCache } from "./src/lib/forecastServerCache";
 import { ADAPTIVE_VOCAB_TIERS, getAdaptiveVocabTopic } from "./src/data/adaptiveVocabTopics";
 import { GroundedProviderRouter } from "./src/lib/groundedProviderRouter";
 import {
+  buildGroundedProviderPrompt,
+  handleGroundedChatRequest,
+  handleWebResearchRequest,
+} from "./src/lib/sources/groundedChat";
+import { handleSourceImportRequest } from "./src/lib/sources/importTransport.server";
+import { fetchLegacyUrlHtml } from "./src/lib/sources/urlSafety";
+import {
+  createJsonParserExcludingSourceImport,
+  createSourceImportAdmissionGate,
+  createSourceImportJsonParser,
+  createSourceImportParserErrorHandler,
+  createSourceVersionEditAdmissionGate,
+  createSourceVersionEditJsonParser,
+} from "./src/lib/sources/importRouteGate.server";
+import {
+  handleArtifactJobRequest,
+  handleArtifactJobStatusRequest,
+} from "./src/lib/sources/artifactTransport.server";
+import {
+  handleSourceVersionEditRequest,
+  handleSourceVersionRequest,
+  handleSourceVersionsRequest,
+  handleSourcesLibraryRequest,
+} from "./src/lib/sources/libraryTransport.server";
+import { injectSourcesRuntimeFlag, parseSourcesLibraryV2Env } from "./src/lib/sources/featureFlags.server";
+import { createSourcesQuotaConsumer, parseSourcesQuotaEnv } from "./src/lib/sources/quota.server";
+import {
+  createLearnerJwtSourcesRepository,
+  resolveSourcesSupabaseConfig,
+  verifyLearnerAccessToken,
+} from "./src/lib/sources/sourcesRepository.server";
+import {
   BifrostGatewayClient,
   WebBridgeGatewayClient,
   buildGeminiGatewayRequestBody,
@@ -95,6 +127,7 @@ dotenv.config({ quiet: true });
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const execFileAsync = promisify(execFile);
+const sourcesQuotaConsumer = createSourcesQuotaConsumer(parseSourcesQuotaEnv(process.env));
 const configuredLiveHubReceiptSecret = process.env.LIVE_HUB_RECEIPT_SECRET?.trim();
 const liveHubReceiptSecret = configuredLiveHubReceiptSecret || crypto.randomBytes(32).toString('hex');
 if (!configuredLiveHubReceiptSecret) {
@@ -185,7 +218,8 @@ function percentile(values: number[], ratio: number) {
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
 }
 
-app.use(express.json({ limit: "15mb" }));
+const genericJsonParser = express.json({ limit: "15mb" });
+app.use(createJsonParserExcludingSourceImport(genericJsonParser));
 
 // Initialize GoogleGenAI client lazily or safely with User-Agent telemetry
 function getGeminiClient(request?: express.Request): GoogleGenAI | null {
@@ -483,6 +517,33 @@ async function callGeminiResiliently(
   });
   if (result.lane === 'web_bridge') recordAiLatency(tier, Date.now() - startedAt);
   return result.value;
+}
+
+async function executeBalancedText(input: {
+  request?: express.Request;
+  contents: string;
+  config?: Record<string, unknown>;
+  validateText?: (text: string) => boolean;
+}): Promise<{ value: string; provider: string; model: string; fallbackReason?: string }> {
+  return groundedProviderRouter.execute({
+    primary: {
+      provider: 'gemini',
+      model: AI_TASK_PROFILES.balanced.model,
+      run: async () => {
+        const ai = getGeminiClient(input.request);
+        const generated = await callOfficialProvidersResiliently(ai, {
+          contents: input.contents,
+          taskTier: 'balanced',
+          config: input.config,
+          validateText: input.validateText,
+        });
+        if (!generated.text) {
+          throw generated.error || new Error('empty balanced text response');
+        }
+        return generated.text;
+      },
+    },
+  });
 }
 
 // Health check endpoint
@@ -822,18 +883,15 @@ app.post("/api/fetch-url", async (req, res) => {
     }
 
     const targetUrl = url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`;
-    const response = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OmniIELTS/1.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    const fetched = await fetchLegacyUrlHtml(targetUrl);
+    if (!fetched.ok || !fetched.html) {
+      if (fetched.code === "RIGHTS_REJECTED") {
+        return res.status(403).json({ error: "URL này không được phép truy cập từ OMNI." });
       }
-    });
-
-    if (!response.ok) {
-      return res.status(400).json({ error: `Không thể tải trang (HTTP ${response.status}). Vui lòng kiểm tra lại đường dẫn hoặc dán trực tiếp nội dung văn bản.` });
+      return res.status(400).json({ error: "Không thể tải trang. Vui lòng kiểm tra lại đường dẫn hoặc dán trực tiếp nội dung văn bản." });
     }
 
-    const html = await response.text();
+    const html = fetched.html;
     const cleanText = extractCleanTextFromHtml(html);
 
     // Extract title from <title> or <h1>
@@ -8489,6 +8547,309 @@ app.post('/api/forecast/refresh', handleForecastRefresh);
 app.post('/api/gemini/forecast-grounding', handleForecastRefresh);
 app.post('/api/speaking/analyze', (_req, res) => res.redirect(307, '/api/gemini/speaking-live-audio-evaluation'));
 
+function sourcesCloudConfig() {
+  return resolveSourcesSupabaseConfig(process.env);
+}
+
+function writeSourcesTransportResult(
+  res: express.Response,
+  result: { status: number; body: Record<string, unknown>; headers?: Record<string, string> },
+) {
+  if (result.headers) {
+    for (const [name, value] of Object.entries(result.headers)) res.setHeader(name, value);
+  }
+  return res.status(result.status).json(result.body);
+}
+
+app.get('/api/sources/library', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourcesLibraryRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.get('/api/sources/versions/:versionId', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourceVersionRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    versionId: req.params.versionId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.get('/api/sources/sources/:sourceId/versions', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleSourceVersionsRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    sourceId: req.params.sourceId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.post('/api/sources/versions',
+  (req, res, next) => {
+    const cloud = sourcesCloudConfig();
+    return createSourceVersionEditAdmissionGate({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      cloudConfigured: cloud.configured,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+    })(req, res, next);
+  },
+  createSourceVersionEditJsonParser(),
+  createSourceImportParserErrorHandler(),
+  async (req, res) => {
+    const cloud = sourcesCloudConfig();
+    const result = await handleSourceVersionEditRequest({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      authorizationHeader: req.header('authorization'),
+      body: req.body,
+      cloudConfigured: cloud.configured,
+      verifiedLearner: res.locals.sourcesVerifiedLearner,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+      repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+    });
+    return writeSourcesTransportResult(res, result);
+  },
+);
+
+app.post('/api/sources/import',
+  (req, res, next) => {
+    const cloud = sourcesCloudConfig();
+    return createSourceImportAdmissionGate({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      cloudConfigured: cloud.configured,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+    })(req, res, next);
+  },
+  createSourceImportJsonParser(),
+  createSourceImportParserErrorHandler(),
+  async (req, res) => {
+    const cloud = sourcesCloudConfig();
+    const result = await handleSourceImportRequest({
+      featureEnabled: parseSourcesLibraryV2Env(process.env),
+      authorizationHeader: req.header('authorization'),
+      body: req.body,
+      cloudConfigured: cloud.configured,
+      verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+      repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+        accessToken,
+        supabaseUrl: cloud.supabaseUrl,
+        supabaseAnonKey: cloud.supabaseAnonKey,
+      }),
+      consumeQuota: sourcesQuotaConsumer,
+      verifiedLearner: res.locals.sourcesVerifiedLearner,
+    });
+    return writeSourcesTransportResult(res, result);
+  },
+);
+
+app.post('/api/sources/artifact-jobs', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleArtifactJobRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    consumeQuota: sourcesQuotaConsumer,
+    routerExecute: async ({ profile, tools, destination, sourceVersionId, sourceSpan, sourceContext, targetBand, customInstruction }) => {
+      if (profile.tier !== 'balanced' || profile.capability !== 'text' || tools.length > 0) {
+        throw new Error('Sources artifacts require the balanced text profile without tools.');
+      }
+      const prompt = [
+        'Create exactly one validated JSON artifact for the requested destination.',
+        'Use only the supplied source context. Do not search the web.',
+        `Destination: ${destination}`,
+        `Target band: ${targetBand ?? 7}`,
+        `SourceVersionId: ${sourceVersionId}`,
+        `Selected span: ${JSON.stringify(sourceSpan)}`,
+        ...(customInstruction ? [`Learner instruction: ${customInstruction}`] : []),
+        'Source context:',
+        sourceContext,
+        'Return JSON only. Do not include scores, XP, mastery, or destination persistence commands.',
+      ].join('\n');
+      const routed = await executeBalancedText({
+        request: req,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+        validateText: (text) => {
+          try {
+            JSON.parse(text);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      });
+      return { value: JSON.parse(routed.value) };
+    },
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.get('/api/sources/artifact-jobs/:jobId', async (req, res) => {
+  const cloud = sourcesCloudConfig();
+  const result = await handleArtifactJobStatusRequest({
+    featureEnabled: parseSourcesLibraryV2Env(process.env),
+    authorizationHeader: req.header('authorization'),
+    jobId: req.params.jobId,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+  });
+  return writeSourcesTransportResult(res, result);
+});
+
+app.post('/api/sources/grounded-chat', async (req, res) => {
+  const featureEnabled = parseSourcesLibraryV2Env(process.env);
+  const cloud = sourcesCloudConfig();
+  const result = await handleGroundedChatRequest({
+    featureEnabled,
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    repositoryForToken: (accessToken) => createLearnerJwtSourcesRepository({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    consumeQuota: sourcesQuotaConsumer,
+    routerExecute: async ({ prompt, question, profile, tools }) => {
+      if (profile.tier !== 'balanced' || profile.capability !== 'text' || tools.length > 0) {
+        throw new Error('Grounded chat must use the balanced text profile without tools.');
+      }
+      const routed = await executeBalancedText({
+        request: req,
+        contents: buildGroundedProviderPrompt(prompt, question),
+        config: { responseMimeType: 'application/json' },
+      });
+      const raw = routed.value;
+      return {
+        ...routed,
+        value: typeof raw === 'string' ? JSON.parse(raw) : raw,
+      };
+    },
+  });
+  if (result.headers?.['Retry-After']) {
+    res.setHeader('Retry-After', result.headers['Retry-After']);
+  }
+  return res.status(result.status).json(result.body);
+});
+
+app.post('/api/sources/web-research', async (req, res) => {
+  const featureEnabled = parseSourcesLibraryV2Env(process.env);
+  const cloud = sourcesCloudConfig();
+  const braveKey = process.env.BRAVE_SEARCH_API_KEY?.trim() || '';
+  const result = await handleWebResearchRequest({
+    featureEnabled,
+    authorizationHeader: req.header('authorization'),
+    body: req.body,
+    cloudConfigured: cloud.configured,
+    searchAdapterConfigured: Boolean(braveKey),
+    verifyAccessToken: (accessToken) => verifyLearnerAccessToken({
+      accessToken,
+      supabaseUrl: cloud.supabaseUrl,
+      supabaseAnonKey: cloud.supabaseAnonKey,
+    }),
+    consumeQuota: sourcesQuotaConsumer,
+    webSearch: braveKey
+      ? async ({ question }) => {
+          const evidence = await requestBraveForecastEvidence({ apiKey: braveKey, query: question });
+          return {
+            webCitations: (evidence.sources || []).map((source) => ({
+              title: source.title,
+              url: source.url,
+              snippet: source.snippet,
+            })),
+          };
+        }
+      : undefined,
+  });
+  if (result.headers?.['Retry-After']) {
+    res.setHeader('Retry-After', result.headers['Retry-After']);
+  }
+  return res.status(result.status).json(result.body);
+});
+
 const ConsentActionSchema = z.enum(['direct', 'search_more', 'practice_available', 'ai_fill_missing', 'create_ai_variant']);
 
 const BaseLiveHubArtifactItemSchema = z.object({
@@ -8874,6 +9235,7 @@ Trả về JSON: { "recommendedNextStepsVi": ["gợi ý 1...", "gợi ý 2..."] 
 
 // Vite middleware setup
 async function startServer() {
+  const sourcesLibraryV2Enabled = parseSourcesLibraryV2Env(process.env);
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -8884,12 +9246,29 @@ async function startServer() {
       },
       appType: "spa",
     });
+    app.use(async (req, res, next) => {
+      const acceptsHtml = req.headers.accept?.includes('text/html');
+      const isShellRequest = req.method === 'GET' && acceptsHtml && (req.path === '/' || req.path === '/index.html');
+      if (!isShellRequest) return next();
+      try {
+        const template = await readFile(path.join(process.cwd(), 'index.html'), 'utf8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+        return res.status(200).type('html').send(injectSourcesRuntimeFlag(transformed, sourcesLibraryV2Enabled));
+      } catch (error) {
+        return next(error);
+      }
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.use(express.static(distPath, { index: false }));
+    app.get("*", async (_req, res, next) => {
+      try {
+        const template = await readFile(path.join(distPath, 'index.html'), 'utf8');
+        return res.status(200).type('html').send(injectSourcesRuntimeFlag(template, sourcesLibraryV2Enabled));
+      } catch (error) {
+        return next(error);
+      }
     });
   }
 

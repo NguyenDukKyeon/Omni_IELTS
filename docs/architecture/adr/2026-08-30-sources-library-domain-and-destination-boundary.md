@@ -75,15 +75,61 @@ We select **Option B**.
 
 1. **Immutable Versioning**: `SourceVersion` rows are append-only and identified by SHA-256 content hashes. Updates create a new version (`v2`, `stage: 'edited'`).
 2. **Single-Destination Job Machine**: `SourceArtifactJob` accepts exactly one `destination` (`practice`, `mock_section`, `vocabulary_deck`, `note`, `idea_bank`).
-3. **Validated Draft Contract**: Artifact Studio produces a `ValidatedArtifactDraft` with a strict provenance bundle. The destination module owns the validation and persistence of the resulting entity.
-4. **Grounded Isolation**: Grounded Chat searches only selected `SourceVersion`s through `POST /api/sources/grounded-chat`. It uses the existing central router, never a new provider path, and never `AI_TASK_PROFILES.grounded` (that profile enables search tools). External search (`CAP-GLB-SEARCH`) is isolated behind `POST /api/sources/web-research` and the explicit learner trigger ("Tra cứu dẫn chứng") and tagged as `web_citation`.
+3. **Validated Draft Contract**: Artifact Studio produces a `ValidatedArtifactDraft` with a strict provenance bundle copied from the input source (never model-invented provenance). The artifact router receives the exact `SourceSpan` used for the job and a bounded context built only from validated blocks of `job.selection`, or from that exact version's usable blocks when no selection exists — never unrelated or full `plainText`. The same 32k-token conservative estimate applies; overflow is `needs_review` with no router call. Every ready draft retains an explicit source-version/span reference: Practice already has `sourceSpanRef`; Mock and Note also carry `sourceSpanRef`; Vocabulary/Idea Bank keep per-item `sourceSpan`. The destination module owns the validation and persistence of the resulting entity. Invalid or incomplete output is `needs_review` / `failed`, never `ready`. P03 does not fabricate Listening audio, answer keys, transcripts, scores, mastery, XP, or destination rows.
+
+4. **Grounded Isolation**: Grounded Chat searches only selected `SourceVersion`s through `POST /api/sources/grounded-chat`. Both this route and `POST /api/sources/web-research` call server-only `parseSourcesLibraryV2Env(process.env)` first; when the flag is not `true` they return typed `feature_disabled` at HTTP 403 before JWT verification, quota, repository hydration, Brave, or the AI router, without exposing the flag name, source IDs, or secrets. The request body carries only `selectedVersionIds` (plus question / optional span). The server verifies the learner Supabase access token with Supabase Auth (`getUser`) using URL + anon key only — never a service-role key — before any repository, AI, Brave, or quota call. A syntactically valid Bearer string is not sufficient. After verified identity, each route consumes a separate in-process `consumeFixedWindowQuota` bucket keyed only by that learner `userId` (grounded-chat vs web-research; never IP or unverified Bearer text). Defaults are 20 / 10 requests per hour, env-configurable and clamped; this is not a paid plan and is not durable across instances. Limit exceeded is typed `quota_exceeded` HTTP 429 with `Retry-After` and zero repository/router/Brave calls. Forged JWTs do not consume quota. Hydration then uses a request-scoped `SourcesRepository` with the verified learner JWT, the anon key, and existing RLS. Model execution is delegated to the central balanced-text executor (`executeBalancedText` / `GroundedProviderRouter` / `AI_TASK_PROFILES.balanced`, `capability: 'text'`, `tools: []`); the Sources handler must not create or select a Gemini client. It never hydrates from process memory, never trusts client-supplied source text, never opens a new provider path, never constructs `@google/genai` inside Sources, never calls `/api/gemini/*`, and never uses `AI_TASK_PROFILES.grounded` (that profile enables search tools). Missing, foreign, or unselected IDs yield one non-disclosing typed `selection_unavailable` failure and do not invoke AI. Unknown or mismatched selected spans yield `unsupported_by_sources` and never fall back to full `plainText`. A source with non-empty `plainText` but zero usable blocks is `unsupported_by_sources` with no model call. The 32k-token conservative estimate covers the complete provider prompt (instructions + selected source context + question + JSON instruction); the request schema caps `question` at 8,000 Unicode code points for both grounded chat and web research. Oversized question or total prompt yields typed `select_smaller_source` with no model or Brave call. Missing or invalid auth yields typed `auth_required`. Cloud unavailability yields typed `unavailable` with no fake context. Guests are not given silent cloud Source Chat. The server must not log or persist raw `SourceVersion` plain text, bearer tokens, or API keys. External search (`CAP-GLB-SEARCH`) is isolated behind the same verified-JWT `POST /api/sources/web-research` path and the explicit learner trigger ("Tra cứu dẫn chứng") and tagged as `web_citation`. If no existing approved search adapter is configured, web-research returns typed `unavailable` rather than adding a crawler. Destination handoff is navigable only for `job.state === 'ready'` with a validated draft whose destination matches the job, controlled provenance exists, and an explicit source-version/span reference matches `job.sourceVersionId` (and `job.selection` exactly when a selection exists); queued/processing/failed/missing-draft/missing-or-mismatched-span jobs return a non-navigable typed result with `autoRedirect: false` and no destination writes.
+
+
 5. **Zero Mastery Policy**: Sources module emits zero `SkillEvidence`, `MistakeEvidence`, `MasteryUpdate`, XP, or automatic vocabulary cards.
 6. **Extraction scope**: P03 extractors implement pasted text/Markdown, article URL, text-layer PDF, DOCX, and VTT/SRT only. YouTube, audio, and chart/image create `handoff_required` / `unavailable` reference records pointing at P04 or P07. No fake transcript, citation, score, or "real exam" claim.
-7. **Feature flag**: `sources_library_v2` (env `OMNI_SOURCES_LIBRARY_V2`) defaults OFF. `sources` continues to render legacy `SourceIngestionView` until the flag is ON. Rollback is flag OFF in one deploy. The legacy view is kept as a one-release facade and is not deleted in the P03 coding epic.
-8. **No Private Web Bridge dependency**: P03 does not require public or paid `CAP-GLB-PRIVATE-WEB-BRIDGE`.
-9. **Dispatch gate**: P03 implementation remains blocked until P02 is merged into `origin/main` and this corrected plan receives Product Owner approval.
+7. **Batch C0 transport**: Import and artifact controls are backed by authenticated server routes before they are rendered. Import request validation, PDF/DOCX base64 decoding and signatures, verified JWT, separate quota buckets, learner-JWT/RLS persistence, and typed lifecycle results stay in server-only transport modules. Artifact jobs use the existing balanced text executor with no tools, persist only `source_artifact_jobs`, and expose learner-scoped status reads; destination persistence remains owner-controlled. The browser wrapper obtains the current session token per request and never stores or logs it. No delete control is exposed without a corresponding real learner-owned delete route.
+8. **Feature flag**: `sources_library_v2` (env `OMNI_SOURCES_LIBRARY_V2`) defaults OFF. `sources` continues to render legacy `SourceIngestionView` until the flag is ON. The same env is a real API kill switch: `parseSourcesLibraryV2Env(process.env)` gates `POST /api/sources/grounded-chat` and `POST /api/sources/web-research` to typed HTTP 403 `feature_disabled` before any JWT, quota, repository, Brave, or router work. Rollback is flag OFF in one deploy. The legacy view is kept as a one-release facade and is not deleted in the P03 coding epic.
+9. **No Private Web Bridge dependency**: P03 does not require public or paid `CAP-GLB-PRIVATE-WEB-BRIDGE`.
+10. **Dispatch gate**: P03 implementation remains blocked until P02 is merged into `origin/main` and this corrected plan receives Product Owner approval.
 
 ---
+
+## 4.1 Batch C correction delta
+
+The Batch C correction supersedes the earlier implementation notes where they conflict:
+
+1. The destination handoff is a typed, in-memory `PendingArtifactHandoff` held at the app navigation boundary. It is created only by the learner's explicit `Open artifact` action, consumed by the matching destination owner, and is not persisted or resumed after reload. Sources never writes destination rows.
+2. `OMNI_SOURCES_LIBRARY_V2` is the single deploy-level flag. Express injects the server-parsed boolean into the browser shell as `window.__OMNI_FLAGS__.sourcesLibraryV2`; there is no manually synchronised `VITE_OMNI_SOURCES_LIBRARY_V2` flag. OFF selects the legacy view and rejects every Sources cloud route before work; ON selects SourcesView and its routes.
+3. Source import authenticates the verified learner before binary decoding, hashing, extraction, or quota consumption. Cheap schema and length checks remain before authentication. Semantically invalid or oversized requests consume no quota, and raw source bytes/text never enter logs or error bodies.
+4. Source import and artifact generation use distinct documented in-process quota configurations and defaults. Artifact target bands are validated at 3.0 through 9.0 in 0.5 increments by the request schema, job factory, and UI.
+
+### 4.2 Batch C.2 security and integrity correction
+
+The import route has a header-only admission boundary before any JSON body
+parser. The global Express JSON parser explicitly skips the import path,
+including its accepted trailing-slash form. The admission boundary checks the
+feature flag, Bearer syntax, verified learner JWT, JSON content type, and a
+declared `Content-Length` before the route installs its scoped parser. That
+parser is limited to `SOURCE_IMPORT_MAX_BASE64_CHARS` plus a fixed 16 KiB JSON
+envelope allowance. Requests without a declared length still receive the same
+bounded parser, so chunked bodies cannot bypass the limit. No client-provided
+forwarded IP header is used for identity or rate limiting.
+
+DOCX archives are inspected from central-directory metadata before Mammoth:
+512 entries maximum, 4 MiB uncompressed per entry, 16 MiB total uncompressed,
+and a 100:1 entry compression-ratio ceiling. Malformed, encrypted,
+multi-disk, ZIP64, and unsupported-structure archives fail closed. The full
+DOCX transformation (Mammoth conversion, JSDOM construction, DOMPurify
+sanitisation, allowed-block extraction, whitespace normalisation, and output
+limits) runs in a short-lived child process with a 256 MiB V8 old-space limit
+and a 15 second timeout. The child returns only bounded plain text and block
+data; the parent never receives converted HTML. PDF extraction is limited to
+the first 100 pages and uses only public `pdf-parse` controls. Both formats
+reject, rather than truncate, output over 200,000 Unicode code points or 2,000
+blocks. These failures use the typed `RESOURCE_LIMIT_EXCEEDED` result and
+never create a source version.
+
+Artifact generation hydrates exactly one RLS-visible version, requires
+`version.sourceId === record.id` and `record.processingState === 'ready'`, and
+validates every supplied span record/version/block ID against that pair before
+the `artifact-generation` quota, job writes, or router call. A historical
+version is valid when it belongs to that ready record; `currentVersionId` is
+not required to equal the selected version.
 
 ## 5. Consequences & Trade-offs
 
@@ -99,7 +145,7 @@ We select **Option B**.
 ### Negative / Mitigations
 
 - **Trade-off**: Learner must click through to destination module to save draft.
-  - *Mitigation*: Smooth deep-linking via "Open artifact" CTA with auto-recovery of pending draft in destination module.
+  - *Mitigation*: A typed in-memory handoff opens the matching destination only after the learner clicks; reload does not persist or resume the draft.
 - **Trade-off**: Multi-step batch import requires robust client-side job polling/state machine.
   - *Mitigation*: Implemented via deterministic `ImportJobMachine` with clear UI progress for each item.
 - **Trade-off**: A YouTube URL entered in Sources does not yield captions in this epic.
