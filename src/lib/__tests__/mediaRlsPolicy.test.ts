@@ -72,19 +72,39 @@ describe('P04 Media Learning Room Database Schema and RLS Policies', () => {
     expect(sql).toMatch(/media_resume_states[\s\S]*media_lessons[\s\S]*auth\.uid\(\)/);
   });
 
-  it('enforces immutability triggers for transcript versions while allowing parent cascade', () => {
+  it('enforces immutability triggers for transcript versions using database-owned non-spoofable cascade', () => {
     const sql = readFileSync(migrationPath, 'utf8');
     expect(sql).toContain('prevent_media_transcript_version_mutation');
-    expect(sql).toContain('omni.active_deleting_media_lesson_id');
+    // Spoofable GUC must be strictly removed
+    expect(sql).not.toContain('omni.active_deleting_media_lesson_id');
+    // Database-owned cascade tracking in private schema
+    expect(sql).toContain('omni_internal.active_deleting_media_lessons');
+    expect(sql).toContain('REVOKE ALL ON SCHEMA omni_internal FROM PUBLIC, anon, authenticated;');
     expect(sql).toContain('BEFORE UPDATE OR DELETE ON public.media_transcript_versions');
     expect(sql).toContain('BEFORE DELETE ON public.media_lessons');
     expect(sql).toContain('AFTER DELETE ON public.media_lessons');
   });
 
-  it('enforces check constraints against raw audio binary and base64 in attempt and transcript tables', () => {
+  it('enforces provenance ownership triggers on media_lessons', () => {
     const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toContain('enforce_media_lesson_provenance');
+    expect(sql).toContain('media_lessons_enforce_provenance');
+    expect(sql).toContain('Invalid source reference');
+    expect(sql).toContain('Invalid version reference');
+  });
+
+  it('enforces check constraints against raw audio binary and base64 across tables and urls', () => {
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toContain('media_lessons_media_url_no_raw_audio');
+    expect(sql).toContain('shadowing_evaluation_schema_valid');
     expect(sql).toMatch(/data:audio\//);
     expect(sql).toMatch(/base64/);
+  });
+
+  it('enforces complete state machine processing states including needs_review and requires_original_audio in check constraint', () => {
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toContain("'needs_review'");
+    expect(sql).toContain("'requires_original_audio'");
   });
 
   it('models multi-tenant isolation: User B cannot attach attempts to User A lesson/version', () => {

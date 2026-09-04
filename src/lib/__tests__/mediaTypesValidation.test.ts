@@ -223,4 +223,46 @@ describe('Media Domain Contracts and Zod Schemas', () => {
       })
     ).toThrow();
   });
+
+  it('validates all MediaProcessingState values including needs_review and requires_original_audio', () => {
+    const allStates = [
+      'queued',
+      'probing',
+      'captions',
+      'transcribing',
+      'normalizing',
+      'validating',
+      'ready',
+      'degraded',
+      'unavailable',
+      'failed',
+      'needs_review',
+      'requires_original_audio',
+    ] as const;
+
+    const baseLesson = {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      title: 'State Test Lesson',
+      mediaType: 'youtube' as const,
+      mediaUrl: 'https://www.youtube.com/watch?v=wr6fQ4KpbRM',
+      durationMs: 60000,
+      createdAt: '2026-09-04T00:00:00.000Z',
+      updatedAt: '2026-09-04T00:00:00.000Z',
+    };
+
+    for (const state of allStates) {
+      const lesson = {
+        ...baseLesson,
+        processingState: state,
+      };
+      const parsed = MediaLessonSchema.parse(lesson);
+      expect(parsed.processingState).toBe(state);
+
+      // Round-trip JSON serialization
+      const serialized = JSON.stringify(parsed);
+      const deserialized = MediaLessonSchema.parse(JSON.parse(serialized));
+      expect(deserialized).toEqual(parsed);
+    }
+  });
 });

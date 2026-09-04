@@ -1,7 +1,19 @@
 -- OMNI Media Learning Room Schema & Multi-Tenant RLS Policies (P04)
 -- Date: 2026-09-04
 -- Constraints: auth.uid() ownership on all tables, cross-row ownership checks,
--- immutable transcript versions with safe cascade delete, zero raw audio binary/base64 storage.
+-- immutable transcript versions with database-owned non-spoofable cascade delete,
+-- provenance ownership enforcement, and structural zero raw audio binary/base64 storage.
+
+-- 0. Internal private schema for database-owned non-spoofable cascade tracking
+CREATE SCHEMA IF NOT EXISTS omni_internal;
+REVOKE ALL ON SCHEMA omni_internal FROM PUBLIC, anon, authenticated;
+
+CREATE UNLOGGED TABLE IF NOT EXISTS omni_internal.active_deleting_media_lessons (
+  lesson_id UUID NOT NULL,
+  tx_id XID8 NOT NULL,
+  PRIMARY KEY (lesson_id, tx_id)
+);
+REVOKE ALL ON TABLE omni_internal.active_deleting_media_lessons FROM PUBLIC, anon, authenticated;
 
 -- 1. Media Lessons
 CREATE TABLE IF NOT EXISTS public.media_lessons (
@@ -17,14 +29,18 @@ CREATE TABLE IF NOT EXISTS public.media_lessons (
   source_record_id UUID REFERENCES public.source_records(id) ON DELETE SET NULL,
   source_version_id UUID REFERENCES public.source_versions(id) ON DELETE SET NULL,
   processing_state TEXT NOT NULL DEFAULT 'queued' CHECK (
-    processing_state IN ('queued', 'probing', 'captions', 'transcribing', 'normalizing', 'validating', 'ready', 'degraded', 'unavailable', 'failed')
+    processing_state IN ('queued', 'probing', 'captions', 'transcribing', 'normalizing', 'validating', 'ready', 'degraded', 'unavailable', 'failed', 'needs_review', 'requires_original_audio')
   ),
   transcript_state TEXT CHECK (
     transcript_state IN ('ready', 'unavailable_transcript', 'coverage_insufficient', 'needs_review')
   ),
   last_practiced_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT media_lessons_media_url_no_raw_audio CHECK (
+    NOT (lower(media_url) LIKE 'data:%') AND
+    NOT (lower(media_url) LIKE '%base64%')
+  )
 );
 
 -- 2. Media Transcript Versions (immutable append-only)
@@ -43,7 +59,8 @@ CREATE TABLE IF NOT EXISTS public.media_transcript_versions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (lesson_id, version_number),
   CONSTRAINT transcript_no_raw_audio CHECK (
-    NOT (segments::text LIKE '%data:audio/%')
+    NOT (lower(segments::text) LIKE '%data:audio/%') AND
+    NOT (lower(segments::text) LIKE '%base64%')
   )
 );
 
@@ -58,10 +75,13 @@ CREATE TABLE IF NOT EXISTS public.media_shadowing_attempts (
   acoustic_status TEXT NOT NULL CHECK (acoustic_status IN ('measured', 'unavailable')),
   evaluation JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT no_raw_audio_binary CHECK (
+  CONSTRAINT shadowing_evaluation_schema_valid CHECK (
     evaluation IS NULL OR (
-      NOT (evaluation::text LIKE '%data:audio/%') AND
-      NOT (evaluation::text LIKE '%base64%')
+      jsonb_typeof(evaluation) = 'object'
+      AND (evaluation ?& ARRAY['overallScore', 'fluencyScore', 'intonationScore', 'accuracyScore', 'feedbackVi', 'swallowedWords', 'stressHighlights', 'acousticStatus'])
+      AND ((evaluation - ARRAY['overallScore', 'fluencyScore', 'intonationScore', 'accuracyScore', 'feedbackVi', 'swallowedWords', 'stressHighlights', 'actionableAdviceVi', 'acousticStatus', 'telemetry']) = '{}'::jsonb)
+      AND NOT (lower(evaluation::text) LIKE '%data:audio/%')
+      AND NOT (lower(evaluation::text) LIKE '%base64%')
     )
   )
 );
@@ -82,8 +102,8 @@ CREATE TABLE IF NOT EXISTS public.media_dictation_attempts (
   mistake_ids UUID[] NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT dictation_no_raw_audio CHECK (
-    NOT (user_response_text LIKE '%data:audio/%') AND
-    NOT (user_response_text LIKE '%base64%')
+    NOT (lower(user_response_text) LIKE 'data:%') AND
+    NOT (lower(user_response_text) LIKE '%base64%')
   )
 );
 
@@ -107,11 +127,78 @@ CREATE INDEX IF NOT EXISTS idx_media_versions_lesson ON public.media_transcript_
 CREATE INDEX IF NOT EXISTS idx_media_shadowing_user ON public.media_shadowing_attempts(user_id, lesson_id);
 CREATE INDEX IF NOT EXISTS idx_media_dictation_user ON public.media_dictation_attempts(user_id, lesson_id);
 
+-- Enforce Provenance Ownership and Cross-Row Constraints on media_lessons
+CREATE OR REPLACE FUNCTION public.enforce_media_lesson_provenance()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_auth_uid UUID := auth.uid();
+  v_owner_id UUID;
+BEGIN
+  IF v_auth_uid IS NOT NULL AND NEW.user_id <> v_auth_uid THEN
+    RAISE EXCEPTION 'Invalid user ownership' USING ERRCODE = '42501';
+  END IF;
+
+  v_owner_id := COALESCE(v_auth_uid, NEW.user_id);
+
+  -- 1. If source_record_id is supplied, it must belong to owner
+  IF NEW.source_record_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.source_records
+      WHERE id = NEW.source_record_id AND user_id = v_owner_id
+    ) THEN
+      RAISE EXCEPTION 'Invalid source reference' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- 2. If source_version_id is supplied, it must belong to source_record_id and owner
+  IF NEW.source_version_id IS NOT NULL THEN
+    IF NEW.source_record_id IS NULL THEN
+      RAISE EXCEPTION 'Invalid source reference' USING ERRCODE = '42501';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM public.source_versions
+      WHERE id = NEW.source_version_id
+        AND source_id = NEW.source_record_id
+        AND user_id = v_owner_id
+    ) THEN
+      RAISE EXCEPTION 'Invalid source reference' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- 3. If current_version_id is supplied, it must belong to this lesson and owner
+  IF NEW.current_version_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.media_transcript_versions
+      WHERE id = NEW.current_version_id
+        AND lesson_id = NEW.id
+        AND user_id = v_owner_id
+    ) THEN
+      RAISE EXCEPTION 'Invalid version reference' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS media_lessons_enforce_provenance ON public.media_lessons;
+CREATE TRIGGER media_lessons_enforce_provenance
+  BEFORE INSERT OR UPDATE OF user_id, source_record_id, source_version_id, current_version_id ON public.media_lessons
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_media_lesson_provenance();
+
 -- Append-only trigger for media_transcript_versions: blocks direct UPDATE/DELETE
--- Allows parent cascade delete through session-scoped active deleting lesson marker.
+-- Allows parent cascade delete ONLY via database-owned non-spoofable transaction tracking table in omni_internal schema.
 CREATE OR REPLACE FUNCTION public.prevent_media_transcript_version_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
 AS $$
 BEGIN
   IF TG_OP = 'UPDATE' THEN
@@ -120,7 +207,10 @@ BEGIN
   END IF;
 
   IF TG_OP = 'DELETE' THEN
-    IF current_setting('omni.active_deleting_media_lesson_id', true) = OLD.lesson_id::text THEN
+    IF EXISTS (
+      SELECT 1 FROM omni_internal.active_deleting_media_lessons
+      WHERE lesson_id = OLD.lesson_id AND tx_id = pg_current_xact_id()
+    ) THEN
       RETURN OLD;
     END IF;
     RAISE EXCEPTION 'media_transcript_versions are append-only; direct delete forbidden'
@@ -140,9 +230,13 @@ CREATE TRIGGER media_transcript_versions_append_only
 CREATE OR REPLACE FUNCTION public.mark_media_lesson_cascade_delete()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
 AS $$
 BEGIN
-  PERFORM set_config('omni.active_deleting_media_lesson_id', OLD.id::text, true);
+  INSERT INTO omni_internal.active_deleting_media_lessons (lesson_id, tx_id)
+  VALUES (OLD.id, pg_current_xact_id())
+  ON CONFLICT DO NOTHING;
   RETURN OLD;
 END;
 $$;
@@ -150,9 +244,12 @@ $$;
 CREATE OR REPLACE FUNCTION public.clear_media_lesson_cascade_delete()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
 AS $$
 BEGIN
-  PERFORM set_config('omni.active_deleting_media_lesson_id', '', true);
+  DELETE FROM omni_internal.active_deleting_media_lessons
+  WHERE lesson_id = OLD.id AND tx_id = pg_current_xact_id();
   RETURN OLD;
 END;
 $$;

@@ -14,6 +14,8 @@ export const MediaProcessingStateSchema = z.enum([
   'degraded',
   'unavailable',
   'failed',
+  'needs_review',
+  'requires_original_audio',
 ]);
 export type MediaProcessingState = z.infer<typeof MediaProcessingStateSchema>;
 

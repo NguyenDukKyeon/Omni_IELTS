@@ -43,7 +43,9 @@ function isSafeInternalFailureMessage(message: string): boolean {
   return (
     message.startsWith('SECURITY_VIOLATION:') ||
     message.startsWith('Policy violation:') ||
-    message.startsWith('Cascade deletion failed:')
+    message.startsWith('Cascade deletion failed:') ||
+    message.startsWith('Provenance violation:') ||
+    message.startsWith('Privacy constraint violation:')
   );
 }
 
@@ -95,14 +97,14 @@ export function assertLocalDatabaseUrl(rawUrl: string): PostgresConfig {
 
   return {
     host: hostname,
-    port: url.port ? Number(url.port) : 54322,
+    port: url.port ? Number(url.port) : 54323,
     user: decodeURIComponent(url.username || 'postgres'),
     password: decodeURIComponent(url.password || ''),
     database: dbName,
   };
 }
 
-async function isPortReachable(host: string, port: number, timeoutMs = 1000): Promise<boolean> {
+async function isPortReachable(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
 
@@ -147,11 +149,12 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   // 2. Reset schemas
   await client.query(`DROP SCHEMA IF EXISTS auth CASCADE;`);
   await client.query(`CREATE SCHEMA auth;`);
+  await client.query(`DROP SCHEMA IF EXISTS omni_internal CASCADE;`);
   await client.query(`DROP SCHEMA IF EXISTS public CASCADE;`);
   await client.query(`CREATE SCHEMA public;`);
   await client.query(`GRANT ALL ON SCHEMA public TO postgres;`);
   await client.query(`GRANT ALL ON SCHEMA public TO public;`);
-  details.push('PASS: Reset disposable test schemas (auth, public)');
+  details.push('PASS: Reset disposable test schemas (auth, omni_internal, public)');
 
   // 3. Auth helpers and roles
   await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
@@ -216,6 +219,11 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   );
   details.push('PASS: Seeded authenticated test identities User A and User B');
 
+  const sourceRecordAId = 'a0000000-0000-4000-8000-000000000005';
+  const sourceVersionAId = 'a0000000-0000-4000-8000-000000000006';
+  const sourceRecordBId = 'b0000000-0000-4000-8000-000000000005';
+  const sourceVersionBId = 'b0000000-0000-4000-8000-000000000006';
+
   const lessonAId = 'a0000000-0000-4000-8000-000000000010';
   const versionA1Id = 'a0000000-0000-4000-8000-000000000020';
   const versionA2Id = 'a0000000-0000-4000-8000-000000000021';
@@ -224,17 +232,50 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
 
   const lessonBId = 'b0000000-0000-4000-8000-000000000010';
 
+  // Seed User A & B source records for provenance testing
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.source_records (id, user_id, title, media_type, processing_state)
+     VALUES ($1, $2, 'Alice P03 Source', 'youtube', 'ready');`,
+    [sourceRecordAId, USER_A_ID]
+  );
+  await client.query(
+    `INSERT INTO public.source_versions (id, source_id, user_id, version_number, stage, content_hash, plain_text)
+     VALUES ($1, $2, $3, 1, 'raw', 'hash_sa', 'Alice source text');`,
+    [sourceVersionAId, sourceRecordAId, USER_A_ID]
+  );
+  await client.query('COMMIT;');
+
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.source_records (id, user_id, title, media_type, processing_state)
+     VALUES ($1, $2, 'Bob P03 Source', 'youtube', 'ready');`,
+    [sourceRecordBId, USER_B_ID]
+  );
+  await client.query(
+    `INSERT INTO public.source_versions (id, source_id, user_id, version_number, stage, content_hash, plain_text)
+     VALUES ($1, $2, $3, 1, 'raw', 'hash_sb', 'Bob source text');`,
+    [sourceVersionBId, sourceRecordBId, USER_B_ID]
+  );
+  await client.query('COMMIT;');
+
   // --- USER A CREATES INITIAL RECORDS ---
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
   await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
   await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
 
-  // Insert Lesson A
+  // Insert Lesson A with legitimate source_record_id and source_version_id
   await client.query(
-    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, duration_ms, processing_state)
-     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
-    [lessonAId, USER_A_ID, 'Alice Lesson on Sustainable Urbanism', 'youtube', 'https://www.youtube.com/watch?v=wr6fQ4KpbRM', 120000, 'ready']
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, duration_ms, processing_state, source_record_id, source_version_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+    [lessonAId, USER_A_ID, 'Alice Lesson on Sustainable Urbanism', 'youtube', 'https://www.youtube.com/watch?v=wr6fQ4KpbRM', 120000, 'ready', sourceRecordAId, sourceVersionAId]
   );
 
   // Insert Version A1
@@ -260,7 +301,7 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   // Update current_version_id
   await client.query(`UPDATE public.media_lessons SET current_version_id = $1 WHERE id = $2;`, [versionA1Id, lessonAId]);
 
-  // Insert Shadowing Attempt A
+  // Insert Shadowing Attempt A with valid evaluation structure matching ShadowingEvaluationSchema
   await client.query(
     `INSERT INTO public.media_shadowing_attempts (id, lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`,
@@ -272,7 +313,16 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
       USER_A_ID,
       4800,
       'measured',
-      JSON.stringify({ overallScore: 88, fluencyScore: 85, intonationScore: 90, accuracyScore: 89, feedbackVi: 'Phát âm tốt', swallowedWords: [], stressHighlights: [] }),
+      JSON.stringify({
+        overallScore: 88,
+        fluencyScore: 85,
+        intonationScore: 90,
+        accuracyScore: 89,
+        feedbackVi: 'Phát âm tốt',
+        swallowedWords: [],
+        stressHighlights: [],
+        acousticStatus: 'measured',
+      }),
     ]
   );
 
@@ -303,55 +353,37 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   await client.query('COMMIT;');
   details.push('PASS: User A created lesson, version 1, shadowing attempt, dictation attempt, and resume state');
 
-  // --- PROOF 1: User B cannot select User A lesson (returns 0 rows) ---
+  // --- PROOFS 1-3: media_lessons tenant isolation ---
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
   await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
   await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
-  const selectRes = await client.query(`SELECT * FROM public.media_lessons WHERE id = $1;`, [lessonAId]);
+  const selectLessonRes = await client.query(`SELECT * FROM public.media_lessons WHERE id = $1;`, [lessonAId]);
+  const updateLessonRes = await client.query(`UPDATE public.media_lessons SET title = 'Hacked' WHERE id = $1;`, [lessonAId]);
+  const deleteLessonRes = await client.query(`DELETE FROM public.media_lessons WHERE id = $1;`, [lessonAId]);
   await client.query('COMMIT;');
-  if (selectRes.rows.length !== 0) {
-    throw new Error('Policy violation: User B was able to SELECT User A media lesson!');
-  }
-  details.push('PASS: Proof 1: User B cannot select User A media lesson (0 rows returned)');
 
-  // --- PROOF 2: User B cannot update User A lesson (0 rows affected) ---
-  await client.query('BEGIN;');
-  await client.query('SET LOCAL ROLE authenticated;');
-  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
-  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
-  const updateRes = await client.query(`UPDATE public.media_lessons SET title = 'Hacked' WHERE id = $1;`, [lessonAId]);
-  await client.query('COMMIT;');
-  if (updateRes.rowCount !== 0) {
-    throw new Error('Policy violation: User B was able to UPDATE User A media lesson!');
-  }
-  details.push('PASS: Proof 2: User B cannot update User A media lesson (0 rows affected)');
+  if (selectLessonRes.rows.length !== 0) throw new Error('Policy violation: User B was able to SELECT User A media lesson!');
+  if (updateLessonRes.rowCount !== 0) throw new Error('Policy violation: User B was able to UPDATE User A media lesson!');
+  if (deleteLessonRes.rowCount !== 0) throw new Error('Policy violation: User B was able to DELETE User A media lesson!');
+  details.push('PASS: Proof 1-3: User B cannot SELECT (0 rows), UPDATE (0 rows), or DELETE (0 rows) User A media lesson');
 
-  // --- PROOF 3: User B cannot delete User A lesson (0 rows affected) ---
-  await client.query('BEGIN;');
-  await client.query('SET LOCAL ROLE authenticated;');
-  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
-  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
-  const deleteRes = await client.query(`DELETE FROM public.media_lessons WHERE id = $1;`, [lessonAId]);
-  await client.query('COMMIT;');
-  if (deleteRes.rowCount !== 0) {
-    throw new Error('Policy violation: User B was able to DELETE User A media lesson!');
-  }
-  details.push('PASS: Proof 3: User B cannot delete User A media lesson (0 rows affected)');
-
-  // --- PROOF 4: User B cannot select User A transcript version (returns 0 rows) ---
+  // --- PROOFS 4-7: media_transcript_versions tenant isolation & append-only ---
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
   await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
   await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
   const selectVerRes = await client.query(`SELECT * FROM public.media_transcript_versions WHERE id = $1;`, [versionA1Id]);
+  const updateVerRes = await client.query(`UPDATE public.media_transcript_versions SET content_hash = 'tampered' WHERE id = $1;`, [versionA1Id]);
+  const deleteVerRes = await client.query(`DELETE FROM public.media_transcript_versions WHERE id = $1;`, [versionA1Id]);
   await client.query('COMMIT;');
-  if (selectVerRes.rows.length !== 0) {
-    throw new Error('Policy violation: User B was able to SELECT User A transcript version!');
-  }
-  details.push('PASS: Proof 4: User B cannot select User A transcript version (0 rows returned)');
 
-  // --- PROOF 5: User B cannot insert a transcript version targeting User A lesson ---
+  if (selectVerRes.rows.length !== 0) throw new Error('Policy violation: User B was able to SELECT User A transcript version!');
+  if (updateVerRes.rowCount !== 0) throw new Error('Policy violation: User B was able to UPDATE User A transcript version!');
+  if (deleteVerRes.rowCount !== 0) throw new Error('Policy violation: User B was able to DELETE User A transcript version!');
+  details.push('PASS: Proof 4-6: User B cannot SELECT (0 rows), UPDATE (0 rows), or DELETE (0 rows) User A transcript version');
+
+  // Proof 7: User B cannot insert version into User A lesson
   let crossUserVersionBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -368,12 +400,25 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     crossUserVersionBlocked = true;
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!crossUserVersionBlocked) {
-    throw new Error('Policy violation: User B was able to INSERT a transcript version into User A lesson!');
-  }
-  details.push('PASS: Proof 5: User B cannot insert transcript version targeting User A lesson (cross-row RLS blocked)');
+  if (!crossUserVersionBlocked) throw new Error('Policy violation: User B was able to INSERT transcript version into User A lesson!');
+  details.push('PASS: Proof 7: User B cannot insert transcript version targeting User A lesson');
 
-  // --- PROOF 6: User B cannot attach a shadowing attempt to User A lesson and version ---
+  // --- PROOFS 8-11: media_shadowing_attempts tenant isolation ---
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const selectShadowingRes = await client.query(`SELECT * FROM public.media_shadowing_attempts WHERE id = $1;`, [shadowingAId]);
+  const updateShadowingRes = await client.query(`UPDATE public.media_shadowing_attempts SET audio_duration_ms = 9999 WHERE id = $1;`, [shadowingAId]);
+  const deleteShadowingRes = await client.query(`DELETE FROM public.media_shadowing_attempts WHERE id = $1;`, [shadowingAId]);
+  await client.query('COMMIT;');
+
+  if (selectShadowingRes.rows.length !== 0) throw new Error('Policy violation: User B was able to SELECT User A shadowing attempt!');
+  if (updateShadowingRes.rowCount !== 0) throw new Error('Policy violation: User B was able to UPDATE User A shadowing attempt!');
+  if (deleteShadowingRes.rowCount !== 0) throw new Error('Policy violation: User B was able to DELETE User A shadowing attempt!');
+  details.push('PASS: Proof 8-10: User B cannot SELECT (0 rows), UPDATE (0 rows), or DELETE (0 rows) User A shadowing attempt');
+
+  // Proof 11: User B cannot insert shadowing attempt into User A lesson/version
   let crossUserShadowingBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -390,12 +435,25 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     crossUserShadowingBlocked = true;
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!crossUserShadowingBlocked) {
-    throw new Error('Policy violation: User B was able to attach a shadowing attempt to User A lesson/version!');
-  }
-  details.push('PASS: Proof 6: User B cannot attach shadowing attempt to User A lesson/version (cross-row RLS blocked)');
+  if (!crossUserShadowingBlocked) throw new Error('Policy violation: User B was able to attach shadowing attempt to User A lesson/version!');
+  details.push('PASS: Proof 11: User B cannot attach shadowing attempt to User A lesson/version');
 
-  // --- PROOF 7: User B cannot attach a dictation attempt to User A lesson and version ---
+  // --- PROOFS 12-15: media_dictation_attempts tenant isolation ---
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const selectDictationRes = await client.query(`SELECT * FROM public.media_dictation_attempts WHERE id = $1;`, [dictationAId]);
+  const updateDictationRes = await client.query(`UPDATE public.media_dictation_attempts SET user_response_text = 'tampered' WHERE id = $1;`, [dictationAId]);
+  const deleteDictationRes = await client.query(`DELETE FROM public.media_dictation_attempts WHERE id = $1;`, [dictationAId]);
+  await client.query('COMMIT;');
+
+  if (selectDictationRes.rows.length !== 0) throw new Error('Policy violation: User B was able to SELECT User A dictation attempt!');
+  if (updateDictationRes.rowCount !== 0) throw new Error('Policy violation: User B was able to UPDATE User A dictation attempt!');
+  if (deleteDictationRes.rowCount !== 0) throw new Error('Policy violation: User B was able to DELETE User A dictation attempt!');
+  details.push('PASS: Proof 12-14: User B cannot SELECT (0 rows), UPDATE (0 rows), or DELETE (0 rows) User A dictation attempt');
+
+  // Proof 15: User B cannot insert dictation attempt into User A lesson/version
   let crossUserDictationBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -412,12 +470,25 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     crossUserDictationBlocked = true;
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!crossUserDictationBlocked) {
-    throw new Error('Policy violation: User B was able to attach a dictation attempt to User A lesson/version!');
-  }
-  details.push('PASS: Proof 7: User B cannot attach dictation attempt to User A lesson/version (cross-row RLS blocked)');
+  if (!crossUserDictationBlocked) throw new Error('Policy violation: User B was able to attach dictation attempt to User A lesson/version!');
+  details.push('PASS: Proof 15: User B cannot attach dictation attempt to User A lesson/version');
 
-  // --- PROOF 8: User B cannot create or access resume state for User A lesson ---
+  // --- PROOFS 16-19: media_resume_states tenant isolation ---
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const selectResumeRes = await client.query(`SELECT * FROM public.media_resume_states WHERE lesson_id = $1;`, [lessonAId]);
+  const updateResumeRes = await client.query(`UPDATE public.media_resume_states SET playback_position_ms = 9999 WHERE lesson_id = $1;`, [lessonAId]);
+  const deleteResumeRes = await client.query(`DELETE FROM public.media_resume_states WHERE lesson_id = $1;`, [lessonAId]);
+  await client.query('COMMIT;');
+
+  if (selectResumeRes.rows.length !== 0) throw new Error('Policy violation: User B was able to SELECT User A resume state!');
+  if (updateResumeRes.rowCount !== 0) throw new Error('Policy violation: User B was able to UPDATE User A resume state!');
+  if (deleteResumeRes.rowCount !== 0) throw new Error('Policy violation: User B was able to DELETE User A resume state!');
+  details.push('PASS: Proof 16-18: User B cannot SELECT (0 rows), UPDATE (0 rows), or DELETE (0 rows) User A resume state');
+
+  // Proof 19: User B cannot insert resume state for User A lesson
   let crossUserResumeBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -434,12 +505,10 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     crossUserResumeBlocked = true;
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!crossUserResumeBlocked) {
-    throw new Error('Policy violation: User B was able to insert resume state for User A lesson!');
-  }
-  details.push('PASS: Proof 8: User B cannot insert or access resume state for User A lesson (cross-row RLS blocked)');
+  if (!crossUserResumeBlocked) throw new Error('Policy violation: User B was able to insert resume state for User A lesson!');
+  details.push('PASS: Proof 19: User B cannot insert or access resume state for User A lesson');
 
-  // --- PROOF 9: Direct UPDATE on media_transcript_versions is rejected by trigger ---
+  // --- PROOF 20-21: Direct UPDATE and DELETE on media_transcript_versions blocked by trigger ---
   let directUpdateBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -457,12 +526,9 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     }
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!directUpdateBlocked) {
-    throw new Error('Policy violation: Direct UPDATE on media_transcript_versions was not blocked by append-only trigger!');
-  }
-  details.push('PASS: Proof 9: Direct UPDATE on media_transcript_versions is rejected (immutable append-only trigger)');
+  if (!directUpdateBlocked) throw new Error('Policy violation: Direct UPDATE on media_transcript_versions was not blocked!');
+  details.push('PASS: Proof 20: Direct UPDATE on media_transcript_versions is rejected by immutable append-only trigger');
 
-  // --- PROOF 10: Direct DELETE on media_transcript_versions is rejected by trigger ---
   let directDeleteBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -477,12 +543,230 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     }
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!directDeleteBlocked) {
-    throw new Error('Policy violation: Direct DELETE on media_transcript_versions was not blocked by trigger!');
-  }
-  details.push('PASS: Proof 10: Direct DELETE on media_transcript_versions is rejected (immutable append-only trigger)');
+  if (!directDeleteBlocked) throw new Error('Policy violation: Direct DELETE on media_transcript_versions was not blocked!');
+  details.push('PASS: Proof 21: Direct DELETE on media_transcript_versions is rejected by immutable append-only trigger');
 
-  // --- PROOF 11: User A creates valid immutable transcript version 2 while v1 remains unchanged ---
+  // --- PROOF 22: GUC spoofing exploit fails: setting omni.active_deleting_media_lesson_id does NOT allow deleting transcript version ---
+  let gucSpoofBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`SELECT set_config('omni.active_deleting_media_lesson_id', $1, true);`, [lessonAId]);
+    await client.query(`DELETE FROM public.media_transcript_versions WHERE id = $1;`, [versionA1Id]);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || String(err.message).includes('append-only')) {
+      gucSpoofBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!gucSpoofBlocked) throw new Error('Policy violation: GUC spoofing succeeded in deleting media_transcript_versions!');
+  details.push('PASS: Proof 22: GUC spoofing attempt is completely ineffective against database-owned cascade');
+
+  // --- PROOF 23: Direct access to omni_internal schema is rejected for authenticated users ---
+  let internalSchemaDenied = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`INSERT INTO omni_internal.active_deleting_media_lessons (lesson_id, tx_id) VALUES ($1, pg_current_xact_id());`, [lessonAId]);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501') {
+      internalSchemaDenied = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!internalSchemaDenied) throw new Error('Security violation: Authenticated user could write to omni_internal!');
+  details.push('PASS: Proof 23: Direct write to omni_internal schema is strictly denied for authenticated users (42501)');
+
+  // --- PROOFS 24-27: Source Provenance Ownership & Cross-Row Verification ---
+  // Proof 24: User A cannot link lesson to User B's source_record_id
+  let foreignSourceRecordBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url, source_record_id)
+       VALUES ($1, 'Stolen Source Lesson', 'youtube', 'https://youtube.com/watch?v=stolen', $2);`,
+      [USER_A_ID, sourceRecordBId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.message.includes('Invalid source reference') || err.code === '42501') {
+      foreignSourceRecordBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!foreignSourceRecordBlocked) throw new Error('Provenance violation: User A linked lesson to User B source record!');
+  details.push('PASS: Proof 24: Provenance ownership: User A cannot link lesson to User B source record');
+
+  // Proof 25: User A cannot link lesson to non-existent source_record_id (identical error)
+  let missingSourceRecordBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url, source_record_id)
+       VALUES ($1, 'Missing Source Lesson', 'youtube', 'https://youtube.com/watch?v=missing', '00000000-0000-4000-8000-000000000099');`,
+      [USER_A_ID]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.message.includes('Invalid source reference') || err.code === '42501') {
+      missingSourceRecordBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!missingSourceRecordBlocked) throw new Error('Provenance violation: Non-existent source record did not fail non-disclosing check!');
+  details.push('PASS: Proof 25: Provenance non-disclosure: Missing and foreign source references fail with identical error');
+
+  // Proof 26: User A cannot link lesson to User B's source_version_id
+  let foreignSourceVersionBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url, source_record_id, source_version_id)
+       VALUES ($1, 'Stolen Version Lesson', 'youtube', 'https://youtube.com/watch?v=stolen', $2, $3);`,
+      [USER_A_ID, sourceRecordAId, sourceVersionBId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.message.includes('Invalid source reference') || err.code === '42501') {
+      foreignSourceVersionBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!foreignSourceVersionBlocked) throw new Error('Provenance violation: User A linked lesson to foreign source version!');
+  details.push('PASS: Proof 26: Provenance ownership: User A cannot link lesson to mismatched or foreign source version');
+
+  // Proof 27: current_version_id must point to a version belonging to the same lesson
+  let crossLessonVersionBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    const newLessonId = 'a0000000-0000-4000-8000-000000000099';
+    await client.query(
+      `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, current_version_id)
+       VALUES ($1, $2, 'Cross Version Lesson', 'youtube', 'https://youtube.com/watch?v=cross', $3);`,
+      [newLessonId, USER_A_ID, versionA1Id] // versionA1Id belongs to lessonAId, not newLessonId
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.message.includes('Invalid version reference') || err.code === '42501') {
+      crossLessonVersionBlocked = true;
+    }
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!crossLessonVersionBlocked) throw new Error('Provenance violation: current_version_id was linked to a version belonging to a different lesson!');
+  details.push('PASS: Proof 27: current_version_id cross-reference constraint enforced on media_lessons');
+
+  // --- PROOFS 28-30: Structural Raw Audio Privacy & Strict JSON Schemas ---
+  // Proof 28: media_url with data: or base64 is rejected
+  let rawDataUrlBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, 'Data URL Attack', 'audio', 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8USA...');`,
+      [USER_A_ID]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') rawDataUrlBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!rawDataUrlBlocked) throw new Error('Privacy constraint violation: data: audio URL was not rejected by CHECK constraint!');
+  details.push('PASS: Proof 28: Raw audio data: URLs are strictly rejected in media_url by CHECK constraint');
+
+  // Proof 29: Shadowing evaluation with unknown key (e.g. 'audio') is rejected
+  let unknownEvaluationKeyBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+      [
+        lessonAId,
+        'seg_1',
+        versionA1Id,
+        USER_A_ID,
+        2000,
+        'measured',
+        JSON.stringify({
+          overallScore: 88,
+          fluencyScore: 85,
+          intonationScore: 90,
+          accuracyScore: 89,
+          feedbackVi: 'Tốt',
+          swallowedWords: [],
+          stressHighlights: [],
+          acousticStatus: 'measured',
+          audio: 'binary_audio_data_here', // Unknown key!
+        }),
+      ]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') unknownEvaluationKeyBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!unknownEvaluationKeyBlocked) throw new Error('Privacy constraint violation: Unknown key "audio" in shadowing evaluation was not blocked!');
+  details.push('PASS: Proof 29: Unknown keys in shadowing evaluation are rejected by strict JSON schema CHECK');
+
+  // Proof 30: Base64 audio in dictation response text is rejected
+  let base64DictationBlocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_dictation_attempts (lesson_id, segment_id, transcript_version_id, user_id, mode, difficulty, user_response_text, expected_text, accuracy_score)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+      [lessonAId, 'seg_1', versionA1Id, USER_A_ID, 'full_sentence', 'easy', 'data:audio/wav;base64,UklGRiQAAABXQVZF', 'Hello', 0]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') base64DictationBlocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!base64DictationBlocked) throw new Error('Privacy constraint violation: Base64 audio payload in dictation attempt was not blocked!');
+  details.push('PASS: Proof 30: Base64 audio payload in dictation response text is strictly rejected');
+
+  // --- PROOF 31: State Contract Alignment: Terminal states accepted by CHECK constraint ---
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, processing_state)
+     VALUES ('a0000000-0000-4000-8000-000000000081', $1, 'Needs Review Lesson', 'youtube', 'https://youtube.com/watch?v=nr', 'needs_review'),
+            ('a0000000-0000-4000-8000-000000000082', $1, 'Requires Original Lesson', 'audio', 'https://storage.local/audio.mp3', 'requires_original_audio');`,
+    [USER_A_ID]
+  );
+  await client.query('COMMIT;');
+  details.push('PASS: Proof 31: Processing state CHECK constraint cleanly accepts needs_review and requires_original_audio');
+
+  // --- PROOF 32: User A creates valid immutable transcript version 2 while v1 remains unchanged ---
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
   await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
@@ -515,9 +799,9 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   if (v1Check.rows[0]?.content_hash !== 'hash_a1' || v2Check.rows[0]?.content_hash !== 'hash_a2') {
     throw new Error('Version creation error: Version 1 was altered or Version 2 hash mismatched');
   }
-  details.push('PASS: Proof 11: User A created immutable transcript v2 while v1 remains preserved and unchanged');
+  details.push('PASS: Proof 32: User A created immutable transcript v2 while v1 remains preserved and unchanged');
 
-  // --- PROOF 12: Duplicate version number on same lesson is rejected by UNIQUE constraint ---
+  // --- PROOF 33: Duplicate version number on same lesson is rejected by UNIQUE constraint ---
   let duplicateVersionBlocked = false;
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
@@ -534,42 +818,10 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
     if (err.code === '23505') duplicateVersionBlocked = true;
     await client.query('ROLLBACK;').catch(() => {});
   }
-  if (!duplicateVersionBlocked) {
-    throw new Error('Integrity error: Duplicate version_number was not blocked by UNIQUE constraint!');
-  }
-  details.push('PASS: Proof 12: Duplicate version number rejected by UNIQUE(lesson_id, version_number)');
+  if (!duplicateVersionBlocked) throw new Error('Integrity error: Duplicate version_number was not blocked by UNIQUE constraint!');
+  details.push('PASS: Proof 33: Duplicate version number rejected by UNIQUE(lesson_id, version_number)');
 
-  // --- PROOF 13: Raw audio binary is rejected by table check constraint ---
-  let rawAudioBlocked = false;
-  await client.query('BEGIN;');
-  await client.query('SET LOCAL ROLE authenticated;');
-  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
-  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
-  try {
-    await client.query(
-      `INSERT INTO public.media_shadowing_attempts (lesson_id, segment_id, transcript_version_id, user_id, audio_duration_ms, acoustic_status, evaluation)
-       VALUES ($1, $2, $3, $4, $5, $6, $7);`,
-      [
-        lessonAId,
-        'seg_1',
-        versionA2Id,
-        USER_A_ID,
-        2000,
-        'measured',
-        JSON.stringify({ audio: 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ8USA...' }),
-      ]
-    );
-    await client.query('COMMIT;');
-  } catch (err: any) {
-    if (err.code === '23514') rawAudioBlocked = true; // check constraint violation
-    await client.query('ROLLBACK;').catch(() => {});
-  }
-  if (!rawAudioBlocked) {
-    throw new Error('Privacy violation: Raw audio base64 payload was not blocked by check constraint!');
-  }
-  details.push('PASS: Proof 13: Raw audio binary/base64 payload is strictly blocked by check constraint');
-
-  // --- PROOF 14: Non-disclosing access check ---
+  // --- PROOF 34: Non-disclosing access check ---
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
   await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
@@ -580,7 +832,7 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   if (missingRes.rows.length !== 0 || foreignRes.rows.length !== 0) {
     throw new Error('Information disclosure: Foreign or missing records disclosed rows to unauthorized user!');
   }
-  details.push('PASS: Proof 14: Non-disclosing access: Foreign and missing records return identical 0-row results');
+  details.push('PASS: Proof 34: Non-disclosing access: Foreign and missing records return identical 0-row results');
 
   // --- USER B CREATES INDEPENDENT LESSON TO PROVE CASCADE ISOLATION ---
   await client.query('BEGIN;');
@@ -594,7 +846,7 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   );
   await client.query('COMMIT;');
 
-  // --- PROOF 15: Cascade delete on User A lesson removes only owned relational records ---
+  // --- PROOF 35: Cascade delete on User A lesson removes only owned relational records ---
   await client.query('BEGIN;');
   await client.query('SET LOCAL ROLE authenticated;');
   await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
@@ -621,105 +873,112 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   if (Number(userBLesson.rows[0].count) !== 1) {
     throw new Error('Cascade deletion failed: User B lesson was affected by User A lesson deletion!');
   }
-  details.push('PASS: Proof 15: Parent cascade delete cleanly removes owned versions, attempts, and resume state without affecting other tenants');
+  details.push('PASS: Proof 35: Parent cascade delete cleanly removes owned versions, attempts, and resume state without affecting other tenants');
 
   return details;
 }
 
-export async function runMediaRlsProof(customUrl?: string): Promise<RlsProofResult> {
-  const rawUrl =
-    customUrl ||
-    process.env.LOCAL_DISPOSABLE_DB_URL ||
-    'postgres://postgres:postgres@127.0.0.1:54322/omni_media_rls_test';
-
+export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: string } = {}): Promise<RlsProofResult> {
+  const isStrict = options.strict ?? (process.env.CI === 'true' || process.argv.includes('--strict'));
   const details: string[] = [];
 
-  let config: PostgresConfig;
+  // 1. Verify migration SQL structure and trigger rules
+  const sql = MIGRATION_PATHS.map((migrationPath) => readFileSync(migrationPath, 'utf8')).join('\n');
+  if (
+    !sql.includes('prevent_media_transcript_version_mutation') ||
+    !sql.includes('omni_internal.active_deleting_media_lessons') ||
+    !sql.includes('enforce_media_lesson_provenance') ||
+    !sql.includes('shadowing_evaluation_schema_valid') ||
+    !sql.includes('media_lessons_media_url_no_raw_audio') ||
+    sql.includes('omni.active_deleting_media_lesson_id')
+  ) {
+    details.push('FAIL: Migration SQL is missing required append-only, non-spoofable cascade, or provenance controls');
+    return { executable: true, proven: false, status: 'failed', details };
+  }
+  details.push('PASS: Migration SQL contains required append-only, non-spoofable cascade, and provenance controls');
+
+  // 2. Discover local disposable PostgreSQL instance
+  const rawDbUrl = options.dbUrl || process.env.LOCAL_DISPOSABLE_DB_URL;
+
+  if (!rawDbUrl) {
+    if (isStrict) {
+      details.push('FAIL-CLOSED: LOCAL_DISPOSABLE_DB_URL is required in strict mode/CI');
+      return { executable: true, proven: false, status: 'failed', details };
+    }
+
+    details.push('GATE-STATUS: LOCAL_DISPOSABLE_DB_URL environment variable is not set.');
+    details.push('GATE-STATUS: Real disposable-DB RLS test skipped locally (status: skipped_no_db).');
+    details.push('GATE-STATUS: NOT claiming RLS is proven; marked as required CI / disposable-DB gate.');
+    return { executable: false, proven: false, status: 'skipped_no_db', details };
+  }
+
+  let dbConfig: PostgresConfig;
   try {
-    config = assertLocalDatabaseUrl(rawUrl);
-  } catch (err) {
-    // If not configured or security violation on URL
-    if (!process.env.LOCAL_DISPOSABLE_DB_URL && !customUrl) {
-      return {
-        executable: false,
-        proven: false,
-        status: 'skipped_no_db',
-        details: [
-          'GATE-STATUS: LOCAL_DISPOSABLE_DB_URL environment variable is not set.',
-          'GATE-STATUS: Real disposable-DB RLS test skipped locally (status: skipped_no_db).',
-          'GATE-STATUS: NOT claiming RLS is proven; marked as required CI / disposable-DB gate.',
-        ],
-      };
-    }
-    return {
-      executable: false,
-      proven: false,
-      status: 'failed',
-      details: [safeFailureMessage(err, UNEXPECTED_FAILURE_MESSAGE)],
-    };
+    dbConfig = assertLocalDatabaseUrl(rawDbUrl);
+  } catch (err: unknown) {
+    details.push(`FAIL-CLOSED: ${safeFailureMessage(err, 'Invalid disposable database URL.')}`);
+    return { executable: true, proven: false, status: 'failed', details };
   }
 
-  const reachable = await isPortReachable(config.host, config.port);
-  if (!reachable) {
-    if (!process.env.LOCAL_DISPOSABLE_DB_URL && !customUrl) {
-      return {
-        executable: false,
-        proven: false,
-        status: 'skipped_no_db',
-        details: [
-          `GATE-STATUS: Local test database port ${config.port} is not reachable.`,
-          'GATE-STATUS: Real disposable-DB RLS test skipped locally (status: skipped_no_db).',
-        ],
-      };
+  const isAlive = await isPortReachable(dbConfig.host, dbConfig.port, 1500);
+  if (!isAlive) {
+    if (isStrict) {
+      details.push(`FAIL-CLOSED: Disposable database host ${dbConfig.host}:${dbConfig.port} is unreachable`);
+      return { executable: true, proven: false, status: 'failed', details };
     }
-    return {
-      executable: false,
-      proven: false,
-      status: 'failed',
-      details: [CONNECT_FAILURE_MESSAGE],
-    };
+
+    details.push(`GATE-STATUS: Disposable database host ${dbConfig.host}:${dbConfig.port} is unreachable (status: skipped_no_db).`);
+    details.push('GATE-STATUS: Real disposable-DB RLS test skipped locally.');
+    details.push('GATE-STATUS: NOT claiming RLS is proven; marked as required CI / disposable-DB gate.');
+    return { executable: false, proven: false, status: 'skipped_no_db', details };
   }
 
-  const client = new Client({
-    host: config.host,
-    port: config.port,
-    user: config.user,
-    password: config.password,
-    database: config.database,
-    ssl: false,
-  });
-
+  const client = new Client(dbConfig);
   try {
     await client.connect();
+  } catch {
+    await client.end().catch(() => {});
+    if (isStrict) {
+      details.push(`FAIL-CLOSED: ${CONNECT_FAILURE_MESSAGE}`);
+      return { executable: true, proven: false, status: 'failed', details };
+    }
+    details.push(`GATE-STATUS: ${CONNECT_FAILURE_MESSAGE} (status: skipped_no_db).`);
+    return { executable: false, proven: false, status: 'skipped_no_db', details };
+  }
+
+  // 3. Execute live tests on reachable database instance
+  try {
+    details.push(`Connected to disposable PostgreSQL instance at ${dbConfig.host}:${dbConfig.port} (database: ${dbConfig.database})`);
     const suiteDetails = await executeDisposableDbSuite(client);
     details.push(...suiteDetails);
+    await client.end();
+
     return {
       executable: true,
       proven: true,
       status: 'passed',
-      details,
+      details: [
+        ...details,
+        'PASS: All 35 Media RLS proof contracts verified against live disposable database',
+      ],
     };
-  } catch (err) {
-    return {
-      executable: true,
-      proven: false,
-      status: 'failed',
-      details: [...details, safeFailureMessage(err, LIVE_EXECUTION_FAILURE_MESSAGE)],
-    };
-  } finally {
+  } catch (err: unknown) {
     await client.end().catch(() => {});
+    details.push(`FAIL: ${safeFailureMessage(err, LIVE_EXECUTION_FAILURE_MESSAGE)}`);
+    return { executable: true, proven: false, status: 'failed', details };
   }
 }
 
 // Direct execution CLI entrypoint
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('test-media-rls-postgres.ts')) {
-  runMediaRlsProof()
+  const isStrict = process.argv.includes('--strict') || process.env.CI === 'true';
+  runMediaRlsProof({ strict: isStrict })
     .then((result) => {
       console.log(`[RLS-PROOF] Status: ${result.status} (proven: ${result.proven})`);
       for (const d of result.details) {
         console.log(` - ${d}`);
       }
-      if (result.status === 'failed') {
+      if (result.status === 'failed' || (isStrict && !result.proven)) {
         process.exit(1);
       }
     })
