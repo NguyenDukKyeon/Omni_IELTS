@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:sources:rls:db": "tsx scripts/test-sources-rls-postgres.ts",
+    "test:media:rls:db": "tsx scripts/test-media-rls-postgres.ts",
     "test:watch": "vitest",
     "test:e2e": "node scripts/test-e2e-deterministic.mjs",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
