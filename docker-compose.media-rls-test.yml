@@ -1,0 +1,26 @@
+name: omni-media-rls-test
+
+services:
+  omni-media-rls-test-db:
+    image: postgres:16.8-alpine@sha256:3b057e1c2c6dfee60a30950096f3fab33be141dbb0fdd7af3d477083de94166c
+    container_name: omni-media-rls-test-db
+    restart: "no"
+    environment:
+      POSTGRES_DB: omni_media_rls_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "127.0.0.1:54323:5432"
+    volumes:
+      - omni_media_rls_test_data:/var/lib/postgresql/data
+      - ./scripts/init-media-disposable-db.sql:/docker-entrypoint-initdb.d/01-init-marker.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omni_media_rls_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+
+volumes:
+  omni_media_rls_test_data:
+    name: omni_media_rls_test_data

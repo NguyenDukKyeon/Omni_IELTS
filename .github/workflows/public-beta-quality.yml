@@ -22,7 +22,17 @@ jobs:
         env:
           LOCAL_DISPOSABLE_DB_URL: postgres://postgres:postgrespassword@127.0.0.1:54322/omni_sources_rls_test
         run: npm run test:sources:rls:db -- --strict
-      - name: Stop Disposable PostgreSQL
+      - name: Stop Disposable PostgreSQL for Sources
         if: always()
         run: docker compose -p omni-sources-rls-test -f docker-compose.sources-rls-test.yml down -v
+      - name: Start Disposable PostgreSQL for Media RLS Proof
+        run: docker compose -p omni-media-rls-test -f docker-compose.media-rls-test.yml up -d --wait
+      - name: Run Strict Media RLS Proof on Disposable PostgreSQL
+        env:
+          LOCAL_DISPOSABLE_DB_URL: postgres://postgres:postgrespassword@127.0.0.1:54323/omni_media_rls_test
+          OMNI_MEDIA_RLS_TEST_ENVIRONMENT: disposable_docker
+        run: npm run test:media:rls:db -- --strict
+      - name: Stop Disposable PostgreSQL for Media
+        if: always()
+        run: docker compose -p omni-media-rls-test -f docker-compose.media-rls-test.yml down -v
       - run: npm run check:beta

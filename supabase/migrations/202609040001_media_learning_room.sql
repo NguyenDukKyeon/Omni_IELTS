@@ -1,0 +1,1006 @@
+-- OMNI Media Learning Room Schema & Multi-Tenant RLS Policies (P04)
+-- Date: 2026-09-04
+-- Constraints: auth.uid() ownership on all tables, cross-row ownership checks,
+-- immutable transcript versions with database-owned non-spoofable cascade delete,
+-- provenance ownership enforcement, and structural zero raw audio binary/base64 storage.
+
+-- 0. Internal private schema for database-owned non-spoofable cascade tracking
+CREATE SCHEMA IF NOT EXISTS omni_internal;
+REVOKE ALL ON SCHEMA omni_internal FROM PUBLIC, anon, authenticated;
+
+CREATE UNLOGGED TABLE IF NOT EXISTS omni_internal.active_deleting_media_lessons (
+  lesson_id UUID NOT NULL,
+  tx_id XID8 NOT NULL,
+  PRIMARY KEY (lesson_id, tx_id)
+);
+REVOKE ALL ON TABLE omni_internal.active_deleting_media_lessons FROM PUBLIC, anon, authenticated;
+
+-- 1. Media Lessons
+CREATE TABLE IF NOT EXISTS public.media_lessons (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  media_type TEXT NOT NULL CHECK (media_type IN ('youtube', 'audio')),
+  media_url TEXT NOT NULL,
+  youtube_id TEXT,
+  channel_title TEXT,
+  duration_ms INT NOT NULL DEFAULT 0,
+  current_version_id UUID,
+  source_record_id UUID REFERENCES public.source_records(id) ON DELETE SET NULL,
+  source_version_id UUID REFERENCES public.source_versions(id) ON DELETE SET NULL,
+  processing_state TEXT NOT NULL DEFAULT 'queued' CHECK (
+    processing_state IN ('queued', 'probing', 'captions', 'transcribing', 'normalizing', 'validating', 'ready', 'degraded', 'unavailable', 'failed', 'needs_review', 'requires_original_audio')
+  ),
+  transcript_state TEXT CHECK (
+    transcript_state IN ('ready', 'unavailable_transcript', 'coverage_insufficient', 'needs_review')
+  ),
+  last_practiced_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT media_lessons_media_url_no_raw_audio CHECK (
+    media_url ~ '^https?://[^\s]+$' AND
+    length(media_url) BETWEEN 10 AND 2048 AND
+    media_url !~* 'data:' AND
+    media_url !~* 'base64' AND
+    media_url !~ '(UklGR|GkXf|SUQz|T2dn)'
+  )
+);
+
+-- Helper function to validate that learner text / metadata leaves do not contain base64 raw audio chunks or signatures
+CREATE OR REPLACE FUNCTION public.is_clean_media_text(p_text TEXT)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+  IF p_text IS NULL THEN
+    RETURN true;
+  END IF;
+
+  IF p_text ~* 'data:' THEN
+    RETURN false;
+  END IF;
+
+  IF p_text ~* 'base64' THEN
+    RETURN false;
+  END IF;
+
+  IF p_text ~ '(UklGR|GkXf|SUQz|T2dn)' THEN
+    RETURN false;
+  END IF;
+
+  IF p_text ~ '[A-Za-z0-9+/=]{28,}' THEN
+    RETURN false;
+  END IF;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_clean_media_text(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_clean_media_text(TEXT) TO authenticated, anon;
+
+-- Pure immutable validator for transcript segments matching MediaTranscriptSegment contract
+CREATE OR REPLACE FUNCTION public.validate_media_transcript_segments(segments JSONB)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_seg JSONB;
+  v_index NUMERIC;
+  v_start_ms NUMERIC;
+  v_end_ms NUMERIC;
+  v_count INT;
+  v_expected_index INT := 0;
+  v_prev_end_ms NUMERIC := NULL;
+BEGIN
+  IF segments IS NULL THEN
+    RETURN false;
+  END IF;
+
+  IF jsonb_typeof(segments) <> 'array' THEN
+    RETURN false;
+  END IF;
+
+  v_count := jsonb_array_length(segments);
+  IF v_count > 1000 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_seg IN SELECT * FROM jsonb_array_elements(segments) LOOP
+    IF jsonb_typeof(v_seg) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    IF NOT (v_seg ?& ARRAY['id', 'index', 'startMs', 'endMs', 'text', 'confidence']) THEN
+      RETURN false;
+    END IF;
+
+    IF (v_seg - ARRAY['id', 'index', 'startMs', 'endMs', 'text', 'confidence', 'speaker', 'translationVi']) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'id') <> 'string' OR
+       length(v_seg->>'id') < 1 OR length(v_seg->>'id') > 100 OR
+       NOT public.is_clean_media_text(v_seg->>'id') THEN
+      RETURN false;
+    END IF;
+
+    -- Non-negative integer index (no decimals, no scientific notation)
+    IF jsonb_typeof(v_seg->'index') <> 'number' OR (v_seg->>'index') !~ '^[0-9]+$' THEN
+      RETURN false;
+    END IF;
+    v_index := (v_seg->>'index')::numeric;
+    IF v_index < 0 OR v_index > 10000 THEN
+      RETURN false;
+    END IF;
+
+    -- Strictly monotonic and continuous in array order (0, 1, 2, ...)
+    IF v_index <> v_expected_index THEN
+      RETURN false;
+    END IF;
+    v_expected_index := v_expected_index + 1;
+
+    -- Non-negative integer startMs and endMs (no decimals, no scientific notation)
+    IF jsonb_typeof(v_seg->'startMs') <> 'number' OR (v_seg->>'startMs') !~ '^[0-9]+$' THEN
+      RETURN false;
+    END IF;
+    IF jsonb_typeof(v_seg->'endMs') <> 'number' OR (v_seg->>'endMs') !~ '^[0-9]+$' THEN
+      RETURN false;
+    END IF;
+
+    v_start_ms := (v_seg->>'startMs')::numeric;
+    v_end_ms := (v_seg->>'endMs')::numeric;
+
+    -- endMs > startMs strictly (no zero-duration segments)
+    IF v_start_ms < 0 OR v_end_ms <= v_start_ms OR v_end_ms > 86400000 THEN
+      RETURN false;
+    END IF;
+
+    -- Subsequent segments must satisfy next.startMs >= previous.endMs - 50 (max 50ms overlap tolerance, blocking backward segments)
+    IF v_prev_end_ms IS NOT NULL THEN
+      IF v_start_ms < (v_prev_end_ms - 50) THEN
+        RETURN false;
+      END IF;
+    END IF;
+    v_prev_end_ms := v_end_ms;
+
+    IF jsonb_typeof(v_seg->'text') <> 'string' OR
+       length(v_seg->>'text') < 1 OR length(v_seg->>'text') > 5000 OR
+       NOT public.is_clean_media_text(v_seg->>'text') THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_seg->'confidence') <> 'string' OR
+       (v_seg->>'confidence') NOT IN ('high', 'medium', 'low') THEN
+      RETURN false;
+    END IF;
+
+    IF v_seg ? 'speaker' THEN
+      IF jsonb_typeof(v_seg->'speaker') <> 'string' OR
+         length(v_seg->>'speaker') < 1 OR length(v_seg->>'speaker') > 100 OR
+         NOT public.is_clean_media_text(v_seg->>'speaker') THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    IF v_seg ? 'translationVi' THEN
+      IF jsonb_typeof(v_seg->'translationVi') <> 'string' OR
+         length(v_seg->>'translationVi') < 1 OR length(v_seg->>'translationVi') > 5000 OR
+         NOT public.is_clean_media_text(v_seg->>'translationVi') THEN
+        RETURN false;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.validate_media_transcript_segments(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_media_transcript_segments(JSONB) TO authenticated, anon;
+
+-- 2. Media Transcript Versions (immutable append-only)
+CREATE TABLE IF NOT EXISTS public.media_transcript_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_id UUID NOT NULL REFERENCES public.media_lessons(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  version_number INT NOT NULL DEFAULT 1,
+  stage TEXT NOT NULL CHECK (stage IN ('raw_caption', 'ai_transcription', 'user_edited', 'normalised')),
+  content_hash TEXT NOT NULL,
+  normalizer_version TEXT NOT NULL DEFAULT 'v1',
+  segments JSONB NOT NULL DEFAULT '[]'::jsonb,
+  coverage_ratio NUMERIC(4,3) NOT NULL DEFAULT 0.000,
+  word_count INT NOT NULL DEFAULT 0,
+  is_complete BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (lesson_id, version_number),
+  CONSTRAINT transcript_segments_valid CHECK (
+    public.validate_media_transcript_segments(segments)
+  )
+);
+
+-- Pure immutable validator for shadowing evaluation payload matching ShadowingEvaluation contract
+CREATE OR REPLACE FUNCTION public.validate_shadowing_evaluation(evaluation JSONB)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_item JSONB;
+  v_telemetry JSONB;
+  v_pause JSONB;
+  v_text TEXT;
+BEGIN
+  IF evaluation IS NULL THEN
+    RETURN true;
+  END IF;
+
+  IF jsonb_typeof(evaluation) <> 'object' THEN
+    RETURN false;
+  END IF;
+
+  -- 1. Required top-level keys
+  IF NOT (evaluation ?& ARRAY[
+    'overallScore',
+    'fluencyScore',
+    'intonationScore',
+    'accuracyScore',
+    'feedbackVi',
+    'swallowedWords',
+    'stressHighlights',
+    'acousticStatus'
+  ]) THEN
+    RETURN false;
+  END IF;
+
+  -- 2. No unknown top-level keys allowed
+  IF (evaluation - ARRAY[
+    'overallScore',
+    'fluencyScore',
+    'intonationScore',
+    'accuracyScore',
+    'feedbackVi',
+    'swallowedWords',
+    'stressHighlights',
+    'actionableAdviceVi',
+    'acousticStatus',
+    'telemetry'
+  ]) <> '{}'::jsonb THEN
+    RETURN false;
+  END IF;
+
+  -- 3. Validate numeric scores (0 to 100)
+  IF jsonb_typeof(evaluation->'overallScore') <> 'number' OR
+     jsonb_typeof(evaluation->'fluencyScore') <> 'number' OR
+     jsonb_typeof(evaluation->'intonationScore') <> 'number' OR
+     jsonb_typeof(evaluation->'accuracyScore') <> 'number' THEN
+    RETURN false;
+  END IF;
+
+  IF (evaluation->>'overallScore')::numeric < 0 OR (evaluation->>'overallScore')::numeric > 100 OR
+     (evaluation->>'fluencyScore')::numeric < 0 OR (evaluation->>'fluencyScore')::numeric > 100 OR
+     (evaluation->>'intonationScore')::numeric < 0 OR (evaluation->>'intonationScore')::numeric > 100 OR
+     (evaluation->>'accuracyScore')::numeric < 0 OR (evaluation->>'accuracyScore')::numeric > 100 THEN
+    RETURN false;
+  END IF;
+
+  -- 4. Validate feedbackVi string
+  IF jsonb_typeof(evaluation->'feedbackVi') <> 'string' THEN
+    RETURN false;
+  END IF;
+
+  v_text := evaluation->>'feedbackVi';
+  IF length(v_text) < 1 OR length(v_text) > 4000 OR NOT public.is_clean_media_text(v_text) THEN
+    RETURN false;
+  END IF;
+
+  -- 5. Validate acousticStatus
+  IF jsonb_typeof(evaluation->'acousticStatus') <> 'string' OR
+     (evaluation->>'acousticStatus') NOT IN ('measured', 'unavailable') THEN
+    RETURN false;
+  END IF;
+
+  -- 6. Validate swallowedWords array
+  IF jsonb_typeof(evaluation->'swallowedWords') <> 'array' OR
+     jsonb_array_length(evaluation->'swallowedWords') > 50 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(evaluation->'swallowedWords') LOOP
+    IF jsonb_typeof(v_item) <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_text := v_item#>>'{}';
+    IF length(v_text) < 1 OR length(v_text) > 100 OR NOT public.is_clean_media_text(v_text) THEN
+      RETURN false;
+    END IF;
+  END LOOP;
+
+  -- 7. Validate stressHighlights array (strict: only word, isCorrect, optional tip)
+  IF jsonb_typeof(evaluation->'stressHighlights') <> 'array' OR
+     jsonb_array_length(evaluation->'stressHighlights') > 50 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(evaluation->'stressHighlights') LOOP
+    IF jsonb_typeof(v_item) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    IF NOT (v_item ?& ARRAY['word', 'isCorrect']) THEN
+      RETURN false;
+    END IF;
+
+    IF (v_item - ARRAY['word', 'isCorrect', 'tip']) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_item->'word') <> 'string' OR
+       length(v_item->>'word') < 1 OR length(v_item->>'word') > 100 OR
+       NOT public.is_clean_media_text(v_item->>'word') OR
+       jsonb_typeof(v_item->'isCorrect') <> 'boolean' THEN
+      RETURN false;
+    END IF;
+
+    IF v_item ? 'tip' THEN
+      IF jsonb_typeof(v_item->'tip') <> 'string' OR
+         length(v_item->>'tip') < 1 OR length(v_item->>'tip') > 1000 OR
+         NOT public.is_clean_media_text(v_item->>'tip') THEN
+        RETURN false;
+      END IF;
+    END IF;
+  END LOOP;
+
+  -- 8. Optional actionableAdviceVi
+  IF evaluation ? 'actionableAdviceVi' THEN
+    IF jsonb_typeof(evaluation->'actionableAdviceVi') <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_text := evaluation->>'actionableAdviceVi';
+    IF length(v_text) < 1 OR length(v_text) > 4000 OR NOT public.is_clean_media_text(v_text) THEN
+      RETURN false;
+    END IF;
+  END IF;
+
+  -- 9. Optional telemetry (strict match for ShadowingTelemetrySchema)
+  IF evaluation ? 'telemetry' THEN
+    v_telemetry := evaluation->'telemetry';
+    IF jsonb_typeof(v_telemetry) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    -- Strict allowed keys only
+    IF (v_telemetry - ARRAY[
+      'rawWpm',
+      'articulationRate',
+      'fillerCount',
+      'fillerRatePer100Words',
+      'silentPauses',
+      'averagePauseDurationMs',
+      'longPauseCount',
+      'speechRatio',
+      'acousticStatus',
+      'vadVersion'
+    ]) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    -- Required keys present
+    IF NOT (v_telemetry ?& ARRAY[
+      'rawWpm',
+      'articulationRate',
+      'fillerCount',
+      'fillerRatePer100Words',
+      'silentPauses',
+      'averagePauseDurationMs',
+      'longPauseCount',
+      'speechRatio',
+      'acousticStatus',
+      'vadVersion'
+    ]) THEN
+      RETURN false;
+    END IF;
+
+    -- Numeric non-negative fields
+    IF jsonb_typeof(v_telemetry->'rawWpm') <> 'number' OR
+       (v_telemetry->>'rawWpm')::numeric < 0 OR (v_telemetry->>'rawWpm')::numeric > 1000 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'fillerCount') <> 'number' OR
+       (v_telemetry->>'fillerCount')::numeric < 0 OR (v_telemetry->>'fillerCount')::numeric > 500 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'fillerRatePer100Words') <> 'number' OR
+       (v_telemetry->>'fillerRatePer100Words')::numeric < 0 OR (v_telemetry->>'fillerRatePer100Words')::numeric > 100 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'longPauseCount') <> 'number' OR
+       (v_telemetry->>'longPauseCount')::numeric < 0 OR (v_telemetry->>'longPauseCount')::numeric > 500 THEN
+      RETURN false;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'speechRatio') <> 'number' OR
+       (v_telemetry->>'speechRatio')::numeric < 0 OR (v_telemetry->>'speechRatio')::numeric > 1 THEN
+      RETURN false;
+    END IF;
+
+    -- Nullable numeric fields
+    IF jsonb_typeof(v_telemetry->'articulationRate') <> 'null' THEN
+      IF jsonb_typeof(v_telemetry->'articulationRate') <> 'number' OR
+         (v_telemetry->>'articulationRate')::numeric < 0 OR (v_telemetry->>'articulationRate')::numeric > 1000 THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    IF jsonb_typeof(v_telemetry->'averagePauseDurationMs') <> 'null' THEN
+      IF jsonb_typeof(v_telemetry->'averagePauseDurationMs') <> 'number' OR
+         (v_telemetry->>'averagePauseDurationMs')::numeric < 0 OR (v_telemetry->>'averagePauseDurationMs')::numeric > 60000 THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    -- acousticStatus: enum ('measured', 'unavailable')
+    IF jsonb_typeof(v_telemetry->'acousticStatus') <> 'string' OR
+       (v_telemetry->>'acousticStatus') NOT IN ('measured', 'unavailable') THEN
+      RETURN false;
+    END IF;
+
+    -- vadVersion: bounded clean string
+    IF jsonb_typeof(v_telemetry->'vadVersion') <> 'string' OR
+       length(v_telemetry->>'vadVersion') < 1 OR length(v_telemetry->>'vadVersion') > 100 OR
+       NOT public.is_clean_media_text(v_telemetry->>'vadVersion') THEN
+      RETURN false;
+    END IF;
+
+    -- silentPauses: array of SilentPauseSchema objects
+    IF jsonb_typeof(v_telemetry->'silentPauses') <> 'array' OR
+       jsonb_array_length(v_telemetry->'silentPauses') > 50 THEN
+      RETURN false;
+    END IF;
+
+    FOR v_pause IN SELECT * FROM jsonb_array_elements(v_telemetry->'silentPauses') LOOP
+      IF jsonb_typeof(v_pause) <> 'object' THEN
+        RETURN false;
+      END IF;
+
+      -- Strict allowed keys
+      IF NOT (v_pause ?& ARRAY['startMs', 'endMs', 'durationMs']) THEN
+        RETURN false;
+      END IF;
+
+      IF (v_pause - ARRAY['startMs', 'endMs', 'durationMs']) <> '{}'::jsonb THEN
+        RETURN false;
+      END IF;
+
+      IF jsonb_typeof(v_pause->'startMs') <> 'number' OR
+         jsonb_typeof(v_pause->'endMs') <> 'number' OR
+         jsonb_typeof(v_pause->'durationMs') <> 'number' THEN
+        RETURN false;
+      END IF;
+
+      IF (v_pause->>'startMs')::numeric < 0 OR
+         (v_pause->>'endMs')::numeric < (v_pause->>'startMs')::numeric OR
+         (v_pause->>'durationMs')::numeric < 0 OR
+         (v_pause->>'endMs')::numeric > 86400000 THEN
+        RETURN false;
+      END IF;
+    END LOOP;
+  END IF;
+
+  -- 10. Global text inspection on full evaluation JSON as defense-in-depth
+  v_text := evaluation::text;
+  IF v_text ~* 'data:audio/' OR
+     v_text ~* 'base64' OR
+     v_text ~ '(UklGR|GkXf|SUQz|T2dn)' THEN
+    RETURN false;
+  END IF;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.validate_shadowing_evaluation(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_shadowing_evaluation(JSONB) TO authenticated, anon;
+
+-- 3. Media Shadowing Attempts
+CREATE TABLE IF NOT EXISTS public.media_shadowing_attempts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_id UUID NOT NULL REFERENCES public.media_lessons(id) ON DELETE CASCADE,
+  segment_id TEXT NOT NULL,
+  transcript_version_id UUID NOT NULL REFERENCES public.media_transcript_versions(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  audio_duration_ms INT NOT NULL DEFAULT 0,
+  acoustic_status TEXT NOT NULL CHECK (acoustic_status IN ('measured', 'unavailable')),
+  evaluation JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT shadowing_evaluation_schema_valid CHECK (
+    public.validate_shadowing_evaluation(evaluation)
+  )
+);
+
+-- Pure immutable validator for dictation diff tokens matching WordDiffToken contract
+CREATE OR REPLACE FUNCTION public.validate_media_dictation_diff_tokens(diff_tokens JSONB)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_token JSONB;
+  v_count INT;
+  v_expected TEXT;
+  v_user TEXT;
+  v_status TEXT;
+BEGIN
+  IF diff_tokens IS NULL THEN
+    RETURN false;
+  END IF;
+
+  IF jsonb_typeof(diff_tokens) <> 'array' THEN
+    RETURN false;
+  END IF;
+
+  v_count := jsonb_array_length(diff_tokens);
+  IF v_count > 500 THEN
+    RETURN false;
+  END IF;
+
+  FOR v_token IN SELECT * FROM jsonb_array_elements(diff_tokens) LOOP
+    IF jsonb_typeof(v_token) <> 'object' THEN
+      RETURN false;
+    END IF;
+
+    -- 1. Required top-level keys
+    IF NOT (v_token ?& ARRAY['expected', 'status']) THEN
+      RETURN false;
+    END IF;
+
+    -- 2. Exact allowed keys: expected, status, optional user
+    IF (v_token - ARRAY['expected', 'status', 'user']) <> '{}'::jsonb THEN
+      RETURN false;
+    END IF;
+
+    -- 3. Enum status
+    IF jsonb_typeof(v_token->'status') <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_status := v_token->>'status';
+    IF v_status NOT IN ('correct', 'incorrect', 'missing', 'extra') THEN
+      RETURN false;
+    END IF;
+
+    -- 4. Validate expected string and bounds
+    IF jsonb_typeof(v_token->'expected') <> 'string' THEN
+      RETURN false;
+    END IF;
+    v_expected := v_token->>'expected';
+
+    IF v_status = 'extra' THEN
+      IF length(v_expected) > 200 OR NOT public.is_clean_media_text(v_expected) THEN
+        RETURN false;
+      END IF;
+    ELSE
+      IF length(v_expected) < 1 OR length(v_expected) > 200 OR NOT public.is_clean_media_text(v_expected) THEN
+        RETURN false;
+      END IF;
+    END IF;
+
+    -- 5. Validate optional user string and bounds
+    IF v_token ? 'user' THEN
+      IF jsonb_typeof(v_token->'user') <> 'string' THEN
+        RETURN false;
+      END IF;
+      v_user := v_token->>'user';
+      IF length(v_user) < 1 OR length(v_user) > 200 OR NOT public.is_clean_media_text(v_user) THEN
+        RETURN false;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.validate_media_dictation_diff_tokens(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_media_dictation_diff_tokens(JSONB) TO authenticated, anon;
+
+-- 4. Media Dictation Attempts
+CREATE TABLE IF NOT EXISTS public.media_dictation_attempts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lesson_id UUID NOT NULL REFERENCES public.media_lessons(id) ON DELETE CASCADE,
+  segment_id TEXT NOT NULL,
+  transcript_version_id UUID NOT NULL REFERENCES public.media_transcript_versions(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL CHECK (mode IN ('full_sentence', 'gap_fill', 'word_arrange')),
+  difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')),
+  user_response_text TEXT NOT NULL,
+  expected_text TEXT NOT NULL,
+  accuracy_score INT NOT NULL CHECK (accuracy_score BETWEEN 0 AND 100),
+  diff_tokens JSONB NOT NULL DEFAULT '[]'::jsonb,
+  mistake_ids UUID[] NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT dictation_no_raw_audio CHECK (
+    length(user_response_text) <= 2000 AND
+    public.is_clean_media_text(user_response_text)
+  ),
+  CONSTRAINT dictation_expected_text_valid CHECK (
+    length(expected_text) >= 1 AND
+    length(expected_text) <= 2000 AND
+    public.is_clean_media_text(expected_text)
+  ),
+  CONSTRAINT dictation_diff_tokens_schema_valid CHECK (
+    public.validate_media_dictation_diff_tokens(diff_tokens)
+  )
+);
+
+-- 5. Media Resume States
+CREATE TABLE IF NOT EXISTS public.media_resume_states (
+  lesson_id UUID PRIMARY KEY REFERENCES public.media_lessons(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  active_segment_id TEXT NOT NULL,
+  playback_position_ms INT NOT NULL DEFAULT 0,
+  last_mode TEXT NOT NULL CHECK (last_mode IN ('shadowing', 'dictation')),
+  playback_speed NUMERIC(3,2) NOT NULL DEFAULT 1.00,
+  loop_count INT NOT NULL DEFAULT 1,
+  wait_interval_ms INT NOT NULL DEFAULT 0,
+  completed_segment_ids TEXT[] NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_media_lessons_user ON public.media_lessons(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_media_versions_lesson ON public.media_transcript_versions(lesson_id, version_number DESC);
+CREATE INDEX IF NOT EXISTS idx_media_shadowing_user ON public.media_shadowing_attempts(user_id, lesson_id);
+CREATE INDEX IF NOT EXISTS idx_media_dictation_user ON public.media_dictation_attempts(user_id, lesson_id);
+
+-- Enforce Provenance Ownership and Cross-Row Constraints on media_lessons (stored in private omni_internal schema)
+CREATE OR REPLACE FUNCTION omni_internal.enforce_media_lesson_provenance()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
+AS $$
+DECLARE
+  v_auth_uid UUID := auth.uid();
+  v_owner_id UUID;
+BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_lessons' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_auth_uid IS NOT NULL AND NEW.user_id <> v_auth_uid THEN
+    RAISE EXCEPTION 'Invalid user ownership' USING ERRCODE = '42501';
+  END IF;
+
+  v_owner_id := COALESCE(v_auth_uid, NEW.user_id);
+
+  -- 1. If source_record_id is supplied, it must belong to owner
+  IF NEW.source_record_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.source_records
+      WHERE id = NEW.source_record_id AND user_id = v_owner_id
+    ) THEN
+      RAISE EXCEPTION 'Invalid source reference' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- 2. If source_version_id is supplied, it must belong to source_record_id and owner
+  IF NEW.source_version_id IS NOT NULL THEN
+    IF NEW.source_record_id IS NULL THEN
+      RAISE EXCEPTION 'Invalid source reference' USING ERRCODE = '42501';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM public.source_versions
+      WHERE id = NEW.source_version_id
+        AND source_id = NEW.source_record_id
+        AND user_id = v_owner_id
+    ) THEN
+      RAISE EXCEPTION 'Invalid source reference' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- 3. If current_version_id is supplied, it must belong to this lesson and owner
+  IF NEW.current_version_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.media_transcript_versions
+      WHERE id = NEW.current_version_id
+        AND lesson_id = NEW.id
+        AND user_id = v_owner_id
+    ) THEN
+      RAISE EXCEPTION 'Invalid version reference' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS media_lessons_enforce_provenance ON public.media_lessons;
+CREATE TRIGGER media_lessons_enforce_provenance
+  BEFORE INSERT OR UPDATE OF user_id, source_record_id, source_version_id, current_version_id ON public.media_lessons
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.enforce_media_lesson_provenance();
+
+-- Append-only trigger for media_transcript_versions: blocks direct UPDATE/DELETE
+-- Allows parent cascade delete ONLY via database-owned non-spoofable transaction tracking table in omni_internal schema.
+CREATE OR REPLACE FUNCTION omni_internal.prevent_media_transcript_version_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
+AS $$
+BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_transcript_versions' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'media_transcript_versions are append-only; update forbidden'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (
+      SELECT 1 FROM omni_internal.active_deleting_media_lessons
+      WHERE lesson_id = OLD.lesson_id AND tx_id = pg_current_xact_id()
+    ) THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'media_transcript_versions are append-only; direct delete forbidden'
+      USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS media_transcript_versions_append_only ON public.media_transcript_versions;
+CREATE TRIGGER media_transcript_versions_append_only
+  BEFORE UPDATE OR DELETE ON public.media_transcript_versions
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.prevent_media_transcript_version_mutation();
+
+CREATE OR REPLACE FUNCTION omni_internal.mark_media_lesson_cascade_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
+AS $$
+BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_lessons' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO omni_internal.active_deleting_media_lessons (lesson_id, tx_id)
+  VALUES (OLD.id, pg_current_xact_id())
+  ON CONFLICT DO NOTHING;
+  RETURN OLD;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION omni_internal.clear_media_lesson_cascade_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
+AS $$
+BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME <> 'media_lessons' THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
+  DELETE FROM omni_internal.active_deleting_media_lessons
+  WHERE lesson_id = OLD.id AND tx_id = pg_current_xact_id();
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS media_lessons_before_cascade ON public.media_lessons;
+CREATE TRIGGER media_lessons_before_cascade
+  BEFORE DELETE ON public.media_lessons
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.mark_media_lesson_cascade_delete();
+
+DROP TRIGGER IF EXISTS media_lessons_after_cascade ON public.media_lessons;
+CREATE TRIGGER media_lessons_after_cascade
+  AFTER DELETE ON public.media_lessons
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.clear_media_lesson_cascade_delete();
+
+-- Enforce Attempt Segment Reference and Tenant/Lesson Isolation on media_shadowing_attempts and media_dictation_attempts
+CREATE OR REPLACE FUNCTION omni_internal.enforce_media_attempt_segment_reference()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, omni_internal, pg_temp
+AS $$
+DECLARE
+  v_auth_uid UUID := auth.uid();
+  v_owner_id UUID;
+BEGIN
+  IF TG_TABLE_SCHEMA <> 'public' OR TG_TABLE_NAME NOT IN ('media_shadowing_attempts', 'media_dictation_attempts') THEN
+    RAISE EXCEPTION 'Invalid trigger execution context' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_auth_uid IS NOT NULL AND NEW.user_id <> v_auth_uid THEN
+    RAISE EXCEPTION 'Invalid user ownership' USING ERRCODE = '42501';
+  END IF;
+
+  v_owner_id := COALESCE(v_auth_uid, NEW.user_id);
+
+  -- Segment must exist in transcript version belonging to lesson_id and owner
+  -- Missing, foreign, or fake segment references produce identical non-disclosing error
+  IF NOT EXISTS (
+    SELECT 1 FROM public.media_transcript_versions v
+    WHERE v.id = NEW.transcript_version_id
+      AND v.lesson_id = NEW.lesson_id
+      AND v.user_id = v_owner_id
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(v.segments) AS s
+        WHERE s->>'id' = NEW.segment_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'Invalid segment reference' USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS media_shadowing_attempts_enforce_segment ON public.media_shadowing_attempts;
+CREATE TRIGGER media_shadowing_attempts_enforce_segment
+  BEFORE INSERT OR UPDATE OF segment_id, transcript_version_id, lesson_id, user_id ON public.media_shadowing_attempts
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.enforce_media_attempt_segment_reference();
+
+DROP TRIGGER IF EXISTS media_dictation_attempts_enforce_segment ON public.media_dictation_attempts;
+CREATE TRIGGER media_dictation_attempts_enforce_segment
+  BEFORE INSERT OR UPDATE OF segment_id, transcript_version_id, lesson_id, user_id ON public.media_dictation_attempts
+  FOR EACH ROW
+  EXECUTE FUNCTION omni_internal.enforce_media_attempt_segment_reference();
+
+-- Privileges: revoke all execution rights on internal schema functions from public/authenticated/anon
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA omni_internal FROM PUBLIC, anon, authenticated;
+
+-- Row Level Security (RLS) Enforcement
+ALTER TABLE public.media_lessons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.media_transcript_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.media_shadowing_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.media_dictation_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.media_resume_states ENABLE ROW LEVEL SECURITY;
+
+-- 1. media_lessons RLS
+CREATE POLICY "media_lessons_owner_all" ON public.media_lessons
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- 2. media_transcript_versions RLS (requires parent lesson owned by auth.uid())
+CREATE POLICY "media_transcript_versions_owner_select" ON public.media_transcript_versions
+  FOR SELECT USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_transcript_versions_owner_insert" ON public.media_transcript_versions
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_transcript_versions_owner_update" ON public.media_transcript_versions
+  FOR UPDATE USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  ) WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_transcript_versions_owner_delete" ON public.media_transcript_versions
+  FOR DELETE USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+-- 3. media_shadowing_attempts RLS (requires parent lesson & version owned by auth.uid())
+CREATE POLICY "media_shadowing_attempts_owner_select" ON public.media_shadowing_attempts
+  FOR SELECT USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      JOIN public.media_transcript_versions v ON v.lesson_id = l.id
+      WHERE l.id = lesson_id AND v.id = transcript_version_id AND l.user_id = auth.uid() AND v.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_shadowing_attempts_owner_insert" ON public.media_shadowing_attempts
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      JOIN public.media_transcript_versions v ON v.lesson_id = l.id
+      WHERE l.id = lesson_id AND v.id = transcript_version_id AND l.user_id = auth.uid() AND v.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_shadowing_attempts_owner_delete" ON public.media_shadowing_attempts
+  FOR DELETE USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+-- 4. media_dictation_attempts RLS (requires parent lesson & version owned by auth.uid())
+CREATE POLICY "media_dictation_attempts_owner_select" ON public.media_dictation_attempts
+  FOR SELECT USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      JOIN public.media_transcript_versions v ON v.lesson_id = l.id
+      WHERE l.id = lesson_id AND v.id = transcript_version_id AND l.user_id = auth.uid() AND v.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_dictation_attempts_owner_insert" ON public.media_dictation_attempts
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      JOIN public.media_transcript_versions v ON v.lesson_id = l.id
+      WHERE l.id = lesson_id AND v.id = transcript_version_id AND l.user_id = auth.uid() AND v.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "media_dictation_attempts_owner_delete" ON public.media_dictation_attempts
+  FOR DELETE USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+-- 5. media_resume_states RLS (requires parent lesson owned by auth.uid())
+CREATE POLICY "media_resume_states_owner_all" ON public.media_resume_states
+  FOR ALL USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  ) WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.media_lessons l
+      WHERE l.id = lesson_id AND l.user_id = auth.uid()
+    )
+  );
+
+-- Permissions
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_lessons TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_transcript_versions TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_shadowing_attempts TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_dictation_attempts TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.media_resume_states TO authenticated;
