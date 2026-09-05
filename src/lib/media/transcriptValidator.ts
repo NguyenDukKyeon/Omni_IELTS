@@ -143,8 +143,8 @@ export function parseSubtitleCues(rawText: string, format: 'vtt' | 'srt'): Subti
 }
 
 /**
- * Validates monotonic timestamps, non-overlapping ordering, and coverage ratio.
- * Enforces >= 65% coverage for complete ready transcripts.
+ * Validates monotonic timestamps, non-overlapping ordering, bounded intervals, and coverage ratio.
+ * Enforces >= 65% coverage for complete ready transcripts based on interval union.
  */
 export function validateTranscriptCoverage(
   segments: MediaTranscriptSegment[],
@@ -154,30 +154,80 @@ export function validateTranscriptCoverage(
     return { valid: false, coverageRatio: 0, issue: 'empty' };
   }
 
-  let coveredMs = 0;
+  // Duration must be finite, positive, and known
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return { valid: false, coverageRatio: 0, issue: 'timestamps_invalid' };
+  }
+
+  let previousStart = -1;
   let previousEnd = -1;
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
 
+    // Timestamps must be finite integers, non-negative, with endMs > startMs
     if (
+      typeof seg.startMs !== 'number' ||
+      !Number.isInteger(seg.startMs) ||
+      typeof seg.endMs !== 'number' ||
+      !Number.isInteger(seg.endMs) ||
       seg.startMs < 0 ||
-      seg.endMs <= seg.startMs ||
-      (i > 0 && seg.startMs < previousEnd - 50) ||
-      !seg.text.trim()
+      seg.endMs <= seg.startMs
     ) {
       return { valid: false, coverageRatio: 0, issue: 'timestamps_invalid' };
     }
 
-    coveredMs += Math.max(0, seg.endMs - seg.startMs);
+    // Intervals must be within [0, durationMs]
+    if (seg.startMs > durationMs || seg.endMs > durationMs) {
+      return { valid: false, coverageRatio: 0, issue: 'timestamps_invalid' };
+    }
+
+    // Monotonic ordering and overlap tolerance (next.startMs >= previous.endMs - 50 ms)
+    if (i > 0) {
+      if (seg.startMs < previousStart || seg.startMs < previousEnd - 50) {
+        return { valid: false, coverageRatio: 0, issue: 'timestamps_invalid' };
+      }
+    }
+
+    // Text must not be empty or whitespace-only
+    if (typeof seg.text !== 'string' || !seg.text.trim()) {
+      return { valid: false, coverageRatio: 0, issue: 'timestamps_invalid' };
+    }
+
+    previousStart = seg.startMs;
     previousEnd = seg.endMs;
   }
 
-  const coverageRatio = durationMs > 0 ? Math.min(1, Math.round((coveredMs / durationMs) * 1000) / 1000) : 1;
+  // Compute coverage as interval union without double-counting overlap
+  let unionCoveredMs = 0;
+  let currentStart = segments[0].startMs;
+  let currentEnd = segments[0].endMs;
 
-  if (durationMs > 0 && coverageRatio < 0.65) {
-    return { valid: false, coverageRatio, issue: 'coverage_insufficient' };
+  for (let i = 1; i < segments.length; i++) {
+    const nextStart = segments[i].startMs;
+    const nextEnd = segments[i].endMs;
+
+    if (nextStart <= currentEnd) {
+      currentEnd = Math.max(currentEnd, nextEnd);
+    } else {
+      unionCoveredMs += (currentEnd - currentStart);
+      currentStart = nextStart;
+      currentEnd = nextEnd;
+    }
+  }
+  unionCoveredMs += (currentEnd - currentStart);
+
+  // Compare unrounded coverage ratio against 0.65 threshold
+  const rawCoverageRatio = unionCoveredMs / durationMs;
+  const displayCoverageRatio = Math.min(1, Math.round(rawCoverageRatio * 1000) / 1000);
+
+  if (rawCoverageRatio < 0.65) {
+    return {
+      valid: false,
+      coverageRatio: displayCoverageRatio,
+      issue: 'coverage_insufficient',
+    };
   }
 
-  return { valid: true, coverageRatio };
+  return { valid: true, coverageRatio: displayCoverageRatio };
 }

@@ -5,6 +5,8 @@ import {
 } from '../media/transcriptValidator';
 import { normalizeRollingCaptions } from '../media/transcriptNormalizer';
 import { computeTranscriptHash, computeSegmentId } from '../media/contentHash';
+import { createMediaJobMachine } from '../media/mediaJobMachine';
+import { createActor } from 'xstate';
 import type { MediaTranscriptSegment } from '../../types/media';
 
 describe('Transcript Validation, Normalization, and Deterministic Identity', () => {
@@ -117,6 +119,164 @@ describe('Transcript Validation, Normalization, and Deterministic Identity', () 
       expect(result.valid).toBe(false);
       expect(result.issue).toBe('empty');
       expect(result.coverageRatio).toBe(0);
+    });
+
+    const makeSeg = (
+      startMs: number,
+      endMs: number,
+      text = 'Valid transcript line.',
+      id = 'seg_test',
+      index = 0,
+    ): MediaTranscriptSegment => ({
+      id,
+      index,
+      startMs,
+      endMs,
+      text,
+      confidence: 'high',
+    });
+
+    it('rejects segments outside duration bounds [0, durationMs] (case a)', () => {
+      const result = validateTranscriptCoverage([makeSeg(2000, 3000)], 1000);
+      expect(result.valid).toBe(false);
+      expect(result.issue).toBe('timestamps_invalid');
+    });
+
+    it('rejects zero duration media (case b)', () => {
+      const result = validateTranscriptCoverage([makeSeg(0, 1000)], 0);
+      expect(result.valid).toBe(false);
+      expect(result.issue).toBe('timestamps_invalid');
+      expect(result.coverageRatio).toBe(0);
+    });
+
+    it('rejects coverage below 65% when rounded display might round to 0.65 (case c)', () => {
+      const result = validateTranscriptCoverage([makeSeg(0, 6496)], 10000);
+      expect(result.valid).toBe(false);
+      expect(result.issue).toBe('coverage_insufficient');
+    });
+
+    it('accepts coverage at exactly 65% threshold (case d)', () => {
+      const result = validateTranscriptCoverage([makeSeg(0, 6500)], 10000);
+      expect(result.valid).toBe(true);
+      expect(result.coverageRatio).toBe(0.65);
+      expect(result.issue).toBeUndefined();
+    });
+
+    it('calculates coverage as interval union without double-counting tolerated overlap (case e)', () => {
+      const intervals = [
+        makeSeg(0, 3300, 'First segment', 's1', 0),
+        makeSeg(3250, 6496, 'Second segment', 's2', 1),
+      ];
+      const result = validateTranscriptCoverage(intervals, 10000);
+      expect(result.valid).toBe(false);
+      expect(result.issue).toBe('coverage_insufficient');
+    });
+
+    it('rejects overlap exceeding 50ms tolerance with timestamps_invalid (case f)', () => {
+      const invalidOverlap = [
+        makeSeg(0, 10000, 'First segment', 's1', 0),
+        makeSeg(9949, 20000, 'Second segment', 's2', 1),
+      ];
+      const result = validateTranscriptCoverage(invalidOverlap, 20000);
+      expect(result.valid).toBe(false);
+      expect(result.issue).toBe('timestamps_invalid');
+    });
+
+    it('rejects zero-duration, negative, fractional, NaN, and Infinity timestamps (case g)', () => {
+      expect(validateTranscriptCoverage([makeSeg(1000, 1000)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(1000, 1000)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(-100, 1000)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(-100, 1000)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, -1000)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, -1000)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0.5, 1000)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0.5, 1000)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, 1000.5)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, 1000.5)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(Number.NaN, 1000)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(Number.NaN, 1000)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, Number.NaN)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, Number.NaN)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(Number.NEGATIVE_INFINITY, 1000)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(Number.NEGATIVE_INFINITY, 1000)], 10000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, Number.POSITIVE_INFINITY)], 10000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, Number.POSITIVE_INFINITY)], 10000).issue).toBe('timestamps_invalid');
+    });
+
+    it('rejects negative, NaN, and Infinity duration (case h)', () => {
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], -1000).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], -1000).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], Number.NaN).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], Number.NaN).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], Number.POSITIVE_INFINITY).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], Number.POSITIVE_INFINITY).issue).toBe('timestamps_invalid');
+
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], Number.NEGATIVE_INFINITY).valid).toBe(false);
+      expect(validateTranscriptCoverage([makeSeg(0, 1000)], Number.NEGATIVE_INFINITY).issue).toBe('timestamps_invalid');
+    });
+
+    it('differentiates empty array vs whitespace text typed failures (case i)', () => {
+      const emptyResult = validateTranscriptCoverage([], 10000);
+      expect(emptyResult.valid).toBe(false);
+      expect(emptyResult.issue).toBe('empty');
+      expect(emptyResult.coverageRatio).toBe(0);
+
+      const whitespaceResult = validateTranscriptCoverage([makeSeg(0, 5000, '   \t\n  ')], 10000);
+      expect(whitespaceResult.valid).toBe(false);
+      expect(whitespaceResult.issue).toBe('timestamps_invalid');
+      expect(whitespaceResult.coverageRatio).toBe(0);
+    });
+
+    it('does not mutate input segments or array (case k)', () => {
+      const seg1 = makeSeg(0, 3000, 'Segment 1', 's1', 0);
+      const seg2 = makeSeg(2980, 7000, 'Segment 2', 's2', 1);
+      Object.freeze(seg1);
+      Object.freeze(seg2);
+      const segments = Object.freeze([seg1, seg2]);
+
+      expect(() => validateTranscriptCoverage(segments as unknown as MediaTranscriptSegment[], 10000)).not.toThrow();
+      expect(seg1.startMs).toBe(0);
+      expect(seg1.endMs).toBe(3000);
+      expect(seg2.startMs).toBe(2980);
+      expect(seg2.endMs).toBe(7000);
+    });
+
+    it('ensures invalid transcript coverage cannot transition ingestion state machine to ready (case l)', () => {
+      const insufficientSegments = [
+        makeSeg(0, 3300, 'First segment', 's1', 0),
+        makeSeg(3250, 6496, 'Second segment', 's2', 1),
+      ];
+      const validation = validateTranscriptCoverage(insufficientSegments, 10000);
+      expect(validation.valid).toBe(false);
+
+      const machine = createMediaJobMachine();
+      const actor = createActor(machine).start();
+      actor.send({ type: 'START_PROBING' });
+      actor.send({ type: 'PROBE_YOUTUBE_SUCCESS' });
+      actor.send({ type: 'CAPTIONS_FETCHED', segmentsCount: insufficientSegments.length });
+      actor.send({ type: 'NORMALIZED' });
+
+      if (validation.valid) {
+        actor.send({ type: 'VALIDATION_PASSED', coverageRatio: validation.coverageRatio });
+      } else if (validation.issue === 'coverage_insufficient') {
+        actor.send({ type: 'VALIDATION_DEGRADED', issue: 'coverage_insufficient' });
+      } else {
+        actor.send({ type: 'VALIDATION_FAILED', category: 'VALIDATION_ERROR', message: 'Invalid timestamps' });
+      }
+
+      expect(actor.getSnapshot().value).toBe('degraded');
+      expect(actor.getSnapshot().value).not.toBe('ready');
+      expect(actor.getSnapshot().context.transcriptState).toBe('coverage_insufficient');
     });
   });
 
