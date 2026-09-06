@@ -319,9 +319,12 @@ describe('Media Domain Contracts and Zod Schemas', () => {
     const validResume = {
       lessonId: '550e8400-e29b-41d4-a716-446655440000',
       userId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+      transcriptVersionId: '550e8400-e29b-41d4-a716-446655440001',
       activeSegmentId: 'seg_a1b2c3d4e5f6',
       playbackPositionMs: 1500,
+      studioMode: 'shadowing' as const,
       lastMode: 'shadowing' as const,
+      assistanceMode: 'guided' as const,
       playbackSpeed: 1.0,
       loopCount: 2,
       waitIntervalMs: 800,

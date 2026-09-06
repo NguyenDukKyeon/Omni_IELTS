@@ -27,24 +27,53 @@ export const MediaTranscriptStateSchema = z.enum([
 ]);
 export type MediaTranscriptState = z.infer<typeof MediaTranscriptStateSchema>;
 
-export const MediaLessonSchema = z.object({
-  id: z.string().uuid(),
-  userId: z.string().uuid(),
-  title: z.string().min(1),
-  mediaType: MediaTypeSchema,
-  mediaUrl: z.string().url(),
-  youtubeId: z.string().optional(),
-  channelTitle: z.string().optional(),
-  durationMs: z.number().int().nonnegative(),
-  currentVersionId: z.string().uuid().optional(),
-  sourceRecordId: z.string().uuid().optional(),
-  sourceVersionId: z.string().uuid().optional(), // Never populated for P03 media handoffs
-  processingState: MediaProcessingStateSchema,
-  transcriptState: MediaTranscriptStateSchema.optional(),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  lastPracticedAt: z.string().datetime().optional(),
-});
+export const MediaLessonSchema = z
+  .object({
+    id: z.string().uuid(),
+    userId: z.string().uuid(),
+    title: z.string().min(1),
+    mediaType: MediaTypeSchema,
+    mediaUrl: z.string().nullable().optional(),
+    youtubeId: z.string().optional(),
+    channelTitle: z.string().optional(),
+    durationMs: z.number().int().nonnegative(),
+    currentVersionId: z.string().uuid().optional(),
+    sourceRecordId: z.string().uuid().optional(),
+    sourceVersionId: z.string().uuid().optional(), // Never populated for P03 media handoffs
+    processingState: MediaProcessingStateSchema,
+    transcriptState: MediaTranscriptStateSchema.optional(),
+    originalFilename: z.string().min(1).max(255).optional(),
+    sourceHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    lastPracticedAt: z.string().datetime().optional(),
+  })
+  .refine(
+    (lesson) => {
+      // YouTube sources require an HTTP(S) url; blob/data/file URLs are strictly forbidden
+      if (lesson.mediaType === 'youtube') {
+        return (
+          typeof lesson.mediaUrl === 'string' &&
+          /^https?:\/\/[^\s]+$/.test(lesson.mediaUrl) &&
+          !lesson.mediaUrl.startsWith('blob:') &&
+          !lesson.mediaUrl.startsWith('data:')
+        );
+      }
+      // If audio has a mediaUrl, it must be HTTP(S)
+      if (lesson.mediaUrl != null) {
+        return (
+          /^https?:\/\/[^\s]+$/.test(lesson.mediaUrl) &&
+          !lesson.mediaUrl.startsWith('blob:') &&
+          !lesson.mediaUrl.startsWith('data:')
+        );
+      }
+      // Audio without mediaUrl (local-only or P03 handoff) is valid
+      return true;
+    },
+    {
+      message: 'mediaUrl is required for YouTube sources and must be a valid HTTP(S) URL',
+    }
+  );
 export type MediaLesson = z.infer<typeof MediaLessonSchema>;
 
 /**
@@ -211,16 +240,101 @@ export const DictationAttemptSchema = z.object({
 });
 export type DictationAttempt = z.infer<typeof DictationAttemptSchema>;
 
-export const MediaResumeStateSchema = z.object({
+export const StudioModeSchema = z.enum(['shadowing', 'dictation']);
+export type StudioMode = z.infer<typeof StudioModeSchema>;
+
+export const AssistanceModeSchema = z.enum(['guided', 'independent']);
+export type AssistanceMode = z.infer<typeof AssistanceModeSchema>;
+
+export const TEXT_DRAFT_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const RECORDING_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+export const LocalOwnerScopeSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('account'),
+      subjectId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('guest'),
+      guestSessionId: z.string().min(1),
+    })
+    .strict(),
+]);
+export type LocalOwnerScope = z.infer<typeof LocalOwnerScopeSchema>;
+
+export const DictationDraftSchema = z
+  .object({
+    scope: LocalOwnerScopeSchema,
+    lessonId: z.string().uuid(),
+    transcriptVersionId: z.string().uuid(),
+    segmentId: z.string().min(1),
+    userResponseText: z
+      .string()
+      .max(2000)
+      .refine((val) => !val.startsWith('data:') && !val.startsWith('blob:'), {
+        message: 'Raw media payloads are not permitted in text drafts',
+      }),
+    assistanceMode: AssistanceModeSchema,
+    lastContentEditedAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+  })
+  .strict();
+export type DictationDraft = z.infer<typeof DictationDraftSchema>;
+
+export const LocalRecordingMetadataSchema = z
+  .object({
+    scope: LocalOwnerScopeSchema,
+    attemptId: z.string().uuid(),
+    lessonId: z.string().uuid(),
+    transcriptVersionId: z.string().uuid(),
+    segmentId: z.string().min(1),
+    completedAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    localArtifactRef: z.string().regex(/^idb-media:\/\/.+/),
+  })
+  .strict();
+export type LocalRecordingMetadata = z.infer<typeof LocalRecordingMetadataSchema>;
+
+const RawMediaResumeStateSchema = z.object({
   lessonId: z.string().uuid(),
   userId: z.string().uuid(),
-  activeSegmentId: z.string().min(1),
+  transcriptVersionId: z.string().uuid().nullable().default(null),
+  activeSegmentId: z.string().min(1).nullable().default(null),
   playbackPositionMs: z.number().int().nonnegative(),
-  lastMode: z.enum(['shadowing', 'dictation']),
+  studioMode: StudioModeSchema.optional(),
+  lastMode: StudioModeSchema.optional(),
+  assistanceMode: AssistanceModeSchema.default('guided'),
   playbackSpeed: z.number().min(0.5).max(2.0),
   loopCount: z.number().int().min(1).max(10),
   waitIntervalMs: z.number().int().nonnegative(),
   completedSegmentIds: z.array(z.string()),
   updatedAt: z.string().datetime(),
 });
+
+export const MediaResumeStateSchema = RawMediaResumeStateSchema
+  .refine((val) => val.studioMode !== undefined || val.lastMode !== undefined, {
+    message: 'studioMode or lastMode must be provided',
+  })
+  .refine((val) => !(val.transcriptVersionId === null && val.activeSegmentId !== null), {
+    message: 'activeSegmentId requires a non-null transcriptVersionId',
+    path: ['activeSegmentId'],
+  })
+  .refine(
+    (val) => !(val.transcriptVersionId === null && val.completedSegmentIds && val.completedSegmentIds.length > 0),
+    {
+      message: 'completedSegmentIds must be empty when transcriptVersionId is null',
+      path: ['completedSegmentIds'],
+    }
+  )
+  .transform((val) => {
+    const resolvedMode = val.studioMode ?? val.lastMode!;
+    return {
+      ...val,
+      studioMode: resolvedMode,
+      lastMode: resolvedMode,
+    };
+  });
 export type MediaResumeState = z.infer<typeof MediaResumeStateSchema>;

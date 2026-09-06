@@ -5,7 +5,8 @@ import pg from 'pg';
 const { Client } = pg;
 const SOURCES_MIGRATION_PATH = 'supabase/migrations/202608300001_sources_library.sql';
 const MEDIA_MIGRATION_PATH = 'supabase/migrations/202609040001_media_learning_room.sql';
-const MIGRATION_PATHS = [SOURCES_MIGRATION_PATH, MEDIA_MIGRATION_PATH];
+const MEDIA_R6_MIGRATION_PATH = 'supabase/migrations/202609060001_media_r6_resume_and_original_audio.sql';
+const MIGRATION_PATHS = [SOURCES_MIGRATION_PATH, MEDIA_MIGRATION_PATH, MEDIA_R6_MIGRATION_PATH];
 
 export const REQUIRED_DISPOSABLE_DB_NAME = 'omni_media_rls_test';
 export const REQUIRED_MARKER_NAME = 'OMNI_MEDIA_RLS_TEST_ENVIRONMENT';
@@ -346,9 +347,9 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
 
   // Insert Resume State A
   await client.query(
-    `INSERT INTO public.media_resume_states (lesson_id, user_id, active_segment_id, playback_position_ms, last_mode, playback_speed)
-     VALUES ($1, $2, $3, $4, $5, $6);`,
-    [lessonAId, USER_A_ID, 'seg_1', 2500, 'shadowing', 1.0]
+    `INSERT INTO public.media_resume_states (lesson_id, user_id, transcript_version_id, active_segment_id, playback_position_ms, last_mode, studio_mode, assistance_mode, playback_speed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
+    [lessonAId, USER_A_ID, versionA1Id, 'seg_1', 2500, 'shadowing', 'shadowing', 'guided', 1.0]
   );
   await client.query('COMMIT;');
   details.push('PASS: User A created lesson, version 1, shadowing attempt, dictation attempt, and resume state');
@@ -1922,6 +1923,308 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   }
   details.push('PASS: Proof 53: Strict dictation diff tokens, leaf bounds, clean media text, and expected_text bounds enforced by database validator');
 
+  // --- PROOFS 54-65: P04 R6 Resume and Original Audio Contracts ---
+  const lessonR6ProofAId = 'a0000000-0000-4000-8000-000000000090';
+  const versionR6ProofAId = 'a0000000-0000-4000-8000-000000000091';
+
+  // Create a dedicated lesson and version for R6 proofs
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, processing_state, transcript_state)
+     VALUES ($1, $2, 'R6 Resume Proof Lesson', 'audio', NULL, 'ready', 'ready');`,
+    [lessonR6ProofAId, USER_A_ID]
+  );
+  await client.query(
+    `INSERT INTO public.media_transcript_versions (id, lesson_id, user_id, version_number, stage, content_hash, segments, coverage_ratio)
+     VALUES ($1, $2, $3, 1, 'raw_caption', 'hash_r6', $4::jsonb, 0.95);`,
+    [
+      versionR6ProofAId,
+      lessonR6ProofAId,
+      USER_A_ID,
+      JSON.stringify([
+        { id: 'r6_seg_1', index: 0, startMs: 0, endMs: 2000, text: 'First segment', confidence: 'high' },
+        { id: 'r6_seg_2', index: 1, startMs: 2000, endMs: 5000, text: 'Second segment', confidence: 'high' },
+      ]),
+    ]
+  );
+  await client.query('COMMIT;');
+
+  // Proof 54: Degraded resume state (null transcript_version_id, null active_segment_id, empty completed_segment_ids) succeeds
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_resume_states (lesson_id, user_id, transcript_version_id, active_segment_id, playback_position_ms, studio_mode, assistance_mode, completed_segment_ids)
+     VALUES ($1, $2, NULL, NULL, 5000, 'shadowing', 'guided', '{}');`,
+    [lessonR6ProofAId, USER_A_ID]
+  );
+  const p54Res = await client.query(
+    `SELECT transcript_version_id, active_segment_id, last_mode, studio_mode, assistance_mode FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [lessonR6ProofAId]
+  );
+  await client.query('COMMIT;');
+  if (p54Res.rows[0].transcript_version_id !== null || p54Res.rows[0].active_segment_id !== null || p54Res.rows[0].last_mode !== 'shadowing') {
+    throw new Error('Proof 54 failed: Degraded resume state insertion or last_mode synchronization failed');
+  }
+  details.push('PASS: Proof 54: Degraded resume state with null version/segment succeeds and synchronizes legacy last_mode');
+
+  // Proof 55: Resume state with null transcript_version_id and non-null active_segment_id is blocked
+  let p55Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `UPDATE public.media_resume_states SET active_segment_id = 'orphan_seg' WHERE lesson_id = $1;`,
+      [lessonR6ProofAId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    p55Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p55Blocked) {
+    throw new Error('Proof 55 failed: Orphan active_segment_id with null transcript_version_id was not blocked');
+  }
+  details.push('PASS: Proof 55: Non-null active_segment_id requires non-null transcript_version_id (blocked)');
+
+  // Proof 56: Resume state with null transcript_version_id and non-empty completed_segment_ids is blocked
+  let p56Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `UPDATE public.media_resume_states SET completed_segment_ids = ARRAY['orphan_seg'] WHERE lesson_id = $1;`,
+      [lessonR6ProofAId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    p56Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p56Blocked) {
+    throw new Error('Proof 56 failed: Non-empty completed_segment_ids with null transcript_version_id was not blocked');
+  }
+  details.push('PASS: Proof 56: Non-empty completed_segment_ids requires non-null transcript_version_id (blocked)');
+
+  // Proof 57: Resume state with valid transcript_version_id and null active_segment_id (no active sentence) succeeds
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `UPDATE public.media_resume_states
+     SET transcript_version_id = $1, active_segment_id = NULL, completed_segment_ids = ARRAY['r6_seg_1']
+     WHERE lesson_id = $2;`,
+    [versionR6ProofAId, lessonR6ProofAId]
+  );
+  const p57Res = await client.query(
+    `SELECT transcript_version_id, active_segment_id, completed_segment_ids FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [lessonR6ProofAId]
+  );
+  await client.query('COMMIT;');
+  if (p57Res.rows[0].transcript_version_id !== versionR6ProofAId || p57Res.rows[0].active_segment_id !== null) {
+    throw new Error('Proof 57 failed: Resume state with version and null active_segment_id failed to update');
+  }
+  details.push('PASS: Proof 57: Owned transcript version with null active_segment_id succeeds');
+
+  // Proof 58: Resume state with valid transcript_version_id and valid active_segment_id succeeds
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `UPDATE public.media_resume_states
+     SET active_segment_id = 'r6_seg_2', completed_segment_ids = ARRAY['r6_seg_1']
+     WHERE lesson_id = $1;`,
+    [lessonR6ProofAId]
+  );
+  await client.query('COMMIT;');
+  details.push('PASS: Proof 58: Valid transcript_version_id and matching active_segment_id succeeds');
+
+  // Proof 59: Resume state with segment_id not in the version segments is blocked
+  let p59Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `UPDATE public.media_resume_states SET active_segment_id = 'non_existent_segment' WHERE lesson_id = $1;`,
+      [lessonR6ProofAId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    p59Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p59Blocked) {
+    throw new Error('Proof 59 failed: Foreign segment_id not present in transcript version was not blocked');
+  }
+  details.push('PASS: Proof 59: Foreign active_segment_id rejected without revealing segment existence');
+
+  // Proof 60: User A attempting to bind User B's transcript version is rejected with 42501
+  const lessonB2Id = 'b0000000-0000-4000-8000-000000000095';
+  const versionB2Id = 'b0000000-0000-4000-8000-000000000096';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_B_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url)
+     VALUES ($1, $2, 'User B Lesson', 'youtube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');`,
+    [lessonB2Id, USER_B_ID]
+  );
+  await client.query(
+    `INSERT INTO public.media_transcript_versions (id, lesson_id, user_id, version_number, stage, content_hash, segments, coverage_ratio)
+     VALUES ($1, $2, $3, 1, 'raw_caption', 'hash_b2', $4::jsonb, 0.90);`,
+    [
+      versionB2Id,
+      lessonB2Id,
+      USER_B_ID,
+      JSON.stringify([{ id: 'seg_b_1', index: 0, startMs: 0, endMs: 1000, text: 'Bob text', confidence: 'high' }]),
+    ]
+  );
+  await client.query('COMMIT;');
+
+  let p60Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `UPDATE public.media_resume_states SET transcript_version_id = $1 WHERE lesson_id = $2;`,
+      [versionB2Id, lessonR6ProofAId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501') p60Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p60Blocked) {
+    throw new Error('Proof 60 failed: User A was able to bind User B transcript version!');
+  }
+  details.push('PASS: Proof 60: Cross-tenant transcript_version_id binding blocked with 42501 non-disclosing error');
+
+  // Proof 61: Bidirectional synchronization of studio_mode and last_mode
+  const lessonR6ModeProofId = 'a0000000-0000-4000-8000-000000000097';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url)
+     VALUES ($1, $2, 'R6 Mode Proof Lesson', 'youtube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');`,
+    [lessonR6ModeProofId, USER_A_ID]
+  );
+  // Insert with only last_mode -> studio_mode must be backfilled
+  await client.query(
+    `INSERT INTO public.media_resume_states (lesson_id, user_id, last_mode, playback_position_ms)
+     VALUES ($1, $2, 'dictation', 1000);`,
+    [lessonR6ModeProofId, USER_A_ID]
+  );
+  const p61Res = await client.query(
+    `SELECT studio_mode, last_mode, assistance_mode FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [lessonR6ModeProofId]
+  );
+  await client.query('COMMIT;');
+  if (p61Res.rows[0].studio_mode !== 'dictation' || p61Res.rows[0].last_mode !== 'dictation' || p61Res.rows[0].assistance_mode !== 'guided') {
+    throw new Error('Proof 61 failed: studio_mode not synchronized from legacy last_mode');
+  }
+  details.push('PASS: Proof 61: Bidirectional mode synchronization (last_mode -> studio_mode and default assistance_mode) verified');
+
+  // Proof 62: Local-only original audio lesson (media_type = 'audio', media_url = NULL, original_filename, 64-hex source_hash) succeeds
+  const localAudioLessonId = 'a0000000-0000-4000-8000-000000000098';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  const p62Res = await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url, original_filename, source_hash, processing_state)
+     VALUES ($1, $2, 'Local Lecture', 'audio', NULL, 'lecture.mp3', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'ready')
+     RETURNING id, media_url, original_filename, source_hash;`,
+    [localAudioLessonId, USER_A_ID]
+  );
+  await client.query('COMMIT;');
+  if (p62Res.rows[0].media_url !== null || p62Res.rows[0].original_filename !== 'lecture.mp3' || p62Res.rows[0].source_hash.length !== 64) {
+    throw new Error('Proof 62 failed: Local-only audio lesson failed to insert properly');
+  }
+  details.push('PASS: Proof 62: Local-only source audio with null media_url, original_filename, and 64-hex source_hash succeeds');
+
+  // Proof 63: YouTube lesson with media_url = NULL is blocked
+  let p63Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, 'Null YT', 'youtube', NULL);`,
+      [USER_A_ID]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') p63Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p63Blocked) {
+    throw new Error('Proof 63 failed: YouTube lesson with null media_url was not blocked');
+  }
+  details.push('PASS: Proof 63: YouTube lesson requires valid non-null HTTP(S) media_url (blocked null)');
+
+  // Proof 64: Lesson with blob: URL is blocked
+  let p64Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url)
+       VALUES ($1, 'Blob YT', 'youtube', 'blob:http://localhost:5173/fake-blob-url');`,
+      [USER_A_ID]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') p64Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p64Blocked) {
+    throw new Error('Proof 64 failed: Lesson with blob: media_url was not blocked');
+  }
+  details.push('PASS: Proof 64: Durable blob: object URL in media_url is strictly forbidden (blocked)');
+
+  // Proof 65: Lesson with invalid source_hash format is blocked
+  let p65Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (user_id, title, media_type, media_url, source_hash)
+       VALUES ($1, 'Bad Hash', 'audio', NULL, 'invalid-hash-string');`,
+      [USER_A_ID]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '23514') p65Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p65Blocked) {
+    throw new Error('Proof 65 failed: Lesson with invalid source_hash was not blocked');
+  }
+  details.push('PASS: Proof 65: Invalid source_hash format rejected by database constraint');
+
   return details;
 }
 
@@ -1936,10 +2239,13 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
     !sql.includes('omni_internal.active_deleting_media_lessons') ||
     !sql.includes('omni_internal.enforce_media_lesson_provenance') ||
     !sql.includes('omni_internal.enforce_media_attempt_segment_reference') ||
+    !sql.includes('omni_internal.enforce_media_resume_invariants') ||
     !sql.includes('shadowing_evaluation_schema_valid') ||
     !sql.includes('dictation_diff_tokens_schema_valid') ||
     !sql.includes('dictation_expected_text_valid') ||
     !sql.includes('media_lessons_media_url_no_raw_audio') ||
+    !sql.includes('media_lessons_media_url_source_check') ||
+    !sql.includes('media_resume_states_active_segment_requires_version') ||
     !sql.includes('validate_shadowing_evaluation') ||
     !sql.includes('validate_media_transcript_segments') ||
     !sql.includes('validate_media_dictation_diff_tokens') ||
@@ -2013,7 +2319,7 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
       status: 'passed',
       details: [
         ...details,
-        'PASS: All 53 Media RLS proof contracts verified against live disposable database',
+        'PASS: All 65 Media RLS proof contracts verified against live disposable database',
       ],
     };
   } catch (err: unknown) {
