@@ -42,7 +42,12 @@ export const MediaLessonSchema = z
     sourceVersionId: z.string().uuid().optional(), // Never populated for P03 media handoffs
     processingState: MediaProcessingStateSchema,
     transcriptState: MediaTranscriptStateSchema.optional(),
-    originalFilename: z.string().min(1).max(255).optional(),
+    originalFilename: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[^/\\]+$/, { message: 'originalFilename must not contain path separators' })
+      .optional(),
     sourceHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -310,7 +315,7 @@ const RawMediaResumeStateSchema = z.object({
   playbackSpeed: z.number().min(0.5).max(2.0),
   loopCount: z.number().int().min(1).max(10),
   waitIntervalMs: z.number().int().nonnegative(),
-  completedSegmentIds: z.array(z.string()),
+  completedSegmentIds: z.array(z.string().min(1)),
   updatedAt: z.string().datetime(),
 });
 
@@ -318,6 +323,13 @@ export const MediaResumeStateSchema = RawMediaResumeStateSchema
   .refine((val) => val.studioMode !== undefined || val.lastMode !== undefined, {
     message: 'studioMode or lastMode must be provided',
   })
+  .refine(
+    (val) => val.studioMode === undefined || val.lastMode === undefined || val.studioMode === val.lastMode,
+    {
+      message: 'studioMode and lastMode must not conflict',
+      path: ['studioMode'],
+    }
+  )
   .refine((val) => !(val.transcriptVersionId === null && val.activeSegmentId !== null), {
     message: 'activeSegmentId requires a non-null transcriptVersionId',
     path: ['activeSegmentId'],

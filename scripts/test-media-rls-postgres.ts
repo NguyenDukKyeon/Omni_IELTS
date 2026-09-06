@@ -6,7 +6,13 @@ const { Client } = pg;
 const SOURCES_MIGRATION_PATH = 'supabase/migrations/202608300001_sources_library.sql';
 const MEDIA_MIGRATION_PATH = 'supabase/migrations/202609040001_media_learning_room.sql';
 const MEDIA_R6_MIGRATION_PATH = 'supabase/migrations/202609060001_media_r6_resume_and_original_audio.sql';
-const MIGRATION_PATHS = [SOURCES_MIGRATION_PATH, MEDIA_MIGRATION_PATH, MEDIA_R6_MIGRATION_PATH];
+const MEDIA_R6_FIX_MIGRATION_PATH = 'supabase/migrations/202609060002_media_r6_mode_sync_and_hardening.sql';
+const MIGRATION_PATHS = [
+  SOURCES_MIGRATION_PATH,
+  MEDIA_MIGRATION_PATH,
+  MEDIA_R6_MIGRATION_PATH,
+  MEDIA_R6_FIX_MIGRATION_PATH,
+];
 
 export const REQUIRED_DISPOSABLE_DB_NAME = 'omni_media_rls_test';
 export const REQUIRED_MARKER_NAME = 'OMNI_MEDIA_RLS_TEST_ENVIRONMENT';
@@ -140,24 +146,7 @@ export async function assertDisposableMarker(client: pg.Client): Promise<void> {
   }
 }
 
-export async function executeDisposableDbSuite(client: pg.Client): Promise<string[]> {
-  const details: string[] = [];
-
-  // 1. Verify marker
-  await assertDisposableMarker(client);
-  details.push('PASS: Verified disposable database marker omni_test.disposable_marker');
-
-  // 2. Reset schemas
-  await client.query(`DROP SCHEMA IF EXISTS auth CASCADE;`);
-  await client.query(`CREATE SCHEMA auth;`);
-  await client.query(`DROP SCHEMA IF EXISTS omni_internal CASCADE;`);
-  await client.query(`DROP SCHEMA IF EXISTS public CASCADE;`);
-  await client.query(`CREATE SCHEMA public;`);
-  await client.query(`GRANT ALL ON SCHEMA public TO postgres;`);
-  await client.query(`GRANT ALL ON SCHEMA public TO public;`);
-  details.push('PASS: Reset disposable test schemas (auth, omni_internal, public)');
-
-  // 3. Auth helpers and roles
+async function initAuthSchema(client: pg.Client): Promise<void> {
   await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
   await client.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
   await client.query(`
@@ -205,6 +194,27 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;`);
   await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO authenticated;`);
   await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO authenticated;`);
+}
+
+export async function executeDisposableDbSuite(client: pg.Client): Promise<string[]> {
+  const details: string[] = [];
+
+  // 1. Verify marker
+  await assertDisposableMarker(client);
+  details.push('PASS: Verified disposable database marker omni_test.disposable_marker');
+
+  // 2. Reset schemas
+  await client.query(`DROP SCHEMA IF EXISTS auth CASCADE;`);
+  await client.query(`CREATE SCHEMA auth;`);
+  await client.query(`DROP SCHEMA IF EXISTS omni_internal CASCADE;`);
+  await client.query(`DROP SCHEMA IF EXISTS public CASCADE;`);
+  await client.query(`CREATE SCHEMA public;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO postgres;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO public;`);
+  details.push('PASS: Reset disposable test schemas (auth, omni_internal, public)');
+
+  // 3. Auth helpers and roles
+  await initAuthSchema(client);
   details.push('PASS: Auth schema, functions, and authenticated role permissions initialized');
 
   // 4. Apply migrations
@@ -2225,6 +2235,307 @@ export async function executeDisposableDbSuite(client: pg.Client): Promise<strin
   }
   details.push('PASS: Proof 65: Invalid source_hash format rejected by database constraint');
 
+  // Proof 66: Single-field UPDATE studio_mode propagates to last_mode
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `UPDATE public.media_resume_states SET studio_mode = 'shadowing' WHERE lesson_id = $1;`,
+    [lessonR6ModeProofId]
+  );
+  const p66Res = await client.query(
+    `SELECT studio_mode, last_mode FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [lessonR6ModeProofId]
+  );
+  await client.query('COMMIT;');
+  if (p66Res.rows[0].studio_mode !== 'shadowing' || p66Res.rows[0].last_mode !== 'shadowing') {
+    throw new Error('Proof 66 failed: single-field UPDATE studio_mode did not propagate to last_mode');
+  }
+  details.push('PASS: Proof 66: Single-field UPDATE studio_mode propagates to last_mode and maintains consistency');
+
+  // Proof 67: Single-field UPDATE last_mode propagates to studio_mode
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `UPDATE public.media_resume_states SET last_mode = 'dictation' WHERE lesson_id = $1;`,
+    [lessonR6ModeProofId]
+  );
+  const p67Res = await client.query(
+    `SELECT studio_mode, last_mode FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [lessonR6ModeProofId]
+  );
+  await client.query('COMMIT;');
+  if (p67Res.rows[0].studio_mode !== 'dictation' || p67Res.rows[0].last_mode !== 'dictation') {
+    throw new Error('Proof 67 failed: single-field UPDATE last_mode did not propagate to studio_mode');
+  }
+  details.push('PASS: Proof 67: Single-field UPDATE last_mode propagates to studio_mode and maintains consistency');
+
+  // Proof 68: UPDATE with conflicting studio_mode and last_mode blocked with 42501
+  let p68Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `UPDATE public.media_resume_states SET studio_mode = 'shadowing', last_mode = 'dictation' WHERE lesson_id = $1;`,
+      [lessonR6ModeProofId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || err.code === '23514') p68Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p68Blocked) {
+    throw new Error('Proof 68 failed: UPDATE with conflicting modes was not blocked');
+  }
+  details.push('PASS: Proof 68: UPDATE with conflicting studio_mode and last_mode blocked with 42501');
+
+  // Proof 69: INSERT with conflicting studio_mode and last_mode blocked with 42501
+  const lessonConflictId = 'a0000000-0000-4000-8000-000000000099';
+  let p69Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url)
+       VALUES ($1, $2, 'Conflict Lesson', 'youtube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');`,
+      [lessonConflictId, USER_A_ID]
+    );
+    await client.query(
+      `INSERT INTO public.media_resume_states (lesson_id, user_id, studio_mode, last_mode)
+       VALUES ($1, $2, 'shadowing', 'dictation');`,
+      [lessonConflictId, USER_A_ID]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || err.code === '23514') p69Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p69Blocked) {
+    throw new Error('Proof 69 failed: INSERT with conflicting modes was not blocked');
+  }
+  details.push('PASS: Proof 69: INSERT with conflicting studio_mode and last_mode blocked with 42501');
+
+  // Proof 70: Authenticated role cannot directly invoke internal trigger function
+  let p70Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(`SELECT omni_internal.enforce_media_resume_invariants();`);
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501' || err.code === '42883') p70Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p70Blocked) {
+    throw new Error('Proof 70 failed: Authenticated role was able to invoke internal trigger function directly');
+  }
+  details.push('PASS: Proof 70: Direct invocation of omni_internal.enforce_media_resume_invariants() denied (revoked)');
+
+  // Proof 71: completed_segment_ids containing empty string rejected
+  let p71Blocked = false;
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  try {
+    await client.query(
+      `UPDATE public.media_resume_states SET completed_segment_ids = ARRAY[''] WHERE lesson_id = $1;`,
+      [lessonR6ModeProofId]
+    );
+    await client.query('COMMIT;');
+  } catch (err: any) {
+    if (err.code === '42501') p71Blocked = true;
+    await client.query('ROLLBACK;').catch(() => {});
+  }
+  if (!p71Blocked) {
+    throw new Error('Proof 71 failed: completed_segment_ids with empty string was not blocked');
+  }
+  details.push('PASS: Proof 71: Empty string in completed_segment_ids rejected by invariant validator');
+
+  return details;
+}
+
+export async function executeUpgradeFromPreR6Suite(client: pg.Client): Promise<string[]> {
+  const details: string[] = [];
+
+  // 1. Verify marker
+  await assertDisposableMarker(client);
+
+  // 2. Reset schemas
+  await client.query(`DROP SCHEMA IF EXISTS auth CASCADE;`);
+  await client.query(`CREATE SCHEMA auth;`);
+  await client.query(`DROP SCHEMA IF EXISTS omni_internal CASCADE;`);
+  await client.query(`DROP SCHEMA IF EXISTS public CASCADE;`);
+  await client.query(`CREATE SCHEMA public;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO postgres;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO public;`);
+
+  // 3. Auth helpers and roles
+  await initAuthSchema(client);
+
+  // 4. Apply migrations 1 & 2 only (Pre-R6 baseline)
+  await client.query(readFileSync(SOURCES_MIGRATION_PATH, 'utf8'));
+  await client.query(readFileSync(MEDIA_MIGRATION_PATH, 'utf8'));
+  details.push('PASS: Applied Pre-R6 baseline migrations (1 & 2)');
+
+  // 5. Seed authenticated test user
+  await client.query(
+    `INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING;`,
+    [USER_A_ID, 'alice@disposable.test']
+  );
+
+  // 6. Seed legacy pre-R6 lesson and resume state
+  const legacyLessonId = 'a0000000-0000-4000-8000-000000000080';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url)
+     VALUES ($1, $2, 'Pre-R6 Legacy Lesson', 'youtube', 'https://www.youtube.com/watch?v=legacy123');`,
+    [legacyLessonId, USER_A_ID]
+  );
+  await client.query(
+    `INSERT INTO public.media_resume_states (
+       lesson_id, user_id, active_segment_id, playback_position_ms, last_mode,
+       playback_speed, loop_count, wait_interval_ms, completed_segment_ids
+     ) VALUES (
+       $1, $2, 'legacy_orphan_segment', 15420, 'shadowing',
+       1.25, 3, 500, ARRAY['legacy_orphan_segment']
+     );`,
+    [legacyLessonId, USER_A_ID]
+  );
+  await client.query('COMMIT;');
+  details.push('PASS: Seeded legacy Pre-R6 resume state (last_mode=shadowing, position=15420, active_segment_id=legacy_orphan_segment)');
+
+  // 7. Apply migrations 3 & 4 (R6 evolution and mode hardening)
+  await client.query(readFileSync(MEDIA_R6_MIGRATION_PATH, 'utf8'));
+  await client.query(readFileSync(MEDIA_R6_FIX_MIGRATION_PATH, 'utf8'));
+  details.push('PASS: Applied R6 and hardening migrations (3 & 4) on top of Pre-R6 database');
+
+  // 8. Verify upgrade invariants
+  const res = await client.query(
+    `SELECT lesson_id, user_id, studio_mode, last_mode, assistance_mode,
+            playback_position_ms, playback_speed, loop_count, wait_interval_ms,
+            active_segment_id, transcript_version_id, completed_segment_ids
+     FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [legacyLessonId]
+  );
+  const row = res.rows[0];
+  if (!row) throw new Error('Upgrade verification failed: row not found');
+  if (row.studio_mode !== 'shadowing') throw new Error(`Upgrade error: expected studio_mode 'shadowing', got ${row.studio_mode}`);
+  if (row.last_mode !== 'shadowing') throw new Error(`Upgrade error: expected last_mode 'shadowing', got ${row.last_mode}`);
+  if (row.assistance_mode !== 'guided') throw new Error(`Upgrade error: expected assistance_mode 'guided', got ${row.assistance_mode}`);
+  if (row.playback_position_ms !== 15420) throw new Error(`Upgrade error: playback_position_ms not preserved`);
+  if (Number(row.playback_speed) !== 1.25) throw new Error(`Upgrade error: playback_speed not preserved`);
+  if (row.loop_count !== 3) throw new Error(`Upgrade error: loop_count not preserved`);
+  if (row.wait_interval_ms !== 500) throw new Error(`Upgrade error: wait_interval_ms not preserved`);
+  if (row.transcript_version_id !== null) throw new Error(`Upgrade error: transcript_version_id should be null`);
+  if (row.active_segment_id !== null) throw new Error(`Upgrade error: orphan active_segment_id was not cleared to null`);
+  if (!Array.isArray(row.completed_segment_ids) || row.completed_segment_ids.length !== 0) {
+    throw new Error(`Upgrade error: completed_segment_ids was not reset to empty array`);
+  }
+  details.push('PASS: Upgrade from Pre-R6 verified: modes synchronized to shadowing, playback settings preserved, orphan segments safely cleared without fabricating provenance');
+
+  return details;
+}
+
+export async function executeUpgradeFromR6Suite(client: pg.Client): Promise<string[]> {
+  const details: string[] = [];
+
+  // 1. Verify marker
+  await assertDisposableMarker(client);
+
+  // 2. Reset schemas
+  await client.query(`DROP SCHEMA IF EXISTS auth CASCADE;`);
+  await client.query(`CREATE SCHEMA auth;`);
+  await client.query(`DROP SCHEMA IF EXISTS omni_internal CASCADE;`);
+  await client.query(`DROP SCHEMA IF EXISTS public CASCADE;`);
+  await client.query(`CREATE SCHEMA public;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO postgres;`);
+  await client.query(`GRANT ALL ON SCHEMA public TO public;`);
+
+  // 3. Auth helpers and roles
+  await initAuthSchema(client);
+
+  // 4. Apply migrations 1, 2, 3 (ef31f3c R6 baseline)
+  await client.query(readFileSync(SOURCES_MIGRATION_PATH, 'utf8'));
+  await client.query(readFileSync(MEDIA_MIGRATION_PATH, 'utf8'));
+  await client.query(readFileSync(MEDIA_R6_MIGRATION_PATH, 'utf8'));
+  details.push('PASS: Applied R6 baseline migrations (1, 2, & 3)');
+
+  // 5. Seed authenticated test user
+  await client.query(
+    `INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING;`,
+    [USER_A_ID, 'alice@disposable.test']
+  );
+
+  // 6. Test Scenario C.1: Desynchronization migration halt proof
+  const desyncLessonId = 'a0000000-0000-4000-8000-000000000081';
+  await client.query('BEGIN;');
+  await client.query('SET LOCAL ROLE authenticated;');
+  await client.query(`SET LOCAL "request.jwt.claim.sub" = '${USER_A_ID}';`);
+  await client.query(`SET LOCAL "request.jwt.claim.role" = 'authenticated';`);
+  await client.query(
+    `INSERT INTO public.media_lessons (id, user_id, title, media_type, media_url)
+     VALUES ($1, $2, 'Desync Test Lesson', 'youtube', 'https://www.youtube.com/watch?v=desync123');`,
+    [desyncLessonId, USER_A_ID]
+  );
+  await client.query(
+    `INSERT INTO public.media_resume_states (lesson_id, user_id, studio_mode, last_mode)
+     VALUES ($1, $2, 'shadowing', 'dictation');`,
+    [desyncLessonId, USER_A_ID]
+  );
+  await client.query('COMMIT;');
+  details.push('PASS: Seeded desynchronized row under migration 3 (studio_mode=shadowing, last_mode=dictation)');
+
+  // Attempt to apply migration 4: MUST halt with 22000
+  let haltTriggered = false;
+  try {
+    await client.query(readFileSync(MEDIA_R6_FIX_MIGRATION_PATH, 'utf8'));
+  } catch (err: any) {
+    if (err.code === '22000' && err.message.includes('MIGRATION_HALTED')) {
+      haltTriggered = true;
+    }
+  }
+  if (!haltTriggered) {
+    throw new Error('Migration halt proof failed: Migration 4 did not abort when desynchronized rows existed');
+  }
+  details.push('PASS: Migration 4 pre-migration check halted with 22000 (MIGRATION_HALTED) on desynchronized database');
+
+  // Test Scenario C.2: Clean upgrade when rows are synchronized
+  await client.query(`DELETE FROM public.media_resume_states WHERE lesson_id = $1;`, [desyncLessonId]);
+  await client.query(
+    `INSERT INTO public.media_resume_states (lesson_id, user_id, studio_mode, last_mode, assistance_mode, playback_position_ms)
+     VALUES ($1, $2, 'dictation', 'dictation', 'independent', 9999);`,
+    [desyncLessonId, USER_A_ID]
+  );
+  await client.query(readFileSync(MEDIA_R6_FIX_MIGRATION_PATH, 'utf8'));
+  details.push('PASS: Applied Migration 4 successfully on synchronized R6 database');
+
+  // Verify consistency constraint and trigger synchronization
+  await client.query(
+    `UPDATE public.media_resume_states SET studio_mode = 'shadowing' WHERE lesson_id = $1;`,
+    [desyncLessonId]
+  );
+  const checkRes = await client.query(
+    `SELECT studio_mode, last_mode FROM public.media_resume_states WHERE lesson_id = $1;`,
+    [desyncLessonId]
+  );
+  if (checkRes.rows[0].studio_mode !== checkRes.rows[0].last_mode || checkRes.rows[0].studio_mode !== 'shadowing') {
+    throw new Error('Consistency violation: studio_mode and last_mode are not equal after update');
+  }
+  details.push('PASS: Verified table constraint media_resume_states_modes_consistent and trigger synchronization on upgraded R6 database');
+
   return details;
 }
 
@@ -2246,6 +2557,9 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
     !sql.includes('media_lessons_media_url_no_raw_audio') ||
     !sql.includes('media_lessons_media_url_source_check') ||
     !sql.includes('media_resume_states_active_segment_requires_version') ||
+    !sql.includes('media_resume_states_modes_consistent') ||
+    !sql.includes('MIGRATION_HALTED') ||
+    !sql.includes('REVOKE ALL ON FUNCTION omni_internal.enforce_media_resume_invariants') ||
     !sql.includes('validate_shadowing_evaluation') ||
     !sql.includes('validate_media_transcript_segments') ||
     !sql.includes('validate_media_dictation_diff_tokens') ||
@@ -2311,6 +2625,10 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
     details.push(`Connected to disposable PostgreSQL instance at ${dbConfig.host}:${dbConfig.port} (database: ${dbConfig.database})`);
     const suiteDetails = await executeDisposableDbSuite(client);
     details.push(...suiteDetails);
+    const upgradePreR6Details = await executeUpgradeFromPreR6Suite(client);
+    details.push(...upgradePreR6Details);
+    const upgradeR6Details = await executeUpgradeFromR6Suite(client);
+    details.push(...upgradeR6Details);
     await client.end();
 
     return {
@@ -2319,7 +2637,7 @@ export async function runMediaRlsProof(options: { strict?: boolean; dbUrl?: stri
       status: 'passed',
       details: [
         ...details,
-        'PASS: All 65 Media RLS proof contracts verified against live disposable database',
+        'PASS: All 71 Media RLS proof contracts and upgrade suites (Pre-R6 and R6) verified against live disposable database',
       ],
     };
   } catch (err: unknown) {

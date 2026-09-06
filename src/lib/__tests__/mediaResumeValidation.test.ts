@@ -165,6 +165,63 @@ describe('P04 Batch A: R6 Resume and Original Audio Contracts', () => {
       expect(() => MediaResumeStateSchema.parse({ ...base, loopCount: 15 })).toThrow();
       expect(() => MediaResumeStateSchema.parse({ ...base, waitIntervalMs: -100 })).toThrow();
     });
+
+    it('rejects conflicting studioMode and lastMode when both are present', () => {
+      const conflictingState = {
+        lessonId,
+        userId,
+        transcriptVersionId: versionId,
+        activeSegmentId: 'seg_01',
+        playbackPositionMs: 1500,
+        studioMode: 'shadowing' as const,
+        lastMode: 'dictation' as const,
+        playbackSpeed: 1.0,
+        loopCount: 1,
+        waitIntervalMs: 0,
+        completedSegmentIds: ['seg_01'],
+        updatedAt: now,
+      };
+      expect(() => MediaResumeStateSchema.parse(conflictingState)).toThrow(
+        /studioMode and lastMode must not conflict/
+      );
+    });
+
+    it('accepts matching studioMode and lastMode when both are present', () => {
+      const matchingState = {
+        lessonId,
+        userId,
+        transcriptVersionId: versionId,
+        activeSegmentId: 'seg_01',
+        playbackPositionMs: 1500,
+        studioMode: 'shadowing' as const,
+        lastMode: 'shadowing' as const,
+        playbackSpeed: 1.0,
+        loopCount: 1,
+        waitIntervalMs: 0,
+        completedSegmentIds: ['seg_01'],
+        updatedAt: now,
+      };
+      const parsed = MediaResumeStateSchema.parse(matchingState);
+      expect(parsed.studioMode).toBe('shadowing');
+      expect(parsed.lastMode).toBe('shadowing');
+    });
+
+    it('rejects empty strings in completedSegmentIds', () => {
+      const emptySegmentState = {
+        lessonId,
+        userId,
+        transcriptVersionId: versionId,
+        activeSegmentId: 'seg_01',
+        playbackPositionMs: 1500,
+        studioMode: 'shadowing' as const,
+        playbackSpeed: 1.0,
+        loopCount: 1,
+        waitIntervalMs: 0,
+        completedSegmentIds: ['seg_01', ''],
+        updatedAt: now,
+      };
+      expect(() => MediaResumeStateSchema.parse(emptySegmentState)).toThrow();
+    });
   });
 
   describe('MediaLessonSchema - Original Audio Representation', () => {
@@ -245,6 +302,45 @@ describe('P04 Batch A: R6 Resume and Original Audio Contracts', () => {
           sourceHash: 'not-a-sha256-hash',
         })
       ).toThrow();
+    });
+
+    it('rejects originalFilename containing Unix or Windows path separators', () => {
+      expect(() =>
+        MediaLessonSchema.parse({
+          ...baseLesson,
+          mediaType: 'audio' as const,
+          mediaUrl: null,
+          originalFilename: '../../etc/passwd',
+        })
+      ).toThrow(/originalFilename must not contain path separators/);
+
+      expect(() =>
+        MediaLessonSchema.parse({
+          ...baseLesson,
+          mediaType: 'audio' as const,
+          mediaUrl: null,
+          originalFilename: 'C:\\Windows\\system32\\audio.mp3',
+        })
+      ).toThrow(/originalFilename must not contain path separators/);
+
+      expect(() =>
+        MediaLessonSchema.parse({
+          ...baseLesson,
+          mediaType: 'audio' as const,
+          mediaUrl: null,
+          originalFilename: 'nested/audio.mp3',
+        })
+      ).toThrow(/originalFilename must not contain path separators/);
+    });
+
+    it('accepts safe originalFilename without path separators', () => {
+      const parsed = MediaLessonSchema.parse({
+        ...baseLesson,
+        mediaType: 'audio' as const,
+        mediaUrl: null,
+        originalFilename: 'lecture_audio_2026-09-06.mp3',
+      });
+      expect(parsed.originalFilename).toBe('lecture_audio_2026-09-06.mp3');
     });
   });
 
